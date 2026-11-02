@@ -8,8 +8,8 @@ const { navigateTarget, isSafePageUrl } = require('./core/url.cjs');
 const { createTab, replacePrivacy, sanitizeTab } = require('./core/tab-model.cjs');
 
 app.enableSandbox();
-const TOP = 106;
-const FOOTER = 26;
+const TOP = 52;
+const FOOTER = 14;
 const MAX_TABS = 35;
 const tabs = [];
 const preparedSessions = new WeakSet();
