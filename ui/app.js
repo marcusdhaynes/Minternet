@@ -69,6 +69,7 @@ function render(data) {
   }
 }
 api.onState(render);
+api.onFocusAddress(() => byId('address').focus());
 const bind = (id, name) => byId(id).addEventListener('click', () => command(name));
 for (const [id, name] of [
   ['newTab','new'],['newPrivate','new-private'],['back','back'],['forward','forward'],
