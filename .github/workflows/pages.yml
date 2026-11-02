@@ -1,0 +1,48 @@
+name: Publish Minternet UI preview
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ui/**'
+      - 'docs/preview-bridge.js'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble static UI preview
+        run: |
+          mkdir -p site
+          cp ui/index.html ui/styles.css ui/app.js site/
+          cp docs/preview-bridge.js site/preview-bridge.js
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("site/index.html")
+          s = p.read_text()
+          needle = '<script src="./app.js" defer></script>'
+          assert needle in s
+          s = s.replace(needle, '<script src="./preview-bridge.js" defer></script>\n  ' + needle)
+          p.write_text(s)
+          PY
+          touch site/.nojekyll
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Upload site
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+      - name: Deploy site
+        id: deployment
+        uses: actions/deploy-pages@v4
