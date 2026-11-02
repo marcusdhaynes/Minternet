@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Minternet</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <header class="chrome">
+    <div class="tab-row">
+      <div class="identity" aria-label="Minternet"><div class="glyph">M</div><span>MINTERNET</span></div>
+      <nav class="tabs" id="tabs" aria-label="Browser tabs"></nav>
+      <button id="newTab" class="icon-btn new-tab" aria-label="New tab" title="New tab (Ctrl+T)">+</button>
+      <div class="window-actions">
+        <button id="minimize" class="win-btn" title="Minimize" aria-label="Minimize">−</button>
+        <button id="maximize" class="win-btn" title="Maximize" aria-label="Maximize">▢</button>
+        <button id="quit" class="win-btn close-window" title="Close browser" aria-label="Close browser">×</button>
+      </div>
+    </div>
+    <div class="toolbar">
+      <div class="history-controls">
+        <button id="back" class="icon-btn" title="Back" aria-label="Back">←</button>
+        <button id="forward" class="icon-btn" title="Forward" aria-label="Forward">→</button>
+        <button id="reload" class="icon-btn" title="Reload" aria-label="Reload">↻</button>
+        <button id="home" class="icon-btn" title="Home" aria-label="Home">⌂</button>
+      </div>
+      <form id="addressForm" class="address-wrap" autocomplete="off">
+        <span id="connectionIcon" class="connection-icon" title="HTTPS-only navigation">◇</span>
+        <input id="address" autocomplete="off" autocapitalize="none" spellcheck="false" type="text" placeholder="Search privately or enter a secure address" aria-label="Search or enter address">
+        <span id="addressState" class="address-state"></span>
+        <span class="kbd">⌘ L</span>
+      </form>
+      <div class="toolbar-actions">
+        <button id="private" class="mode-btn" title="Switch current tab between normal and private">◈ <span id="modeLabel">Normal</span></button>
+        <button id="tor" class="mode-btn tor-btn" title="Tor information (not integrated)">◎ <span>Tor</span></button>
+        <button id="extensions" class="icon-btn ext-btn" title="Install unpacked Chromium extension" aria-label="Extensions">⬡</button>
+        <button id="newPrivate" class="icon-btn" title="New private tab" aria-label="New private tab">+</button>
+      </div>
+    </div>
+  </header>
+  <main id="homeScreen" class="home-screen">
+    <div class="background-shape shape-one"></div>
+    <div class="background-shape shape-two"></div>
+    <div class="hero">
+      <div class="hero-logo">M<span>·</span></div>
+      <p class="eyebrow">A MORE CONSIDERED WAY TO BROWSE</p>
+      <h1>The internet,<br><em>simplified.</em></h1>
+      <p class="subtitle">Less chrome. More room to explore.</p>
+      <form id="homeSearchForm" class="search-box">
+        <span>⌕</span>
+        <input id="homeSearch" type="search" placeholder="Where shall we go?" aria-label="Search the web" autocomplete="off">
+        <button aria-label="Search" title="Search">↗</button>
+      </form>
+      <div class="shortcut-hints"><span>HTTPS first</span><i></i><span>Private by design</span><i></i><span>Quiet interface</span></div>
+    </div>
+    <div class="edition">MINTERNET <span>•</span> EDITION 001</div>
+  </main>
+  <footer class="statusbar"><span id="pageStatus">Ready to explore</span><span class="status-right" id="extensionStatus">Secure HTTPS navigation · Prototype</span></footer>
+  <div id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
