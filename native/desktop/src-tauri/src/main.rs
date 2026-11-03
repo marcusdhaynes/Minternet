@@ -164,6 +164,72 @@ fn restore_pinned(app: &tauri::AppHandle) {
     browser.active_id=browser.tabs.first().map(|tab|tab.id).unwrap_or(0);
 }
 
+
+/* Restore the full non-private browsing session, including ordinary tabs.
+   Private tabs intentionally never enter persistent storage. */
+fn session_file(app: &tauri::AppHandle) -> Result<PathBuf,String> {
+    let dir=app.path().app_data_dir().map_err(|e|e.to_string())?;
+    Ok(dir.join("browser-session.v1.json"))
+}
+fn save_session(app: &tauri::AppHandle) -> Result<(),String> {
+    if std::env::args().any(|a|a.starts_with("--minternet-") && a.ends_with("smoke")) {return Ok(());}
+    let data={
+        let store=app.state::<Mutex<Browser>>();
+        let browser=store.lock().map_err(|e|e.to_string())?;
+        let tabs=browser.tabs.iter().filter(|tab|!tab.private).map(|tab|{
+            json!({"url":tab.url,"pinned":tab.pinned})
+        }).collect::<Vec<_>>();
+        let selected=browser.active().filter(|t|!t.private).map(|t|t.id);
+        let active=tabs.iter().enumerate().find_map(|(i,_)|{
+            let target=browser.tabs.iter().filter(|t|!t.private).nth(i)?;
+            if Some(target.id)==selected{Some(i)}else{None}
+        });
+        json!({"version":1,"tabs":tabs,"active":active})
+    };
+    let file=session_file(app)?;
+    let bytes=serde_json::to_vec(&data).map_err(|e|e.to_string())?;
+    if std::fs::read(&file).ok().as_deref()==Some(bytes.as_slice()){return Ok(());}
+    if let Some(dir)=file.parent(){std::fs::create_dir_all(dir).map_err(|e|e.to_string())?;}
+    let temp=file.with_extension("tmp");
+    std::fs::write(&temp,&bytes).map_err(|e|e.to_string())?;
+    if std::fs::rename(&temp,&file).is_err(){
+        std::fs::copy(&temp,&file).map_err(|e|e.to_string())?;
+        let _=std::fs::remove_file(&temp);
+    }
+    Ok(())
+}
+fn restore_session(app: &tauri::AppHandle) {
+    if std::env::args().any(|a|a.starts_with("--minternet-") && a.ends_with("smoke")){
+        restore_pinned(app);return;
+    }
+    let Ok(path)=session_file(app) else {restore_pinned(app);return};
+    let Ok(bytes)=std::fs::read(path) else {restore_pinned(app);return};
+    if bytes.len()>128_000 {restore_pinned(app);return;}
+    let Ok(data)=serde_json::from_slice::<Value>(&bytes) else {restore_pinned(app);return};
+    let Some(saved)=data.get("tabs").and_then(Value::as_array) else {restore_pinned(app);return};
+    let state=app.state::<Mutex<Browser>>();
+    let Ok(mut browser)=state.lock() else {return};
+    for record in saved.iter().take(MAX_TABS) {
+        let Some(address)=record.get("url").and_then(Value::as_str) else {continue};
+        if address!=HOME {
+            let Ok(url)=tauri::Url::parse(address) else {continue};
+            if url.scheme()!="https"||url.host_str().is_none()||
+                !url.username().is_empty()||url.password().is_some(){continue;}
+        }
+        if let Ok(id)=browser.add(false){
+            if let Some(tab)=browser.tabs.iter_mut().find(|t|t.id==id){
+                tab.url=address.to_string();
+                tab.title=title_for(address);
+                tab.history=vec![address.to_string()];
+                tab.pinned=record.get("pinned").and_then(Value::as_bool)==Some(true);
+            }
+        }
+    }
+    let index=data.get("active").and_then(Value::as_u64).map(|n|n as usize);
+    browser.active_id=index.and_then(|i|browser.tabs.get(i).map(|t|t.id))
+        .or_else(||browser.tabs.iter().find(|t|t.pinned).map(|t|t.id)).unwrap_or(0);
+}
+
 fn snapshot(app: &tauri::AppHandle) -> Result<Snapshot, String> {
     let browser = app.state::<Mutex<Browser>>();
     let b = browser.lock().map_err(|e| e.to_string())?;
@@ -180,6 +246,7 @@ fn notify(app: &tauri::AppHandle) {
         state
     };
     let _ = app.emit_to("chrome", "minternet:state", state);
+    let _ = save_session(app);
 }
 
 fn title_for(url: &str) -> String {
@@ -1006,7 +1073,7 @@ fn main() {
                 let mut b=store.lock().map_err(|e|e.to_string())?;
                 b.add(false)?;
             } else {
-                restore_pinned(app.handle());
+                restore_session(app.handle());
             }
             let builder = WindowBuilder::new(app, "main")
                 .title("Minternet")
