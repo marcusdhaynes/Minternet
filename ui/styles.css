@@ -542,3 +542,7 @@ body.tab-dragging .ungroup-drop-target{display:flex}
   .toolbar-actions .mode-symbol-btn {padding:0 4px;gap:3px;}
   .toolbar-actions .mode-symbol-btn .mode-text {display:inline!important;font-size:9px;}
 }
+
+/* Prevent the engine's CSS drag-region handling from consuming title-bar
+   double-clicks. JS starts OS dragging only after a real pointer movement. */
+.tab-row,.tab-row .identity {-webkit-app-region:no-drag!important;}
