@@ -5,7 +5,14 @@ if (window.__TAURI__ && !window.minternet) {
   const listeners=[];
   window.minternet={
     command:async (name,value)=>{
-      try { return await api.core.invoke('browser_action',{name,value:value===undefined?null:value}); }
+      try {
+        // Search choice is transported with each navigation, avoiding a race
+        // between restoring preferences and the first typed query.
+        const payload=name==='navigate'&&typeof value==='string'
+          ? {address:value,searchEngine:window.minternetSearch?.getEngine?.()||'google'}
+          : value===undefined?null:value;
+        return await api.core.invoke('browser_action',{name,value:payload});
+      }
       catch(err){ return {message:String(err)}; }
     },
     onState:cb=>{

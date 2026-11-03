@@ -552,3 +552,36 @@ body.tab-dragging .ungroup-drop-target{display:flex}
 .tab-row {position:relative;}
 .tab-row > #tabGroups {position:absolute;left:3px;top:1px;z-index:2;order:initial;margin:0;width:22px;height:20px;min-width:22px;}
 .tab-row > .identity {margin-left:24px;}
+
+/* The main M icon is always the farthest-left element in the title bar. */
+.tab-row {position:relative;}
+.tab-row > .identity {position:absolute;left:3px;top:2px;z-index:3;margin:0!important;order:initial;}
+.tab-row > #tabGroups {position:absolute;left:25px;top:1px;z-index:2;margin:0;order:initial;}
+.tab-row > .tabs {margin-left:47px;}
+
+/* Zero-footer browser: the WebView2 website reaches the bottom of the window. */
+:root {--footer-height:0px;}
+.statusbar {display:none!important;}
+.home-screen {bottom:0;}
+
+/* Dense bookmark shelf. Bookmarks and the manager button sit side by side,
+   not separated by a flexible spacer, and still scroll if there are many. */
+.bookmark-bar {gap:0!important;padding:0 2px;justify-content:flex-start;}
+.bookmark-bar .bookmark-items {
+  flex:0 1 auto; width:max-content;max-width:calc(100% - 22px);
+  gap:0;margin:0;padding:0;
+}
+.bookmark-bar .bookmark-item {gap:2px;padding:0 3px;min-width:17px;margin:0;}
+.bookmark-bar #bookmarkBarManage {margin:0 0 0 1px;flex:0 0 20px;}
+
+/* Only Tor's compact icon remains; never imply Tor is connected. */
+.toolbar-actions #tor {display:grid;place-items:center;width:25px;min-width:25px;flex:0 0 25px;padding:0;}
+
+/* Local search-engine selection, matching the existing compact settings. */
+.search-setting-field {display:flex;align-items:center;gap:9px;padding:10px 12px;border-top:1px solid #39445e;}
+.search-setting-field > span {display:flex;flex:1;flex-direction:column;gap:3px;min-width:0;}
+.search-setting-field strong {font-size:11px;}
+.search-setting-field small {font-size:9px;color:#8998ba;}
+.search-setting-field select {width:120px;max-width:43%;height:28px;padding:0 6px;
+  background:#121a2c;border:1px solid #55617d;color:#e7edff;border-radius:6px;font-size:10px;}
+.search-setting-field select:focus-visible {outline:2px solid #a7a9f2;}

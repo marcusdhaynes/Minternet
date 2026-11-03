@@ -9,6 +9,7 @@
   <script src="./native-bridge.js" defer></script>
   <script src="./bookmark-model.js" defer></script>
   <script src="./tab-group-model.js" defer></script>
+  <script src="./search-settings.js" defer></script>
   <script src="./app.js" defer></script>
   <script src="./bookmark-ui.js" defer></script>
   <script src="./tab-group-ui.js" defer></script>
@@ -17,6 +18,7 @@
 <body>
   <header class="chrome">
     <div class="tab-row">
+      <div class="identity" aria-label="Minternet" title="Drag to Move Minternet"><img class="brand-mark" src="./minternet-logo.svg" alt=""><span>MINTERNET</span></div>
       <button id="tabGroups" class="icon-btn tab-groups-btn" aria-label="Tab Groups" title="Tab Groups · Create, collapse or organize">
         <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true">
           <rect x="3" y="4" width="13" height="11" rx="2"></rect>
@@ -24,7 +26,6 @@
           <circle cx="13" cy="14" r="1.5" fill="currentColor" stroke="none"></circle>
         </svg>
       </button>
-      <div class="identity" aria-label="Minternet" title="Drag to Move Minternet"><img class="brand-mark" src="./minternet-logo.svg" alt=""><span>MINTERNET</span></div>
       <nav class="tabs" id="tabs" aria-label="Browser tabs"></nav>
       <div id="tabUngroupDrop" class="ungroup-drop-target" title="Drop Here to Remove Tab From Group" aria-label="Remove Tab From Group" role="group">Ungroup</div>
       <button id="newTab" class="icon-btn new-tab" aria-label="New Tab" title="New Tab (Ctrl+T)">+</button>
@@ -55,18 +56,11 @@
         <button type="button" id="bookmarkThisPage" class="address-star" title="Bookmark This Page (Ctrl+D)" aria-label="Bookmark This Page">☆</button>
       </form>
       <div class="toolbar-actions">
-        <button id="private" class="mode-btn mode-symbol-btn" title="Switch Current Tab Between Normal and Private" aria-label="Normal Mode">
-          <svg class="mode-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="9"></circle><path d="M3.5 12h17M12 3c-2.7 3-4 6-4 9s1.3 6 4 9c2.7-3 4-6 4-9s-1.3-6-4-9Z"></path>
-          </svg>
-          <span class="mode-text">Normal</span><span id="modeLabel" class="sr-only">Normal</span>
-        </button>
         <button id="tor" class="mode-btn tor-btn mode-symbol-btn" title="Tor Is Not Integrated · View Information" aria-label="Tor Information">
           <svg class="mode-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" aria-hidden="true">
             <path d="M12 3.5c3.3 3.4 6.7 5.9 6.7 10a6.7 6.7 0 0 1-13.4 0c0-4.1 3.4-6.6 6.7-10Z"></path>
             <path d="M12 6v12m-4.5-8.5c2.5 2.2 6.5 2.2 9 0m-9.9 5c2.9-1.9 7.9-1.9 10.8 0"></path>
           </svg>
-          <span class="mode-text">Tor</span>
         </button>
         <button id="settings" class="icon-btn settings-btn" title="Settings" aria-label="Settings" aria-expanded="false">⚙</button>
       </div>
@@ -81,6 +75,17 @@
     <aside id="bookmarkSettings" class="bookmark-panel bookmark-settings" hidden aria-label="Settings">
       <div class="bookmark-panel-head"><strong>Settings</strong><button class="bookmark-close" id="bookmarkSettingsClose" aria-label="Close Settings">×</button></div>
       <label class="bookmark-toggle"><span><strong>Bookmark Bar</strong><small>Show beneath the address line</small></span><input id="bookmarkBarToggle" type="checkbox" checked></label>
+      <label class="search-setting-field" for="defaultSearchEngine">
+        <span><strong>Default Search Engine</strong><small>Plain text in the address bar searches here</small></span>
+        <select id="defaultSearchEngine" aria-label="Default Search Engine">
+          <option value="google">Google</option>
+          <option value="duckduckgo">DuckDuckGo</option>
+          <option value="bing">Bing</option>
+          <option value="brave">Brave Search</option>
+          <option value="startpage">Startpage</option>
+          <option value="ecosia">Ecosia</option>
+        </select>
+      </label>
       <button class="bookmark-menu-action" id="bookmarkSettingsManage">☆ Manage Bookmarks <span>›</span></button>
             <div class="bookmark-settings-foot">Saved locally · No account required</div>
     </aside>
@@ -137,7 +142,6 @@
     </div>
     <div class="edition">MINTERNET <span>•</span> EDITION 001</div>
   </main>
-  <footer class="statusbar"><span id="pageStatus">Ready to explore</span><span class="status-right" id="extensionStatus">Secure HTTPS navigation · Prototype</span></footer>
   <div id="toast" role="status" aria-live="polite"></div>
 </body>
 </html>

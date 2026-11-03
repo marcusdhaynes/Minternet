@@ -80,18 +80,9 @@ function render(data) {
   byId('reload').disabled = !active || active.url === 'about:blank';
   const isBlank = !active || active.url === 'about:blank';
   byId('homeScreen').hidden = !isBlank;
-  byId('modeLabel').textContent = active?.private ? 'Private' : 'Normal';
-  byId('private').classList.toggle('active-mode', !!active?.private);
-  byId('private').setAttribute('aria-pressed', String(!!active?.private));
-  byId('private').setAttribute('aria-label',
-    active?.private ? 'Private Mode · Switch to Normal' : 'Normal Mode · Switch to Private');
-  byId('private').title=active?.private ?
-    'Private Mode · Switch Current Tab to Normal' : 'Normal Mode · Switch Current Tab to Private';
   byId('connectionIcon').textContent = active?.url?.startsWith('http://') ? '!' : active?.private ? '◈' : '◇';
   byId('connectionIcon').title = active?.url?.startsWith('http://') ? 'Warning: unencrypted HTTP' : 'HTTPS preferred';
   byId('address').setAttribute('aria-label', active?.url?.startsWith('http://') ? 'Insecure HTTP address' : 'Search or enter address');
-  byId('pageStatus').textContent = active?.error || (active?.loading ? 'Connecting securely…' : (active?.private ? 'Private session' : 'Ready to explore'));
-  byId('extensionStatus').textContent = (data.extensionsCount || 0) + ' extension(s) · ' + (active?.private ? 'Private' : 'Normal') + ' mode';
   if (!addressFocused) byId('address').value = isBlank ? '' : active.url;
   if (lastUrl !== active?.url) {
     lastUrl = active?.url;
@@ -103,7 +94,7 @@ api.onFocusAddress(() => byId('address').focus());
 const bind = (id, name) => byId(id).addEventListener('click', () => command(name));
 for (const [id, name] of [
   ['newTab','new'],['newPrivate','new-private'],['back','back'],['forward','forward'],
-  ['reload','reload'],['private','privacy'],['tor','tor'],
+  ['reload','reload'],['tor','tor'],
   ['minimize','minimize'],['maximize','maximize'],['quit','quit']
 ]) bind(id,name);
 byId('addressForm').addEventListener('submit', event => {
