@@ -8,6 +8,9 @@
   try { state=model.hydrate(localStorage.getItem(KEY)); } catch {state=model.blank();}
   let latest={tabs:[],activeId:null};
   let lastRenderKey='', editing=null, assignTarget=null, fallbackPending=false;
+  let draggingTabId=null;
+  const ungroupTarget=$('tabUngroupDrop');
+  const tabStrip=$('tabs');
   const palette={
     violet:'#ad9cf9',blue:'#82aefa',teal:'#69d4c9',green:'#8bda9a',
     amber:'#e8c16d',orange:'#e7a16c',pink:'#e89acb',red:'#e18591',slate:'#a1adbf'
@@ -65,6 +68,43 @@
     return true;
   }
   function ungroup(tabId){return assign(tabId,null);}
+  function currentDraggedTab(){
+    return Number.isSafeInteger(draggingTabId)&&latest.tabs.some(t=>t.id===draggingTabId)
+      ?draggingTabId:null;
+  }
+  function clearDropState(){
+    draggingTabId=null;
+    document.body.classList.remove('tab-dragging');
+    tabStrip.classList.remove('drag-ungroup-over');
+    ungroupTarget?.classList.remove('drag-target');
+    document.querySelectorAll('.drag-target,.group-drop-target,.tab-drag-source')
+      .forEach(node=>node.classList.remove('drag-target','group-drop-target','tab-drag-source'));
+  }
+  function dropIntoGroup(event,gid){
+    const id=currentDraggedTab();
+    if(id===null)return false;
+    event.preventDefault();
+    event.stopPropagation();
+    clearDropState();
+    return assign(id,gid);
+  }
+  function dropOutsideGroup(event){
+    const id=currentDraggedTab();
+    if(id===null)return false;
+    event.preventDefault();
+    event.stopPropagation();
+    clearDropState();
+    return ungroup(id);
+  }
+  function acceptDrag(event,element,marker){
+    const id=currentDraggedTab();
+    if(id===null)return false;
+    event.preventDefault();
+    event.stopPropagation();
+    if(event.dataTransfer)event.dataTransfer.dropEffect='move';
+    element.classList.add(marker);
+    return true;
+  }
   function removeGroup(id) {
     const group=model.get(state,id);
     if(!group)return false;
@@ -87,14 +127,11 @@
     const count=document.createElement('span');count.className='group-chip-count';count.textContent=String(tabs.length);
     node.append(dot,name,count);
     node.addEventListener('click',()=>toggleCollapsed(g.id));
-    node.addEventListener('dragover',event=>{
-      if(event.dataTransfer?.types.includes('text/minternet-tab')) event.preventDefault();
+    node.addEventListener('dragover',event=>acceptDrag(event,node,'drag-target'));
+    node.addEventListener('dragleave',event=>{
+      if(!node.contains(event.relatedTarget))node.classList.remove('drag-target');
     });
-    node.addEventListener('drop',event=>{
-      const id=Number(event.dataTransfer?.getData('text/minternet-tab'));
-      if(!Number.isSafeInteger(id)||!latest.tabs.some(tab=>tab.id===id))return;
-      event.preventDefault();assign(id,g.id);
-    });
+    node.addEventListener('drop',event=>dropIntoGroup(event,g.id));
     node.addEventListener('contextmenu',event=>{
       event.preventDefault();
       window.minternetMenus?.group(g.id,{x:event.clientX,y:event.clientY});
@@ -141,14 +178,53 @@
   function attachTabMenu(element,tabId){
     element.draggable=true;
     element.addEventListener('dragstart',event=>{
-      event.dataTransfer?.setData('text/minternet-tab',String(tabId));
-      if(event.dataTransfer) event.dataTransfer.effectAllowed='move';
+      if(!event.dataTransfer){event.preventDefault();return;}
+      draggingTabId=tabId;
+      event.dataTransfer.setData('text/minternet-tab',String(tabId));
+      event.dataTransfer.setData('text/plain',String(tabId));
+      event.dataTransfer.effectAllowed='move';
+      document.body.classList.add('tab-dragging');
+      element.classList.add('tab-drag-source');
+    });
+    element.addEventListener('dragend',clearDropState);
+    element.addEventListener('dragover',event=>{
+      if(currentDraggedTab()===null||currentDraggedTab()===tabId)return;
+      acceptDrag(event,element,'group-drop-target');
+      const group=model.findTab(state,tabId);
+      if(group)element.style.setProperty('--group-accent',groupColor(group));
+    });
+    element.addEventListener('dragleave',event=>{
+      if(!element.contains(event.relatedTarget))element.classList.remove('group-drop-target');
+    });
+    element.addEventListener('drop',event=>{
+      if(currentDraggedTab()===null||currentDraggedTab()===tabId)return;
+      const group=model.findTab(state,tabId);
+      if(group)dropIntoGroup(event,group.id);
+      else dropOutsideGroup(event);
     });
     element.addEventListener('contextmenu',event=>{
       event.preventDefault();
       window.minternetMenus?.tab(tabId,{x:event.clientX,y:event.clientY});
     });
   }
+  // Dropping a grouped tab onto the empty strip, an ordinary tab, or the
+  // temporary Ungroup target removes membership without closing its webview.
+  tabStrip.addEventListener('dragover',event=>{
+    if(currentDraggedTab()===null||event.target.closest('.tab,.group-chip'))return;
+    acceptDrag(event,tabStrip,'drag-ungroup-over');
+  });
+  tabStrip.addEventListener('dragleave',event=>{
+    if(!tabStrip.contains(event.relatedTarget))tabStrip.classList.remove('drag-ungroup-over');
+  });
+  tabStrip.addEventListener('drop',event=>{
+    if(event.target.closest('.tab,.group-chip'))return;
+    dropOutsideGroup(event);
+  });
+  ungroupTarget?.addEventListener('dragover',event=>acceptDrag(event,ungroupTarget,'drag-target'));
+  ungroupTarget?.addEventListener('dragleave',()=>ungroupTarget.classList.remove('drag-target'));
+  ungroupTarget?.addEventListener('drop',dropOutsideGroup);
+  // Native WebView2 may cancel a drag if it leaves the browser chrome.
+  document.addEventListener('dragend',clearDropState);
   function openEditor(groupId=null,withActive=false) {
     window.minternetBookmarks?.closeOverlay();
     const group=groupId?model.get(state,groupId):null;
