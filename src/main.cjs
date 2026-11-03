@@ -71,7 +71,7 @@ function lockDown(s) {
       event.preventDefault();
       return;
     }
-    const name = path.basename(item.getFilename() || 'download').replace(/[\\x00-\\x1f]/g, '').slice(0, 180) || 'download';
+    const name = path.basename(item.getFilename() || 'download').replace(/[\x00-\x1f]/g, '').slice(0, 180) || 'download';
     item.setSaveDialogOptions({
       title: 'Save download from ' + origin,
       defaultPath: path.join(app.getPath('downloads'), name),
