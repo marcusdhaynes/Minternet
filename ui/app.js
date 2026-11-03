@@ -22,17 +22,19 @@ function toast(message) {
 }
 function buildTab(tab, active) {
   const root = document.createElement('div');
-  root.className = 'tab' + (active ? ' selected' : '') + (tab.private ? ' private-tab' : '');
+  root.className = 'tab' + (active ? ' selected' : '') +
+    (tab.private ? ' private-tab' : '') + (tab.pinned ? ' pinned-tab' : '');
   root.setAttribute('role', 'tab');
   root.setAttribute('aria-selected', String(active));
   root.title = tab.suspended ? 'Inactive tab (reloads on selection) · ' + tab.url : (tab.url === 'about:blank' ? 'New tab' : tab.url);
   const choose = document.createElement('button');
   choose.className = 'tab-choose';
-  choose.title = tab.title;
+  choose.title = (tab.pinned?'Pinned · ':'')+tab.title;
   choose.addEventListener('click', () => command('activate', tab.id));
   const symbol = document.createElement('span');
   symbol.className = 'tab-symbol';
-  symbol.textContent = tab.private ? '◈' : (tab.suspended ? '◌' : tab.loading ? '◌' : '◉');
+  symbol.textContent = tab.pinned ? '◆' :
+    tab.private ? '◈' : (tab.suspended ? '◌' : tab.loading ? '◌' : '◉');
   const text = document.createElement('span');
   text.className = 'tab-text';
   text.textContent = tab.title || 'New Tab';
@@ -43,7 +45,8 @@ function buildTab(tab, active) {
   close.title = 'Close tab';
   close.setAttribute('aria-label', 'Close ' + (tab.title || 'tab'));
   close.addEventListener('click', () => command('close', tab.id));
-  root.append(choose, close);
+  root.append(choose);
+  if(!tab.pinned)root.append(close);
   return root;
 }
 window.minternetToast = toast;
@@ -68,10 +71,12 @@ function render(data) {
       const tab = data.tabs[i];
       const el = tabs.children[i];
       const activeTab = tab.id === data.activeId;
-      el.className = 'tab' + (activeTab ? ' selected' : '') + (tab.private ? ' private-tab' : '');
+      el.className = 'tab' + (activeTab ? ' selected' : '') +
+        (tab.private ? ' private-tab' : '')+(tab.pinned ? ' pinned-tab' : '');
       el.setAttribute('aria-selected', String(activeTab));
       el.title = tab.suspended ? 'Inactive tab (reloads on selection) · ' + tab.url : tab.url;
-      el.querySelector('.tab-symbol').textContent = tab.private ? '◈' : tab.suspended || tab.loading ? '◌' : '◉';
+      el.querySelector('.tab-symbol').textContent = tab.pinned ? '◆' :
+        tab.private ? '◈' : tab.suspended || tab.loading ? '◌' : '◉';
       el.querySelector('.tab-text').textContent = tab.title || 'New Tab';
     }
   }

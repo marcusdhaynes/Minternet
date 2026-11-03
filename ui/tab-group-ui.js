@@ -29,7 +29,7 @@
     if(fallbackPending)return;
     fallbackPending=true;
     const replacement=model.visibleFallback(state,latest.tabs,t.id);
-    const call=replacement?api.command('activate',replacement):api.command('new');
+    const call=replacement?api.command('activate',replacement):api.command('deselect');
     Promise.resolve(call).finally(()=>{fallbackPending=false;});
   }
   function repaint() {
@@ -40,7 +40,12 @@
   function createGroup(name='New Group',color='violet',tabId=null) {
     const group=model.create(state,{name,color});
     if(!group) {window.minternetToast?.('Too many tab groups.');return null;}
-    if(tabId!=null)model.assign(state,tabId,group.id);
+    if(tabId!=null) {
+      // Pinned tabs cannot be children of groups. Unpin before grouping.
+      const tab=latest.tabs.find(t=>t.id===tabId);
+      if(tab?.pinned)void api.command('unpin',tabId);
+      model.assign(state,tabId,group.id);
+    }
     persist();
     return group;
   }
@@ -60,6 +65,8 @@
     return updateGroup(id,{collapsed:!group.collapsed,visible:true});
   }
   function assign(tabId,groupId) {
+    const tab=latest.tabs.find(t=>t.id===tabId);
+    if(tab?.pinned&&groupId)void api.command('unpin',tabId);
     if(!model.assign(state,tabId,groupId))return false;
     if(groupId){
       const g=model.get(state,groupId);
@@ -69,6 +76,15 @@
     return true;
   }
   function ungroup(tabId){return assign(tabId,null);}
+  async function pin(tabId,willPin=true) {
+    if(!latest.tabs.some(t=>t.id===tabId))return false;
+    // Pinning detaches the page from its group; never close or reload it.
+    if(willPin)model.assign(state,tabId,null);
+    const response=await api.command(willPin?'pin':'unpin',tabId);
+    if(response?.message){window.minternetToast?.(response.message);return false;}
+    persist();
+    return true;
+  }
   function currentDraggedTab(){
     return Number.isSafeInteger(draggingTabId)&&latest.tabs.some(t=>t.id===draggingTabId)
       ?draggingTabId:null;
@@ -161,7 +177,7 @@
     eligibleFallback();
     const signature=JSON.stringify([
       data.activeId,
-      data.tabs.map(t=>[t.id,t.title,t.url,t.private,t.loading,t.suspended]),
+      data.tabs.map(t=>[t.id,t.title,t.url,t.private,t.pinned,t.loading,t.suspended]),
       state.order,
       state.groups.map(g=>[g.id,g.name,g.color,g.visible,g.collapsed]),
       Object.entries(state.assignments).sort()
@@ -169,9 +185,17 @@
     if(lastRenderKey===signature)return;
     lastRenderKey=signature;
     const items=[];
+    // Chrome/Firefox-style pinned tabs precede groups and show no close X.
+    for(const tab of model.sortedTabs(state,data.tabs).filter(t=>t.pinned)){
+      if(model.findTab(state,tab.id))model.assign(state,tab.id,null);
+      const item=buildTab(tab,tab.id===data.activeId);
+      item.dataset.tabId=String(tab.id);
+      attachTabMenu(item,tab.id);
+      items.push(item);
+    }
     for(const g of state.groups){
       if(!g.visible)continue;
-      const members=model.tabsIn(state,g.id,data.tabs);
+      const members=model.tabsIn(state,g.id,data.tabs).filter(t=>!t.pinned);
       items.push(buildChip(g,members));
       if(!g.collapsed){
         for(const tab of members){
@@ -185,7 +209,7 @@
       }
     }
     for(const tab of model.sortedTabs(state,data.tabs)){
-      if(model.findTab(state,tab.id))continue;
+      if(tab.pinned||model.findTab(state,tab.id))continue;
       const item=buildTab(tab,tab.id===data.activeId);
       item.dataset.tabId=String(tab.id);
       attachTabMenu(item,tab.id);
@@ -344,7 +368,7 @@
   window.minternetGroups={
     getState:()=>state, getLatest:()=>latest, get:model.get.bind(null,state),
     displayName, groupColor, createGroup, updateGroup, toggleVisible, toggleCollapsed,
-    assign, ungroup, removeGroup, openEditor, closeEditor, renderTabs, repaint,
+    assign, ungroup, pin, removeGroup, openEditor, closeEditor, renderTabs, repaint,
     isVisibleTab:id=>model.isVisibleTab(state,id)
   };
 })();

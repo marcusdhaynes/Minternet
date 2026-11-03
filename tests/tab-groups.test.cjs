@@ -61,3 +61,11 @@ test('drag reorder adjacent tabs and across group boundaries without closing tab
  assert.equal(m.findTab(s,2),undefined);
  assert.equal(m.moveRelative(s,2,2),false);
 });
+
+test('pinned tab is preferred over hidden group and no fallback is a valid tabless state',()=>{
+ const s=m.blank(),g=m.create(s,{name:'Archive'});
+ m.assign(s,1,g.id);m.assign(s,2,g.id);
+ m.update(s,g.id,{visible:false});
+ assert.equal(m.visibleFallback(s,[{id:1},{id:2}],1),null);
+ assert.equal(m.visibleFallback(s,[{id:1},{id:2},{id:3,pinned:true}],1),3);
+});

@@ -95,7 +95,11 @@
     return !g||(g.visible&&!g.collapsed);
   }
   function visibleFallback(state,tabs,excludeId) {
-    return tabs.find(t=>t.id!==excludeId && isVisibleTab(state,t.id))?.id ?? null;
+    // A pinned tab takes priority over every regular group when a group is
+    // hidden. If everything is grouped/hidden, return null for the real home.
+    const others=tabs.filter(t=>t.id!==excludeId);
+    return others.find(t=>t.pinned)?.id ??
+      others.find(t=>isVisibleTab(state,t.id))?.id ?? null;
   }
   return { colors, MAX_GROUPS, blank, hydrate, serialize, get, findTab, create, update, remove,
     assign, prune, sortedTabs, moveRelative, tabsIn, isVisibleTab, visibleFallback };
