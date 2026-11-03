@@ -1413,7 +1413,8 @@ fn main() {
                                       const groupEntry=desc.find(n => n.text?.includes('Tab Groups'));
                                       const btn=[...document.querySelectorAll('.bookmark-item')].find(n=>n.dataset.bookmarkId===root.id);
                                       if(!btn){await stage('no-button');return;}
-                                      await stage('before-popup');
+                                      window.__minternetMenuSmoke=true;
+                                       await stage('before-popup');
                                       await window.minternetMenus.folder(root.id,btn);
                                       await stage('after-popup:'+window.minternetMenus.nativePopupCount());
                                       const result=await window.minternet?.command('menu-smoke-proof',{
