@@ -15,7 +15,17 @@ if (!window.minternet) {
     if(!s)return 'about:blank';
     if(/^[a-z][\w+.-]*:/i.test(s)&&!/^https:\/\//i.test(s))return null;
     const host=/^(?:localhost|(?:[a-z\d-]+\.)+[a-z]{2,})(?::\d+)?(?:[/?#]|$)/i;
-    const target=/^https:\/\//i.test(s)?s:host.test(s)?'https://'+s:'https://duckduckgo.com/?q='+encodeURIComponent(s);
+    const engines={
+      google:'https://www.google.com/search?q=',
+      duckduckgo:'https://duckduckgo.com/?q=',
+      bing:'https://www.bing.com/search?q=',
+      brave:'https://search.brave.com/search?q=',
+      startpage:'https://www.startpage.com/sp/search?query=',
+      ecosia:'https://www.ecosia.org/search?q='
+    };
+    const chosen=window.minternetSearch?.getEngine?.()||'google';
+    const target=/^https:\/\//i.test(s)?s:host.test(s)?'https://'+s:
+      (engines[chosen]||engines.google)+encodeURIComponent(s);
     try{const u=new URL(target);return u.protocol==='https:'&&!u.username&&!u.password&&u.hostname?u.href:null}
     catch{return null}
   }
@@ -74,11 +84,10 @@ if (!window.minternet) {
           const url=parse(value);if(!url)return {message:'Only HTTPS addresses and search terms are permitted.'};
           go(url);
           if (url !== 'about:blank' && restricted(url)) {
-            // User explicitly asked to navigate here; open the real site now.
-            // Popup blockers may refuse it, so the ordinary Open Website anchor remains.
-            window.open(url, '_blank', 'noopener,noreferrer');
+            // GitHub Pages cannot embed these websites. Do not silently open
+            // the system browser; this would misrepresent the desktop app.
             emit();
-            return {message:'This site cannot appear inside GitHub Pages. Opened it in your browser; use Open Website if it was blocked.'};
+            return {message:'GitHub Pages cannot embed this site. The portable Minternet EXE opens it inside Minternet.'};
           }
           break;
         }

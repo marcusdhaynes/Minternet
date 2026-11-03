@@ -53,3 +53,11 @@ These optimizations reduce Minternet's overhead, not the destination site's netw
 - Bookmark folders/subfolders no longer offer a redundant Bookmark This Page menu action. Context menus use the dark OS window theme when supported, with polished compact fallback styling.
 - The Home button and keyboard shortcut label at the address-bar end are removed; Favorites star sits at the right edge.
 - Normal and Tor controls are always visibly labeled. **Tor is still only an informational control; Tor routing has not been implemented.**
+
+## Pointer tabs and search settings (v0.6 preview)
+- Move a tab onto a group header or another group's tab to join it; move onto an ordinary tab or blank tab-strip area to ungroup. A floating, pointer-tracked tab chip and insertion markers replace HTML5 drag-and-drop, avoiding WebView2's prohibited-drop cursor. Native tabs stay alive during reordering.
+- The Minternet M logo is farthest left. Bookmark Bar items are adjacent, the status footer is gone, and only the Tor information icon remains alongside the settings gear. The eye-icon new-private-tab feature remains available.
+- Tor itself is not connected or advertised as an anonymizing mode.
+- Plain text entered in the address bar or home search is routed inside the native WebView2 to Google by default; ordinary HTTPS websites remain direct website navigations.
+- Settings > Default Search Engine supports Google, DuckDuckGo, Bing, Brave Search, Startpage, and Ecosia. The trusted chrome stores this under `minternet.search-engine.v1`. Each navigation includes the selected enum, validated by the native backend against its allowlist.
+- The GitHub Pages UI companion is not a fully functional browser and never auto-launches restricted websites in the OS browser.
