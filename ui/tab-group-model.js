@@ -30,6 +30,7 @@
     }
     // Assignments are restored separately against the native session's ordered tabs.
     state.restoredSlots=Array.isArray(raw.slots)?raw.slots.slice(0,100).map(x=>typeof x==='string'?x:null):null;
+    state.restoredOrder=Array.isArray(raw.visualOrder)?raw.visualOrder.filter(n=>Number.isSafeInteger(n)&&n>=0&&n<100):null;
     return state;
   }
   const serialize = state => JSON.stringify({ version: 2, groups: state.groups, slots: state.order.map(id=>state.assignments[String(id)]||null) });
