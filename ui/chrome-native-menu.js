@@ -273,6 +273,38 @@
     document.addEventListener('pointerdown',outside,true);
     document.addEventListener('keydown',esc,true);
   }
+  function groupsOverview(point){
+    closeFallback();
+    const host=document.createElement('div');
+    host.className='system-popup-root minternet-context-menu group-overview';
+    const heading=document.createElement('div');heading.className='minternet-context-heading';
+    heading.textContent='TAB GROUPS';host.append(heading);
+    for(const group of groups()?.getState().groups||[]){
+      const row=document.createElement('div');row.className='group-overview-row';
+      const name=document.createElement('button');name.className='group-overview-name';
+      const dot=document.createElement('span');dot.className='group-overview-dot';
+      dot.style.background=groups().groupColor(group);
+      name.append(dot,document.createTextNode(groups().displayName(group)));
+      name.title='Edit group';
+      name.addEventListener('click',()=>groupInspector(group.id,point));
+      const eye=document.createElement('button');eye.className='group-inspector-icon';
+      eye.setAttribute('aria-label','Toggle visibility for '+groups().displayName(group));
+      const sync=()=>{eye.textContent=group.visible?'◉':'◌';eye.setAttribute('aria-pressed',String(group.visible));eye.title=group.visible?'Hide From Tab Bar':'Show In Tab Bar';};
+      sync();eye.addEventListener('click',()=>{groups().toggleVisible(group.id);sync();});
+      row.append(name,eye);host.append(row);
+    }
+    const create=document.createElement('button');create.className='system-popup-row group-overview-create';
+    create.textContent='＋  New Tab Group';
+    create.addEventListener('click',()=>{closeFallback();groups()?.openEditor(null,true);});
+    host.append(create);
+    document.body.append(host);fallback=host;customOpen=true;
+    if(window.__TAURI__)void window.minternet?.command('chrome-overlay',true);
+    const rect=host.getBoundingClientRect();
+    host.style.left=Math.max(3,Math.min(point.x||0,innerWidth-rect.width-3))+'px';
+    host.style.top=Math.max(3,Math.min(point.y||0,innerHeight-rect.height-3))+'px';
+    document.addEventListener('pointerdown',outside,true);
+    document.addEventListener('keydown',esc,true);
+  }
   function fromElement(button){
     const bounds=button.getBoundingClientRect();
     return {x:bounds.left,y:bounds.bottom};
@@ -281,7 +313,7 @@
     folder:(id,button)=>popup(folderItems(id),fromElement(button)),
     bookmark:(id,event)=>popup(barMenu(id),{x:event.clientX,y:event.clientY},{custom:true,heading:'BOOKMARK FOLDER'}),
     bar:event=>popup(barMenu(),{x:event.clientX,y:event.clientY},{custom:true,heading:'BOOKMARKS'}),
-    groups:point=>popup(groupsMenu(),point,{custom:true,heading:'TAB GROUPS'}),
+    groups:point=>groupsOverview(point),
     group:(id,point)=>groupInspector(id,point),
     tab:(id,point)=>popup(tabMenu(id),point,{custom:true,heading:'TAB OPTIONS'}),
     inspectTab:id=>tabMenu(id),
