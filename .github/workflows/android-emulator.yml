@@ -43,6 +43,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: android-emulator-smoke-evidence
-          path: /tmp/minternet-*.png
+          path: |
+            /tmp/minternet-*.png
+            /tmp/minternet-*.xml
           if-no-files-found: ignore
           retention-days: 7
