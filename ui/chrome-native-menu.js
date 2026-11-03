@@ -206,7 +206,7 @@
     const eye=document.createElement('button');
     eye.className='group-inspector-icon';
     eye.setAttribute('aria-label','Toggle group visibility');
-    const syncEye=()=>{eye.textContent=group.visible?'◉':'◌';eye.title=group.visible?'Hide From Tab Bar':'Show In Tab Bar';eye.setAttribute('aria-pressed',String(group.visible));};
+    const syncEye=()=>{eye.textContent=group.visible?'👁':'◌';eye.title=group.visible?'Hide From Tab Bar':'Show In Tab Bar';eye.setAttribute('aria-pressed',String(group.visible));};
     syncEye();
     eye.addEventListener('click',()=>{groups()?.toggleVisible(id);syncEye();});
     const del=document.createElement('button');del.className='group-inspector-icon delete';
@@ -289,7 +289,7 @@
       name.addEventListener('click',()=>groupInspector(group.id,point));
       const eye=document.createElement('button');eye.className='group-inspector-icon';
       eye.setAttribute('aria-label','Toggle visibility for '+groups().displayName(group));
-      const sync=()=>{eye.textContent=group.visible?'◉':'◌';eye.setAttribute('aria-pressed',String(group.visible));eye.title=group.visible?'Hide From Tab Bar':'Show In Tab Bar';};
+      const sync=()=>{eye.textContent=group.visible?'👁':'◌';eye.setAttribute('aria-pressed',String(group.visible));eye.title=group.visible?'Hide From Tab Bar':'Show In Tab Bar';};
       sync();eye.addEventListener('click',()=>{groups().toggleVisible(group.id);sync();});
       row.append(name,eye);host.append(row);
     }
