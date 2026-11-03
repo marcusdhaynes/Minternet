@@ -180,6 +180,7 @@
     group:(id,point)=>popup(groupDetail(id),point),
     tab:(id,point)=>popup(tabMenu(id),point),
     inspectBar:()=>barMenu(),
+    inspectFolder:id=>folderItems(id),
     nativePopupCount:()=>nativePopupCount
   };
   window.minternetMenus=handlers;
