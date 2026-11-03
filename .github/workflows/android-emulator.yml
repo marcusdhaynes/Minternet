@@ -1,0 +1,48 @@
+name: Android emulator browser and private-session smoke
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'native/android/**'
+      - '.github/workflows/android-emulator.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Build APK for emulator
+        run: |
+          echo "y" | sdkmanager --licenses >/dev/null || true
+          cd native/android
+          gradle :app:assembleDebug --no-daemon
+      - name: Allow KVM for Android emulator
+        run: |
+          if test -e /dev/kvm; then sudo chmod 666 /dev/kvm; fi
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_5
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          script: bash native/android/scripts/smoke.sh
+      - name: Save Android emulator screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-emulator-smoke-evidence
+          path: /tmp/minternet-*.png
+          if-no-files-found: ignore
+          retention-days: 7
