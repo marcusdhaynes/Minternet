@@ -257,6 +257,48 @@ jobs:
             Remove-Item $google,$brave,$trace -Force -ErrorAction SilentlyContinue
             $checks | Remove-Item -Force -ErrorAction SilentlyContinue
           }
+      - name: Verify native pinned tabs restore, tabless homepage and first navigation
+        shell: pwsh
+        run: |
+          $exe = "$env:RUNNER_TEMP\minternet-portable\Minternet-Portable-x64.exe"
+          $saved = Join-Path $env:TEMP "minternet-ci-pinned-tabs.v1.json"
+          Remove-Item $saved -Force -ErrorAction SilentlyContinue
+          $p = Start-Process -FilePath $exe -ArgumentList "--minternet-pin-smoke" -PassThru
+          $pinned = Join-Path $env:TEMP "minternet-pin-$($p.Id)-pinned.ok"
+          try {
+            $success=$false
+            for($i=0;$i -lt 30;$i++) {
+              Start-Sleep -Seconds 2
+              $p.Refresh()
+              if($p.HasExited){throw "Minternet exited during pin test"}
+              if(Test-Path $pinned){$success=$true;break}
+            }
+            if(!$success){throw "Failed to pin a website in the real tab strip"}
+            if(!(Test-Path $saved)){throw "Pinned URLs were not saved"}
+          } finally {
+            if(!$p.HasExited){Stop-Process -Id $p.Id -Force}
+            Remove-Item $pinned -Force -ErrorAction SilentlyContinue
+          }
+          $p = Start-Process -FilePath $exe -ArgumentList "--minternet-pin-reopen-smoke" -PassThru
+          $restored = Join-Path $env:TEMP "minternet-pin-$($p.Id)-restored.ok"
+          $tabless = Join-Path $env:TEMP "minternet-pin-$($p.Id)-tabless.ok"
+          $first = Join-Path $env:TEMP "minternet-pin-$($p.Id)-new-first.ok"
+          try {
+            $success=$false
+            for($i=0;$i -lt 35;$i++){
+              Start-Sleep -Seconds 2
+              $p.Refresh()
+              if($p.HasExited){throw "Minternet exited while restoring pinned tab"}
+              if((Test-Path $restored) -and (Test-Path $tabless) -and (Test-Path $first)){
+                $success=$true;break
+              }
+            }
+            if(!$success){throw "Pin restore, last-tab close, or first home navigation failed"}
+            "PASS: pin website, restore pinned site after restart, close final tab without replacement, create tab only upon navigation." >> $env:GITHUB_STEP_SUMMARY
+          } finally {
+            if(!$p.HasExited){Stop-Process -Id $p.Id -Force}
+            Remove-Item $restored,$tabless,$first,$saved -Force -ErrorAction SilentlyContinue
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: Minternet-Portable-Windows-x64
