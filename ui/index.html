@@ -140,7 +140,7 @@
         <form id="vaultEntryForm" class="vault-auth" autocomplete="off">
           <label>HTTPS Website<input id="vaultOrigin" type="url" placeholder="https://example.com" required></label>
           <label>Username / Email<input id="vaultUsername" autocomplete="off" maxlength="320"></label>
-          <label>Password<input id="vaultPassword" type="password" autocomplete="new-password" required maxlength="4096"></label>
+          <label>Password<div class="vault-password-row"><input id="vaultPassword" type="password" autocomplete="new-password" required maxlength="4096"><button id="vaultShowPassword" type="button" aria-label="Show or hide password" title="Show or Hide">◉</button><button id="vaultGeneratePassword" type="button">Generate</button></div></label>
           <label class="vault-checkbox"><input type="checkbox" id="vaultAutofill" checked> Autofill on this HTTPS site</label>
           <button type="submit">Save Credential</button>
         </form>
