@@ -512,3 +512,24 @@ body.tab-dragging .ungroup-drop-target{display:flex}
 .tab.drop-after::after {right:-2px;}
 .group-chip.drag-target {outline:2px solid var(--group-accent);outline-offset:-1px;filter:brightness(1.4);}
 #tabUngroupDrop.drag-target {background:#6c70a45c;outline:1px solid #b3b2ff;}
+
+/* Minternet context-menu finish: consistent dark etched-glass appearance.
+   Windows native popup styling is OS-controlled; these tokens style the
+   HTML fallback and web companion, with a matching dark system theme hint. */
+.system-popup-root,.system-popup-child {
+  background:linear-gradient(160deg,#29334b 0%,#1c2539 100%);
+  color:#eef2ff;border:1px solid #566482;border-radius:9px;
+  box-shadow:0 16px 35px #030814b8, inset 0 1px #ffffff14;
+  backdrop-filter:blur(16px);
+  padding:5px;
+}
+.system-popup-root {width:226px;}
+.system-popup-child {width:226px;top:-5px;}
+.system-popup-row {
+  min-height:25px;padding:4px 10px;border-radius:5px;font-size:10px;
+  letter-spacing:.005em;transition:background .09s ease,color .09s ease;
+}
+.system-popup-row:hover,.system-popup-has-child:hover>.system-popup-row,
+.system-popup-row:focus-visible {background:linear-gradient(90deg,#5a638b,#495774);color:#fff;}
+.system-popup-separator {margin:4px 8px;height:1px;background:#53617e77;}
+.system-popup-arrow {color:#afbcdf;font-size:13px;}

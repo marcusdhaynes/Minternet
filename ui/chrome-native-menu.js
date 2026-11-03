@@ -26,7 +26,7 @@
     const items=[];
     for(const child of folder.children.slice(0,120)){
       if(child.kind==='folder'){
-        items.push(sub(iconText(child)+'  '+label(child)+'  ›',depth<11?folderItems(child.id,depth+1):[disabled('Maximum folder depth')]));
+        items.push(sub(iconText(child)+'  '+label(child),depth<11?folderItems(child.id,depth+1):[disabled('Maximum folder depth')]));
       }else if(child.kind==='link'){
         items.push(item(iconText(child)+'  '+label(child),()=>b.openLink(child.url)));
       }
@@ -35,8 +35,7 @@
     if(items.length===0)items.push(disabled('Empty Folder'));
     items.push(sep());
     items.push(item('＋  New Subfolder…',()=>b.newFolder(id)));
-    items.push(item('☆  Bookmark This Page',()=>b.savePage(id)));
-    items.push(item('✎  Edit Folder…',()=>b.edit(id)));
+    items.push(item('✎  Folder Properties…',()=>b.edit(id)));
     return items;
   }
   function barGroupItems(){
@@ -93,7 +92,7 @@
       sub('▣  Tab Groups',barGroupItems()),
       sep(),
       item('📁  New Folder…',()=>b?.newFolder(folderId)),
-      item('☆  Bookmark This Page',()=>b?.toggleBookmark()),
+      ...(!folderId?[item('☆  Bookmark This Page',()=>b?.toggleBookmark())]:[]),
       item('⚙  Manage Bookmarks…',()=>b?.manager()),
       sep(),
       item((state()?.visible?'✓  ':'')+'Show Bookmark Bar',()=>b?.toggleBar())

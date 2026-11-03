@@ -61,3 +61,14 @@ test('folder menu actions target the correct folder, without executable URLs',()
  assert.equal(h.flags.folderEdits,1);
  assert.equal(h.bookmarks.items[0].children[0].children[0].url,'https://example.com/');
 });
+
+test('folder and subfolder context menus do not offer Bookmark This Page',()=>{
+ const h=harness();
+ for(const id of [h.root.id,h.sub.id]){
+  const entries=h.window.minternetMenus.inspectFolder(id);
+  assert.equal(entries.some(x=>x.text?.includes('Bookmark This Page')),false);
+ }
+ const folderContext=h.window.minternetMenus.inspectBar();
+ const group=folderContext.find(x=>x.text?.includes('Tab Groups'));
+ assert.ok(group);
+});

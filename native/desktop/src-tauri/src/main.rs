@@ -736,6 +736,8 @@ fn main() {
         .setup(|app| {
             let builder = WindowBuilder::new(app, "main")
                 .title("Minternet")
+                // Request dark OS chrome and native menus where supported.
+                .theme(Some(tauri::Theme::Dark))
                 .inner_size(1160.0, 760.0)
                 .min_inner_size(620.0, 400.0);
             // Windows portable EXE has no separate OS caption above the app.
