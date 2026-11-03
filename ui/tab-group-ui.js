@@ -189,7 +189,7 @@
   }
   function renderTabs(data,host,buildTab) {
     latest=data;
-    if(state.restoredSlots){
+    if(state.restoredSlots&&data.tabs.length){
       // Native session restores in the saved tab order; never reuse old tab IDs.
       data.tabs.filter(tab=>!tab.private).forEach((tab,index)=>{if(!tab.pinned&&model.get(state,state.restoredSlots[index]))model.assign(state,tab.id,state.restoredSlots[index]);});
       state.restoredSlots=null;
