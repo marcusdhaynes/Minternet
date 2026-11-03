@@ -342,7 +342,7 @@ fn update_from_site(app: &tauri::AppHandle, id: u32, url: &str) {
                 }
                 if tab.title=="New Tab"{tab.title=title_for(url);}
             }
-        }
+        };
     }
     if pinned_change{let _=save_pinned(app);}
     notify(app);
