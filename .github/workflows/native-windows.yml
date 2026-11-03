@@ -27,8 +27,12 @@ jobs:
           workspaces: native/desktop/src-tauri -> target
       - name: Install Tauri CLI
         run: npm install --no-fund --no-audit
-      - name: Validate frontend bridge JavaScript
-        run: node --check ../../ui/native-bridge.js
+      - name: Validate browser UI and bookmark model
+        run: |
+          node --check ../../ui/native-bridge.js
+          node --check ../../ui/bookmark-model.js
+          node --check ../../ui/bookmark-ui.js
+          node --test ../../tests/bookmarks.test.cjs
       - name: Build native portable EXE with embedded UI, no installer
         run: npm run build
       - name: Copy EXE ALONE to clean directory, ensure no sidecar dependencies

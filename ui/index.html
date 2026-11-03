@@ -7,7 +7,9 @@
   <title>Minternet</title>
   <link rel="stylesheet" href="./styles.css">
   <script src="./native-bridge.js" defer></script>
+  <script src="./bookmark-model.js" defer></script>
   <script src="./app.js" defer></script>
+  <script src="./bookmark-ui.js" defer></script>
 </head>
 <body>
   <header class="chrome">
@@ -32,6 +34,7 @@
         <span id="connectionIcon" class="connection-icon" title="HTTPS-only navigation">◇</span>
         <input id="address" autocomplete="off" autocapitalize="none" spellcheck="false" type="text" placeholder="Search privately or enter a secure address" aria-label="Search or enter address">
         <span id="addressState" class="address-state"></span>
+        <button type="button" id="bookmarkThisPage" class="address-star" title="Bookmark This Page (Ctrl+D)" aria-label="Bookmark This Page">☆</button>
         <span class="kbd">⌘ L</span>
       </form>
       <div class="toolbar-actions">
@@ -40,9 +43,52 @@
         <button id="extensions" class="icon-btn ext-btn" title="Install unpacked Chromium extension" aria-label="Extensions">⬡</button>
         <button id="freeMemory" class="icon-btn" title="Release inactive tabs from RAM (unsaved content may be lost)" aria-label="Free tab memory">◌</button>
         <button id="newPrivate" class="icon-btn" title="New private tab" aria-label="New private tab">+</button>
+        <button id="settings" class="icon-btn settings-btn" title="Settings" aria-label="Settings" aria-expanded="false">⚙</button>
       </div>
     </div>
+    <div class="bookmark-bar" id="bookmarkBar" aria-label="Bookmark Bar">
+      <div class="bookmark-items" id="bookmarkItems"></div>
+      <button class="bookmark-mini" id="bookmarkBarAdd" title="New Folder" aria-label="New Bookmark Folder">＋</button>
+      <button class="bookmark-mini" id="bookmarkBarManage" title="Manage Bookmarks" aria-label="Manage Bookmarks">⋯</button>
+    </div>
   </header>
+  <section id="bookmarkOverlay" class="bookmark-overlay" hidden aria-label="Bookmarks and settings">
+    <div class="bookmark-backdrop" id="bookmarkBackdrop"></div>
+    <aside id="bookmarkSettings" class="bookmark-panel bookmark-settings" hidden aria-label="Settings">
+      <div class="bookmark-panel-head"><strong>Settings</strong><button class="bookmark-close" id="bookmarkSettingsClose" aria-label="Close Settings">×</button></div>
+      <label class="bookmark-toggle"><span><strong>Bookmark Bar</strong><small>Show beneath the address line</small></span><input id="bookmarkBarToggle" type="checkbox" checked></label>
+      <button class="bookmark-menu-action" id="bookmarkSettingsManage">☆ Manage Bookmarks <span>›</span></button>
+      <button class="bookmark-menu-action" id="bookmarkSettingsFolder">📁 New Folder <span>＋</span></button>
+      <div class="bookmark-settings-foot">Saved locally · No account required</div>
+    </aside>
+    <aside id="bookmarkFolderMenu" class="bookmark-panel bookmark-folder-menu" hidden aria-label="Bookmark Folder">
+      <div class="bookmark-panel-head"><button class="bookmark-mini" id="bookmarkFolderBack" aria-label="Parent Folder">‹</button><strong id="bookmarkFolderTitle">Bookmarks</strong><button class="bookmark-close" id="bookmarkFolderClose" aria-label="Close Folder">×</button></div>
+      <div id="bookmarkFolderContents" class="bookmark-folder-contents"></div>
+      <div class="bookmark-panel-foot">
+        <button class="bookmark-menu-action" id="bookmarkFolderNew">＋ Subfolder</button>
+        <button class="bookmark-menu-action" id="bookmarkFolderPage">☆ Save Page Here</button>
+        <button class="bookmark-menu-action" id="bookmarkFolderEdit">✎ Edit Folder</button>
+      </div>
+    </aside>
+    <aside id="bookmarkManager" class="bookmark-panel bookmark-manager" hidden aria-label="Bookmark Manager">
+      <div class="bookmark-panel-head"><strong>Bookmarks</strong><button id="bookmarkManageNewFolder" title="New Folder" class="bookmark-mini">📁＋</button><button id="bookmarkManageNewLink" title="New Bookmark" class="bookmark-mini">☆＋</button><button id="bookmarkManageClose" class="bookmark-close" aria-label="Close Bookmarks">×</button></div>
+      <div id="bookmarkTree" class="bookmark-tree"></div>
+      <div class="bookmark-panel-foot bookmark-hint">Click a bookmark to open · ✎ to edit or move</div>
+    </aside>
+    <aside id="bookmarkEditor" class="bookmark-panel bookmark-editor" hidden aria-label="Edit Bookmark">
+      <form id="bookmarkEditForm" autocomplete="off">
+        <div class="bookmark-panel-head"><strong id="bookmarkEditorTitle">New Folder</strong><button type="button" id="bookmarkEditClose" class="bookmark-close" aria-label="Cancel">×</button></div>
+        <label class="bookmark-field">Name <small>(optional for folders)</small><input id="bookmarkName" maxlength="180" placeholder="Leave blank for icon only"></label>
+        <label class="bookmark-field" id="bookmarkUrlField">Website URL<input id="bookmarkUrl" type="url" spellcheck="false" placeholder="https://example.com"></label>
+        <label class="bookmark-field">Icon <small>(emoji or image)</small>
+          <div class="bookmark-icon-row"><span id="bookmarkIconPreview" class="bookmark-icon-preview">📁</span><input id="bookmarkIcon" maxlength="24" placeholder="📁 or 🌿" aria-label="Emoji Icon"><button type="button" id="bookmarkIconUpload" title="Choose Image">Image…</button></div>
+        </label>
+        <input type="file" id="bookmarkImageFile" accept="image/png,image/jpeg,image/webp" hidden>
+        <label class="bookmark-field">Location<select id="bookmarkParent"></select></label>
+        <div class="bookmark-editor-buttons"><button type="button" id="bookmarkRemove" class="bookmark-delete" hidden>Delete</button><span class="bookmark-fill"></span><button type="button" id="bookmarkCancel">Cancel</button><button type="submit" class="bookmark-save">Save</button></div>
+      </form>
+    </aside>
+  </section>
   <main id="homeScreen" class="home-screen">
     <div class="background-shape shape-one"></div>
     <div class="background-shape shape-two"></div>
