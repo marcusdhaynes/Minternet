@@ -310,7 +310,7 @@
     return {x:bounds.left,y:bounds.bottom};
   }
   const handlers={
-    folder:(id,button)=>popup(folderItems(id),fromElement(button),window.__TAURI__&&location.search.includes('minternet-menus-smoke')?{}:{custom:true,heading:'FOLDER'}),
+    folder:(id,button)=>popup(folderItems(id),fromElement(button),window.__minternetMenuSmoke?{}:{custom:true,heading:'FOLDER'}),
     bookmark:(id,event)=>popup(barMenu(id),{x:event.clientX,y:event.clientY},{custom:true,heading:'BOOKMARK FOLDER'}),
     bar:event=>popup(barMenu(),{x:event.clientX,y:event.clientY},{custom:true,heading:'BOOKMARKS'}),
     groups:point=>groupsOverview(point),
