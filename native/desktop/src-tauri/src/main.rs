@@ -486,6 +486,21 @@ fn browser_snapshot(app: tauri::AppHandle) -> Result<Snapshot,String> { snapshot
 #[tauri::command]
 async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Result<Value, String> {
     match name.as_str() {
+        "pointer-smoke-proof" => {
+            if !std::env::args().any(|a|a=="--minternet-pointer-smoke") {
+                return Err("Tab drag proof unavailable outside UI smoke".into());
+            }
+            if value.get("joined").and_then(Value::as_bool)!=Some(true) ||
+               value.get("left").and_then(Value::as_bool)!=Some(true) ||
+               value.get("noHtmlDrag").and_then(Value::as_bool)!=Some(true) {
+                return Err("Pointer-group entry/exit failed".into());
+            }
+            let marker=std::env::temp_dir()
+                .join(format!("minternet-pointer-{}.ok",std::process::id()));
+            std::fs::write(marker,"Pointer tab drag joined and left group without native drop")
+                .map_err(|e|e.to_string())?;
+            return Ok(json!({"ok":true}));
+        }
         "search-smoke-proof" => {
             if !std::env::args().any(|a|a=="--minternet-search-smoke"){
                 return Err("Search test unavailable outside CI".into());
@@ -830,6 +845,7 @@ fn main() {
             let bookmarks_reopen = std::env::args().any(|a| a == "--minternet-bookmarks-reopen");
             let menus_smoke = std::env::args().any(|a| a == "--minternet-menus-smoke");
             let search_smoke = std::env::args().any(|a| a == "--minternet-search-smoke");
+            let pointer_smoke = std::env::args().any(|a| a == "--minternet-pointer-smoke");
             let rapid_smoke = std::env::args().any(|a| a == "--minternet-rapid-ui-smoke");
             window.add_child(
                 WebviewBuilder::new("chrome",WebviewUrl::App("index.html".into()))
@@ -911,6 +927,42 @@ fn main() {
                                     await window.minternet?.command('rapid-ui-smoke-proof',{phase:'restore',ui});
                                     await window.minternet?.command('rapid-ui-smoke-stage','after-restore');
                                   },750);
+                                "#);
+                            } else if pointer_smoke {
+                                let _ = view.eval(r#"
+                                  setTimeout(async () => {
+                                    const groups=window.minternetGroups;
+                                    const group=groups?.createGroup('Pointer Test','teal');
+                                    if(!group)return;
+                                    const strip=document.getElementById('tabs');
+                                    const emit=(node,type,id,x,y)=>node.dispatchEvent(new PointerEvent(type,{
+                                      bubbles:true,cancelable:true,pointerId:id,pointerType:'mouse',
+                                      isPrimary:true,button:0,clientX:x,clientY:y
+                                    }));
+                                    const source=()=>document.querySelector('.tab[data-tab-id="1"]');
+                                    const center=node=>{
+                                      const r=node.getBoundingClientRect();
+                                      return [r.left+r.width/2,r.top+r.height/2];
+                                    };
+                                    const tab=source(),chip=document.querySelector('.group-chip[data-group-id="'+group.id+'"]');
+                                    if(!tab||!chip)return;
+                                    let [sx,sy]=center(tab),[dx,dy]=center(chip);
+                                    emit(tab.querySelector('.tab-choose'),'pointerdown',71,sx,sy);
+                                    emit(document,'pointermove',71,dx,dy);
+                                    emit(document,'pointerup',71,dx,dy);
+                                    const joined=groups.getState().assignments['1']===group.id;
+                                    const next=source();
+                                    if(!next)return;
+                                    [sx,sy]=center(next);
+                                    const stripRect=strip.getBoundingClientRect();
+                                    dx=stripRect.right-14;dy=stripRect.top+stripRect.height/2;
+                                    emit(next.querySelector('.tab-choose'),'pointerdown',72,sx,sy);
+                                    emit(document,'pointermove',72,dx,dy);
+                                    emit(document,'pointerup',72,dx,dy);
+                                    const left=groups.getState().assignments['1']==null;
+                                    const noHtmlDrag=next.draggable===false;
+                                    await window.minternet?.command('pointer-smoke-proof',{joined,left,noHtmlDrag});
+                                  },650);
                                 "#);
                             } else if search_smoke {
                                 let _ = view.eval(r#"
