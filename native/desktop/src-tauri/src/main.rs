@@ -487,8 +487,12 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                     let mut used_native_history = false;
                     if let Some(label) = label {
                         if let Some(view) = app.get_webview(&label) {
-                            let navigated = if back { view.go_back() } else { view.go_forward() };
-                            used_native_history = navigated.is_ok();
+                            // Tauri's stable Webview wrapper does not expose go_back on
+                            // the pinned version. WebView2 executes the constant history
+                            // operation in the existing renderer, enabling its BFCache.
+                            // No page-controlled URL or arbitrary script is interpolated.
+                            let operation = if back { "history.back()" } else { "history.forward()" };
+                            used_native_history = view.eval(operation).is_ok();
                         }
                     }
                     if !used_native_history {
