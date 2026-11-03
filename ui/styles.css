@@ -728,3 +728,39 @@ body.tab-dragging .tab-drag-source {opacity:.48;box-shadow:inset 0 0 0 1px #aab5
 .group-overview-name:hover {background:#7561a355;}
 .group-overview-dot {flex:0 0 9px;width:9px;height:9px;border-radius:3px;}
 .group-overview-create {width:100%;margin-top:4px;border-top:1px solid #bfa6ff24!important;text-align:left;}
+
+/* Rapid UI refinement: quiet expanded groups, vivid collapsed groups. */
+.group-chip.group-expanded {
+  background:color-mix(in srgb,var(--group-accent) 11%,#192239);
+  border:1px solid color-mix(in srgb,var(--group-accent) 38%,#28344a);
+  box-shadow:inset 0 -1px color-mix(in srgb,var(--group-accent) 38%,transparent);
+  opacity:1;
+}
+.group-chip.group-collapsed {
+  background:var(--group-accent);
+  border:1px solid var(--group-accent);
+  border-style:solid;
+  color:#111524;
+  opacity:1;
+  box-shadow:0 0 0 1px #0004,inset 0 1px #fff5;
+}
+.group-chip.group-collapsed .group-chip-label,
+.group-chip.group-collapsed .group-chip-count,
+.group-chip.group-collapsed .group-chip-symbol {color:#111524;}
+/* Smaller, precisely centered controls, without glyph-baseline offsets. */
+.group-inspector {width:205px;padding:5px;}
+.group-inspector-top {gap:3px;padding-bottom:5px;}
+.group-inspector-name {width:88px;min-height:20px;font-size:10px;line-height:16px;padding:2px 3px;}
+.group-inspector-icon {flex:0 0 19px;width:19px;height:19px;padding:0;display:flex;align-items:center;justify-content:center;line-height:1;vertical-align:middle;border-radius:4px;}
+.group-inspector-icon svg {display:block;width:12px;height:12px;flex:none;}
+.group-overview {width:195px;}
+.group-overview-row {gap:3px;}
+.bookmark-manager {width:min(270px,calc(100vw - 14px));}
+.bookmark-tree {padding:3px;}
+.bookmark-tree-line {gap:3px;min-height:21px;padding:1px 3px;}
+.bookmark-tree-line .action {min-width:18px;padding:1px;}
+/* All bookmark overlays match the group's etched-glass palette. */
+.bookmark-panel {background:linear-gradient(153deg,#302b4a 0%,#1b2138 43%,#131a2c 100%);border-color:#796e9eaa;color:#eee9ff;box-shadow:0 17px 46px #03040cc9,inset 0 1px #c8b6ff30;}
+.bookmark-panel-head {background:#29253f;border-bottom-color:#bfa6ff24;}
+.bookmark-panel-foot,.bookmark-settings-foot {border-color:#bfa6ff24;}
+.bookmark-tree-line:hover,.bookmark-folder-entry:hover,.bookmark-menu-action:hover {background:#70629a7b;}
