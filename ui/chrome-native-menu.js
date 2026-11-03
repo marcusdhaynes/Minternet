@@ -5,6 +5,7 @@
 (() => {
   const $=id=>document.getElementById(id);
   let lastMenus=[];
+  let nativePopupCount=0;
   const cleanLabel=(value,fallback)=>String(value||fallback).replace(/[\r\n\t]/g,' ').slice(0,80);
   const sep=()=>({item:'Separator'});
   const disabled=text=>({text,enabled:false});
@@ -149,6 +150,7 @@
         lastMenus.push(native);
         if(lastMenus.length>6)lastMenus.shift();
         await native.popup(new api.dpi.LogicalPosition(x,y));
+        nativePopupCount++;
         return true;
       }catch(error){
         console.warn('Native menu unavailable:',error);
@@ -176,7 +178,9 @@
     bar:event=>popup(barMenu(),{x:event.clientX,y:event.clientY}),
     groups:point=>popup(groupsMenu(),point),
     group:(id,point)=>popup(groupDetail(id),point),
-    tab:(id,point)=>popup(tabMenu(id),point)
+    tab:(id,point)=>popup(tabMenu(id),point),
+    inspectBar:()=>barMenu(),
+    nativePopupCount:()=>nativePopupCount
   };
   window.minternetMenus=handlers;
   const bar=$('bookmarkBar');

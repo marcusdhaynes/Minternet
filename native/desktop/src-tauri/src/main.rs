@@ -472,6 +472,23 @@ fn browser_snapshot(app: tauri::AppHandle) -> Result<Snapshot,String> { snapshot
 #[tauri::command]
 async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Result<Value, String> {
     match name.as_str() {
+        "menu-smoke-proof" => {
+            if !std::env::args().any(|a| a == "--minternet-menus-smoke") {
+                return Err("Unavailable outside native menu smoke".into());
+            }
+            let folders = value.get("folders").and_then(Value::as_u64).unwrap_or(0);
+            let native = value.get("nativePopups").and_then(Value::as_u64).unwrap_or(0);
+            let group_visible = value.get("groupVisible").and_then(Value::as_bool);
+            let group_rows = value.get("groupMenuRows").and_then(Value::as_u64).unwrap_or(0);
+            if folders < 2 || native < 1 || group_visible != Some(false) || group_rows < 1 {
+                return Err("Native cascading folder menu / tab-group visibility check failed".into());
+            }
+            let marker = std::env::temp_dir()
+                .join(format!("minternet-menus-{}.ok",std::process::id()));
+            std::fs::write(marker,"Native folder popup and hidden tab group verified")
+                .map_err(|e| e.to_string())?;
+            return Ok(json!({"ok":true}));
+        }
         "bookmarks-smoke-proof" => {
             // Only enabled for CI's explicit smoke launch; not available during
             // ordinary browsing. Validate nested unnamed folders persisted by
@@ -711,6 +728,7 @@ fn main() {
             let turbo_smoke = std::env::args().any(|a| a == "--minternet-turbo-smoke");
             let bookmarks_smoke = std::env::args().any(|a| a == "--minternet-bookmarks-smoke");
             let bookmarks_reopen = std::env::args().any(|a| a == "--minternet-bookmarks-reopen");
+            let menus_smoke = std::env::args().any(|a| a == "--minternet-menus-smoke");
             window.add_child(
                 WebviewBuilder::new("chrome",WebviewUrl::App("index.html".into()))
                     .on_page_load(move |view, event| {
@@ -757,6 +775,37 @@ fn main() {
                                     if (!saved) return;
                                     await window.minternet?.command('bookmarks-smoke-proof', JSON.parse(saved));
                                   }, 550);
+                                "#);
+                            } else if menus_smoke {
+                                let _ = view.eval(r#"
+                                  setTimeout(async () => {
+                                    const $ = id => document.getElementById(id);
+                                    try {
+                                      $('bookmarkBarAdd').click();
+                                      $('bookmarkName').value = 'Folder Menu Test';
+                                      $('bookmarkEditForm').requestSubmit();
+                                      const data = window.minternetBookmarks.getState();
+                                      const root = data.items.findLast(n => n.kind === 'folder' && n.name === 'Folder Menu Test');
+                                      if (!root) return;
+                                      window.minternetBookmarks.newFolder(root.id);
+                                      $('bookmarkName').value = 'Subfolder Test';
+                                      $('bookmarkEditForm').requestSubmit();
+                                      const group = window.minternetGroups.createGroup('Reading','teal');
+                                      window.minternetGroups.assign(1,group.id);
+                                      window.minternetGroups.toggleVisible(group.id);
+                                      const desc=window.minternetMenus.inspectBar();
+                                      const groupEntry=desc.find(n => n.text?.includes('Tab Groups'));
+                                      const btn=[...document.querySelectorAll('.bookmark-item')].find(n=>n.dataset.bookmarkId===root.id);
+                                      if(!btn)return;
+                                      await window.minternetMenus.folder(root.id,btn);
+                                      await window.minternet?.command('menu-smoke-proof',{
+                                        folders:root.children.length+1,
+                                        nativePopups:window.minternetMenus.nativePopupCount(),
+                                        groupVisible:window.minternetGroups.get(group.id).visible,
+                                        groupMenuRows:groupEntry?.items?.length||0
+                                      });
+                                    } catch (e) { console.warn('Native menu smoke failed',e); }
+                                  },650);
                                 "#);
                             }
                         }
