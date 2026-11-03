@@ -22,3 +22,5 @@ Normal browsing persists cookies/cache under Windows app data; no browser can op
 - Existing WebView2 caching, persistent normal-session storage, GPU acceleration and process isolation are preserved. Nothing disables TLS, certificate validation, browser safety features or site privacy protections.
 
 These optimizations reduce Minternet's overhead, not the destination site's network latency or JavaScript workload. Automated smoke tests verify real in-app navigation, but do not yet quantify a universal page-load speedup.
+
+- Back/Forward now uses WebView2's native navigation history and back-forward cache where available, preserving page state and avoiding forced reloads. Suspended tabs have an HTTPS navigation fallback.

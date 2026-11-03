@@ -462,21 +462,45 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             activated(&app)?;
         }
         "back" | "forward" => {
-            let delta: isize = if name=="back" {-1} else {1};
+            // Let WebView2 use its own BFCache/history instead of reloading the URL.
+            // This preserves scroll position, page state, and avoids repeat requests.
+            let back = name == "back";
             let target = {
                 let state = app.state::<Mutex<Browser>>();
-                let mut b = state.lock().map_err(|e|e.to_string())?;
+                let mut b = state.lock().map_err(|e| e.to_string())?;
                 let tab = b.active_mut().ok_or("No tab")?;
-                let next = tab.at as isize + delta;
+                let next = tab.at as isize + if back { -1 } else { 1 };
                 if next < 0 || next as usize >= tab.history.len() { None }
                 else {
                     tab.at = next as usize;
-                    Some((tab.id,tab.history[tab.at].clone()))
+                    let url = tab.history[tab.at].clone();
+                    let view = tab.view.clone();
+                    tab.url = url.clone();
+                    tab.title = title_for(&url);
+                    Some((tab.id, url, view))
                 }
             };
-            if let Some((id,url))=target {
-                let parsed = if url==HOME {None} else {Some(tauri::Url::parse(&url).map_err(|e| e.to_string())?)};
-                navigate_tab(&app,id,parsed,false)?;
+            if let Some((id, url, label)) = target {
+                if url == HOME {
+                    navigate_tab(&app, id, None, false)?;
+                } else {
+                    let mut used_native_history = false;
+                    if let Some(label) = label {
+                        if let Some(view) = app.get_webview(&label) {
+                            let navigated = if back { view.go_back() } else { view.go_forward() };
+                            used_native_history = navigated.is_ok();
+                        }
+                    }
+                    if !used_native_history {
+                        // Suspended/closed tabs or unsupported browser history
+                        // fall back to ordinary validated HTTPS navigation.
+                        let dest = tauri::Url::parse(&url).map_err(|e| e.to_string())?;
+                        if dest.scheme() != "https" { return Err("Unsafe history URL".into()); }
+                        navigate_tab(&app, id, Some(dest), false)?;
+                    } else {
+                        notify(&app);
+                    }
+                }
             }
         }
         "reload" => {
