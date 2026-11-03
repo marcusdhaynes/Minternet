@@ -3,6 +3,9 @@ package app.minternet.browser;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.os.Bundle;
+import android.os.Build;
+import android.content.Intent;
+import android.webkit.WebStorage;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.Bitmap;
@@ -33,7 +36,8 @@ import android.view.KeyEvent;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class MainActivity extends Activity {
+public class MainActivity extends Activity {
+    private boolean isolatedPrivate=false;
     private static final int BG=0xff111827;
     private static final int SURFACE=0xff1e293b;
     private static final int ACCENT=0xffb9b7ff;
@@ -71,8 +75,23 @@ public final class MainActivity extends Activity {
     }
 
     @Override public void onCreate(Bundle savedInstanceState) {
+        // Android WebView stores cookies per *process*, not per tab. Isolate the
+        // private Activity into a dedicated process and separate data directory.
+        // Must happen before invoking any other WebView API in this process.
+        isolatedPrivate=this instanceof PrivateActivity;
+        if(isolatedPrivate && Build.VERSION.SDK_INT>=28) {
+            WebView.setDataDirectorySuffix("minternet-private");
+        }
         super.onCreate(savedInstanceState);
-        getWindow().setStatusBarColor(BG);
+        if(isolatedPrivate && Build.VERSION.SDK_INT<28) {
+            finish(); // no safe private profile on this Android version
+            return;
+        }
+        if(isolatedPrivate) {
+            CookieManager.getInstance().removeAllCookies(null);
+            WebStorage.getInstance().deleteAllData();
+        }
+        getWindow().setStatusBarColor(isolatedPrivate?0xff27203e:BG);
         getWindow().setNavigationBarColor(BG);
         WebView.setWebContentsDebuggingEnabled(false);
         LinearLayout root=new LinearLayout(this);
@@ -108,7 +127,7 @@ public final class MainActivity extends Activity {
         controls.addView(address,new LinearLayout.LayoutParams(0,dp(38),1));
         Button go=button("→","Go");
         Button add=button("+","New tab");
-        Button privateButton=button("◈","Private mode information");
+        Button privateButton=button("◈",isolatedPrivate?"Return to normal browser":"Open isolated private window");
         controls.addView(go);controls.addView(add);controls.addView(privateButton);
         root.addView(controls,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(42)));
         content=new FrameLayout(this);
@@ -123,11 +142,35 @@ public final class MainActivity extends Activity {
             navigate(address.getText().toString());return true;
         });
         add.setOnClickListener(v->newTab("about:blank",true));
-        privateButton.setOnClickListener(v->new AlertDialog.Builder(this)
-            .setTitle("Private sessions not available yet")
-            .setMessage("Android WebView shares browser storage by default. Minternet will not label a tab private until an isolated browsing profile is implemented and tested.")
-            .setPositiveButton("OK",null).show());
-        newTab("about:blank",true);
+        privateButton.setOnClickListener(v->{
+            if(isolatedPrivate) {
+                // The previously opened normal browser remains untouched.
+                finish();
+                return;
+            }
+            if(Build.VERSION.SDK_INT<28) {
+                new AlertDialog.Builder(this)
+                    .setTitle("Private mode requires Android 9+")
+                    .setMessage("Android WebView data-directory isolation requires Android 9 (API 28) or newer.")
+                    .setPositiveButton("OK",null).show();
+                return;
+            }
+            // Creating a new Activity in a dedicated process is necessary;
+            // ordinary WebView tabs share persistent cookies and site storage.
+            String activeUrl=current()==null?"about:blank":current().url;
+            if(!"about:blank".equals(activeUrl) && !activeUrl.startsWith("https://")) activeUrl="about:blank";
+            Intent intent=new Intent(this,PrivateActivity.class);
+            intent.putExtra("url",activeUrl);
+            startActivity(intent);
+        });
+        if(isolatedPrivate) {
+            privateButton.setText("◈");
+            privateButton.setContentDescription("Close isolated private window");
+            address.setHint("ISOLATED PRIVATE • HTTPS search or address");
+        }
+        String startUrl=isolatedPrivate?getIntent().getStringExtra("url"):null;
+        if(startUrl==null || (!"about:blank".equals(startUrl) && !startUrl.startsWith("https://"))) startUrl="about:blank";
+        newTab(startUrl,true);
     }
 
     private BrowserTab current() {
@@ -291,9 +334,20 @@ public final class MainActivity extends Activity {
     @Override protected void onDestroy() {
         for(BrowserTab tab:new ArrayList<>(tabs)){
             if(tab.web.getParent() instanceof ViewGroup)((ViewGroup)tab.web.getParent()).removeView(tab.web);
+            if(isolatedPrivate) {
+                tab.web.clearHistory();
+                tab.web.clearCache(true);
+            }
             tab.web.destroy();
         }
         tabs.clear();
+        if(isolatedPrivate) {
+            // Best effort: clear private cookies/storage at session end.
+            // WebView may still leave recoverable filesystem traces after a crash.
+            CookieManager.getInstance().removeAllCookies(null);
+            WebStorage.getInstance().deleteAllData();
+            CookieManager.getInstance().flush();
+        }
         super.onDestroy();
     }
 }
