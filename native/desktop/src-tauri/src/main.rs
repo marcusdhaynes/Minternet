@@ -109,6 +109,11 @@ impl Browser {
 // Only non-private, HTTPS pinned pages survive application restarts.
 // The file is in Minternet's own user profile, never beside the single EXE.
 fn pinned_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    // CI smoke uses an isolated file so it never alters the user's pins.
+    if std::env::args().any(|a|a=="--minternet-pin-smoke"||
+                               a=="--minternet-pin-reopen-smoke") {
+        return Ok(std::env::temp_dir().join("minternet-ci-pinned-tabs.v1.json"));
+    }
     let dir=app.path().app_data_dir().map_err(|e|e.to_string())?;
     Ok(dir.join("pinned-tabs.v1.json"))
 }
@@ -546,6 +551,31 @@ fn browser_snapshot(app: tauri::AppHandle) -> Result<Snapshot,String> { snapshot
 #[tauri::command]
 async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Result<Value, String> {
     match name.as_str() {
+        "pin-smoke-proof" => {
+            if !std::env::args().any(|a|a=="--minternet-pin-smoke"||
+                                        a=="--minternet-pin-reopen-smoke") {
+                return Err("Pin test is not enabled".into());
+            }
+            let phase=value.get("phase").and_then(Value::as_str).ok_or("Missing phase")?;
+            let state=app.state::<Mutex<Browser>>();
+            let browser=state.lock().map_err(|e|e.to_string())?;
+            let valid=match phase {
+                "pinned"=>browser.tabs.iter().any(|t|t.pinned&&t.id==1)&&
+                    browser.active_id==1&&value.get("pinRendered").and_then(Value::as_bool)==Some(true),
+                "restored"=>browser.tabs.len()==1&&browser.tabs[0].pinned&&
+                    browser.active_id==browser.tabs[0].id,
+                "tabless"=>browser.tabs.is_empty()&&browser.active_id==0&&
+                    value.get("homeVisible").and_then(Value::as_bool)==Some(true),
+                "new-first"=>browser.tabs.len()==1&&browser.active_id!=0&&
+                    !browser.tabs[0].pinned,
+                _=>false
+            };
+            if !valid{return Err(format!("Native pinned-tab {phase} invariant failed"))}
+            let marker=std::env::temp_dir()
+                .join(format!("minternet-pin-{}-{phase}.ok",std::process::id()));
+            std::fs::write(marker,phase).map_err(|e|e.to_string())?;
+            return Ok(json!({"ok":true}));
+        }
         "pointer-smoke-proof" => {
             if !std::env::args().any(|a|a=="--minternet-pointer-smoke") {
                 return Err("Tab drag proof unavailable outside UI smoke".into());
@@ -968,7 +998,7 @@ fn main() {
             // Automated tests use a deterministic fresh session. Real users
             // restore their pinned pages or start with a tabless home.
             let smoke=std::env::args().any(|a|a.starts_with("--minternet-")&&a.ends_with("-smoke"));
-            if smoke {
+            if smoke && !std::env::args().any(|a|a=="--minternet-pin-reopen-smoke") {
                 let store=app.state::<Mutex<Browser>>();
                 let mut b=store.lock().map_err(|e|e.to_string())?;
                 b.add(false)?;
@@ -998,6 +1028,8 @@ fn main() {
             let search_smoke = std::env::args().any(|a| a == "--minternet-search-smoke");
             let pointer_smoke = std::env::args().any(|a| a == "--minternet-pointer-smoke");
             let rapid_smoke = std::env::args().any(|a| a == "--minternet-rapid-ui-smoke");
+            let pin_smoke = std::env::args().any(|a| a == "--minternet-pin-smoke");
+            let pin_reopen_smoke = std::env::args().any(|a| a == "--minternet-pin-reopen-smoke");
             window.add_child(
                 WebviewBuilder::new("chrome",WebviewUrl::App("index.html".into()))
                     .on_page_load(move |view, event| {
@@ -1046,6 +1078,34 @@ fn main() {
                                     if (!saved) return;
                                     await window.minternet?.command('bookmarks-smoke-proof', JSON.parse(saved));
                                   }, 550);
+                                "#);
+                            } else if pin_smoke {
+                                let _ = view.eval(r#"
+                                  setTimeout(async () => {
+                                    const api=window.minternet;
+                                    const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+                                    await api.command('navigate','https://example.com');
+                                    await api.command('pin',1);
+                                    await sleep(400);
+                                    const rendered=!!document.querySelector('.tab[data-tab-id="1"].pinned-tab');
+                                    await api.command('pin-smoke-proof',{phase:'pinned',pinRendered:rendered});
+                                  },550);
+                                "#);
+                            } else if pin_reopen_smoke {
+                                let _ = view.eval(r#"
+                                  setTimeout(async () => {
+                                    const api=window.minternet;
+                                    const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+                                    await api.command('pin-smoke-proof',{phase:'restored'});
+                                    await api.command('unpin',1);
+                                    await api.command('close',1);
+                                    await sleep(450);
+                                    const visible=!document.getElementById('homeScreen').hidden;
+                                    await api.command('pin-smoke-proof',{phase:'tabless',homeVisible:visible});
+                                    await api.command('navigate','minternet new home page query');
+                                    await sleep(350);
+                                    await api.command('pin-smoke-proof',{phase:'new-first'});
+                                  },550);
                                 "#);
                             } else if rapid_smoke {
                                 let _ = view.eval(r#"
