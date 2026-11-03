@@ -1,0 +1,71 @@
+name: Publish verified Windows download to GitHub Releases
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-portable-release.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download previously tested portable EXE from successful Windows build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          gh run download 41580589769 --repo "$GITHUB_REPOSITORY" \
+            --name Minternet-Portable-Windows-x64 --dir release
+          test -f release/Minternet-Portable-x64.exe
+      - name: Verify exact tested binary and produce SHA256 checksum
+        run: |
+          set -euo pipefail
+          echo "11dc1b6570391363ca2d0eb979f2f9165921435f15588f63b1495e88a4e3c4a4  release/Minternet-Portable-x64.exe" | sha256sum --check
+          test "$(stat -c%s release/Minternet-Portable-x64.exe)" -eq 9098752
+          (
+            cd release
+            sha256sum Minternet-Portable-x64.exe > Minternet-Portable-x64.exe.sha256
+          )
+          echo "Verified Windows executable: 9,098,752 bytes" >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish GitHub Release assets with permanent public URLs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=v0.3.0-bookmarks-preview
+          cat > release-notes.md <<'NOTES'
+          ## Minternet Portable — Windows x64
+
+          Single-file Windows EXE, 9.10 MB. No installer or Program Files writes.
+          Contains compact Settings, bookmark bar toggle, nested folders and
+          subfolders, optional folder names, emoji and custom image icons.
+
+          This is the exact binary from successful GitHub Actions Windows
+          run 41580589769. Checks include native website navigation, warmed
+          tabs, folder creation, and bookmark persistence after restart.
+
+          **Unsigned development preview.** Windows SmartScreen may warn.
+          Uses the existing Windows WebView2 runtime and maintains normal
+          browser profile/cache data in Windows.
+
+          Tor, full Firefox/Chrome extension support, and independent
+          security auditing are not included.
+          NOTES
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" release/Minternet-Portable-x64.exe release/Minternet-Portable-x64.exe.sha256 \
+              --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" \
+              release/Minternet-Portable-x64.exe release/Minternet-Portable-x64.exe.sha256 \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Minternet Portable for Windows — Bookmarks Preview" \
+              --notes-file release-notes.md --prerelease --target "$GITHUB_SHA"
+          fi
+          echo "### Direct download" >> "$GITHUB_STEP_SUMMARY"
+          echo "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/Minternet-Portable-x64.exe" >> "$GITHUB_STEP_SUMMARY"
