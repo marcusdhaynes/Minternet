@@ -16,7 +16,7 @@
     red:'#ea5967',orange:'#f39b52',yellow:'#f1ce59',green:'#65c98a',blue:'#6b9ff0',purple:'#ad8df6',pink:'#e889c9',white:'#f2f0f8',black:'#202235',violet:'#ad9cf9',teal:'#69d4c9',amber:'#e8c16d',slate:'#a1adbf'
   };
   function persist() {
-    try {localStorage.setItem(KEY,model.serialize(state));}
+    try {const stored=JSON.parse(model.serialize(state));stored.slots=latest.tabs.filter(t=>!t.private).map(t=>state.assignments[String(t.id)]||null);localStorage.setItem(KEY,JSON.stringify(stored));}
     catch { window.minternetToast?.('Cannot save tab groups locally.');}
     repaint();
   }
@@ -191,7 +191,7 @@
     latest=data;
     if(state.restoredSlots){
       // Native session restores in the saved tab order; never reuse old tab IDs.
-      data.tabs.forEach((tab,index)=>{if(!tab.private&&!tab.pinned&&model.get(state,state.restoredSlots[index]))model.assign(state,tab.id,state.restoredSlots[index]);});
+      data.tabs.filter(tab=>!tab.private).forEach((tab,index)=>{if(!tab.pinned&&model.get(state,state.restoredSlots[index]))model.assign(state,tab.id,state.restoredSlots[index]);});
       state.restoredSlots=null;
     }
     model.prune(state,data.tabs.map(t=>t.id));
@@ -206,7 +206,7 @@
     if(lastRenderKey===signature)return;
     lastRenderKey=signature;
     // Save the current slot order so group membership survives native restarts.
-    try {localStorage.setItem(KEY,model.serialize(state));}catch{}
+    try {const stored=JSON.parse(model.serialize(state));stored.slots=data.tabs.filter(t=>!t.private).map(t=>state.assignments[String(t.id)]||null);localStorage.setItem(KEY,JSON.stringify(stored));}catch{}
     const items=[];
     // Chrome/Firefox-style pinned tabs precede groups and show no close X.
     for(const tab of model.sortedTabs(state,data.tabs).filter(t=>t.pinned)){
