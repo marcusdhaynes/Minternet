@@ -11,7 +11,7 @@
   const makeId = () => typeof crypto !== 'undefined' && crypto.randomUUID
     ? crypto.randomUUID() : 'group-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
   const name = value => typeof value === 'string' ? value.trim().slice(0, 42) : '';
-  const color = value => typeof value === 'string' && (/^#[0-9a-f]{6}$/i.test(value) || colors.includes(value)) ? value : 'purple';
+  const color = value => typeof value === 'string' && (/^#[0-9a-f]{6}$/i.test(value) || colors.includes(value)) ? value : 'violet';
   const blank = () => ({ version: 1, groups: [], assignments: Object.create(null), order: [] });
   function hydrate(json) {
     let raw;
