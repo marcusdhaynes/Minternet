@@ -43,6 +43,7 @@ jobs:
           test "$BRANCH" = main
           test "$SRC" = "$GITHUB_REPOSITORY"
           echo "SHA=$SHA" >> "$GITHUB_ENV"
+          echo "SOURCE_RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
           mkdir -p release
           gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
             --name Minternet-Portable-Windows-x64 --dir release
@@ -57,6 +58,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # Multiple Windows jobs may finish out of order. Never publish an
+          # older successful build over a newer one from the same main branch.
+          LATEST=$(gh run list --repo "$GITHUB_REPOSITORY" \
+            --workflow native-windows.yml --branch main \
+            --limit 40 --json databaseId,conclusion \
+            | jq -r '[.[] | select(.conclusion == "success")][0].databaseId')
+          if [ "$SOURCE_RUN_ID" != "$LATEST" ]; then
+            echo "Skipping older Windows run $SOURCE_RUN_ID (latest pass: $LATEST)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           TAG=v0.4.0-native-menus-tab-groups
           cat > notes.md <<'NOTES'
           ## Minternet Portable — Native Menus & Tab Groups
