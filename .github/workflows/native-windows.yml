@@ -31,6 +31,13 @@ jobs:
         run: node --check ../../ui/native-bridge.js
       - name: Build installer using installed WebView2 runtime
         run: npm run build
+      - name: Measure unpacked native app executable
+        shell: pwsh
+        run: |
+          $binary = Get-Item "src-tauri/target/release/minternet_native.exe"
+          $bytes = $binary.Length
+          "Minternet unpacked native EXE: $bytes bytes" >> $env:GITHUB_STEP_SUMMARY
+          if ($bytes -ge 50000000) { throw "Native executable exceeds 50,000,000 bytes" }
       - name: Enforce under 50MB Windows installer
         shell: pwsh
         run: |
