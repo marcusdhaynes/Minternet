@@ -793,3 +793,51 @@ body.tab-dragging .tab-drag-source {opacity:.48;box-shadow:inset 0 0 0 1px #aab5
 .vault-password-row{display:flex;align-items:center;gap:4px;}
 .vault-password-row input{min-width:0;flex:1;}
 .vault-password-row button{flex:none;font-size:9px;padding:5px;border-radius:5px;}
+
+/* One continuous tinted shelf behind each expanded group's tabs, with an
+   unmistakable rounded right edge extending past the final member. */
+.tabs .group-chip.group-expanded {
+  margin-right:0;
+  border-right-color:color-mix(in srgb,var(--group-accent) 25%,#28344a);
+  border-radius:6px 3px 0 0;
+}
+.tabs .tab.group-member {
+  background:color-mix(in srgb,var(--group-accent) 14%,#192239);
+  border-top:1px solid color-mix(in srgb,var(--group-accent) 43%,#28344a);
+  border-left:0;
+  border-radius:2px 2px 0 0;
+  position:relative;
+  isolation:isolate;
+}
+.tabs .tab.group-member::before {
+  content:"";
+  position:absolute;
+  z-index:-1;
+  pointer-events:none;
+  left:-2px;
+  top:-1px;
+  bottom:0;
+  width:3px;
+  background:color-mix(in srgb,var(--group-accent) 14%,#192239);
+  border-top:1px solid color-mix(in srgb,var(--group-accent) 43%,#28344a);
+}
+.tabs .tab.group-member.selected {
+  background:color-mix(in srgb,var(--group-accent) 23%,#313a51);
+  box-shadow:inset 0 1px color-mix(in srgb,var(--group-accent) 68%,transparent);
+}
+.tabs .tab.group-member:hover {
+  background:color-mix(in srgb,var(--group-accent) 24%,#202a3e);
+}
+.tabs .group-end-cap {
+  box-sizing:border-box;
+  align-self:flex-end;
+  flex:0 0 12px;
+  width:12px;
+  height:20px;
+  margin-left:-2px;
+  border-top:1px solid color-mix(in srgb,var(--group-accent) 43%,#28344a);
+  border-right:1px solid color-mix(in srgb,var(--group-accent) 43%,#28344a);
+  border-radius:0 7px 0 0;
+  background:color-mix(in srgb,var(--group-accent) 14%,#192239);
+  pointer-events:none;
+}
