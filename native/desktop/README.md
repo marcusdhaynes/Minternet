@@ -12,3 +12,13 @@ The local navigation chrome occupies the full window on a blank tab, then shrink
 
 ## Limitations
 Normal browsing persists cookies/cache under Windows app data; no browser can operate fully without the OS web engine and its runtime dependencies. No Tor anonymity, full Chrome/Firefox add-on support, independent security audit or verified signed auto-updates yet.
+
+## Turbo responsiveness (0.4 preview)
+
+- Cached layout signature avoids resizing 35 potential website views on every navigation.
+- Tab visibility switches operate on only the previous and next view.
+- Identical browser-state snapshots are suppressed before the native-to-UI IPC channel.
+- Focusing the address/search input on an empty tab warms one browser control **without fetching any web address**; Enter navigates using the already-created control.
+- Existing WebView2 caching, persistent normal-session storage, GPU acceleration and process isolation are preserved. Nothing disables TLS, certificate validation, browser safety features or site privacy protections.
+
+These optimizations reduce Minternet's overhead, not the destination site's network latency or JavaScript workload. Automated smoke tests verify real in-app navigation, but do not yet quantify a universal page-load speedup.

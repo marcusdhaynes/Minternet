@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::sync::Mutex;
+use std::{sync::Mutex, collections::HashSet};
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{
@@ -51,6 +51,7 @@ struct Browser {
     active_id: u32,
     next_id: u32,
     last_notified: Option<Snapshot>,
+    warming: HashSet<u32>,
 }
 
 #[derive(Default)]
@@ -69,6 +70,7 @@ impl Browser {
             active_id: 1,
             next_id: 2,
             last_notified: None,
+            warming: HashSet::new(),
         }
     }
     fn active(&self) -> Option<&Tab> {
@@ -250,14 +252,14 @@ fn update_from_site(app: &tauri::AppHandle, id: u32, url: &str) {
     notify(app);
 }
 
-fn create_webview(app: &tauri::AppHandle, id: u32, url: tauri::Url, private: bool) -> Result<(), String> {
+fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: bool) -> Result<(), String> {
     let Some(window) = app.get_window("main") else { return Err("Missing window".into()) };
     let label = format!("tab-{id}");
     let (width, height) = dimensions(&window)?;
     let for_load = app.clone();
     let for_title = app.clone();
     let for_popup = app.clone();
-    let builder = WebviewBuilder::new(label.clone(), WebviewUrl::External(url))
+    let builder = WebviewBuilder::new(label.clone(), url)
         .incognito(private)
         .on_navigation(|url| url.scheme() == "https")
         .on_permission_request(|_view, _kind| PermissionResponse::Deny)
@@ -306,11 +308,49 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: tauri::Url, private: boo
     Ok(())
 }
 
+// Prepare one lightweight WebView2 controller only after the user focuses a
+// blank tab's address input. This does not connect to sites or leak typed URLs.
+fn prepare_active(app: &tauri::AppHandle) -> Result<(), String> {
+    let candidate = {
+        let store = app.state::<Mutex<Browser>>();
+        let mut b = store.lock().map_err(|e| e.to_string())?;
+        let Some(tab) = b.active() else { return Ok(()) };
+        if tab.url != HOME || tab.view.is_some() || b.warming.contains(&tab.id) {
+            return Ok(());
+        }
+        let (id, private) = (tab.id, tab.private);
+        b.warming.insert(id);
+        (id, private)
+    };
+    let (id, private) = candidate;
+    let created = create_webview(app, id, WebviewUrl::App("warmup.html".into()), private);
+    let dest = {
+        let store = app.state::<Mutex<Browser>>();
+        let mut b = store.lock().map_err(|e| e.to_string())?;
+        b.warming.remove(&id);
+        b.tabs.iter().find(|t| t.id == id).map(|t| t.url.clone())
+    };
+    created?;
+    let Some(view) = app.get_webview(&format!("tab-{id}")) else { return Ok(()) };
+    match dest {
+        Some(url) if url != HOME => {
+            // Navigation may have arrived before warmup completed.
+            view.navigate(tauri::Url::parse(&url).map_err(|e| e.to_string())?)
+                .map_err(|e| e.to_string())?;
+            display_active(app);
+        }
+        Some(_) => { let _ = view.hide(); }
+        None => { let _ = view.close(); }
+    }
+    Ok(())
+}
+
 fn navigate_tab(app: &tauri::AppHandle, id: u32, url: Option<tauri::Url>, append: bool) -> Result<(), String> {
     let str_url = url.as_ref().map(|u| u.as_str()).unwrap_or(HOME).to_string();
-    let (existing, private) = {
+    let (existing, private, warming) = {
         let state = app.state::<Mutex<Browser>>();
         let mut browser = state.lock().map_err(|e| e.to_string())?;
+        let warming = browser.warming.contains(&id);
         let tab = browser.tabs.iter_mut().find(|t| t.id == id).ok_or("Tab not found")?;
         if append && tab.url != str_url {
             tab.history.truncate(tab.at + 1);
@@ -319,17 +359,22 @@ fn navigate_tab(app: &tauri::AppHandle, id: u32, url: Option<tauri::Url>, append
         }
         tab.url = str_url.clone();
         tab.title = title_for(&str_url);
-        (tab.view.clone(), tab.private)
+        (tab.view.clone(), tab.private, warming)
     };
     if let Some(url) = url {
+        if warming && existing.is_none() {
+            // Prepare command will navigate the controller after it is ready.
+            display_active(app);
+            return Ok(());
+        }
         if let Some(label) = existing {
             if let Some(view) = app.get_webview(&label) {
                 view.navigate(url).map_err(|e| e.to_string())?;
             } else {
-                create_webview(app, id, url, private)?;
+                create_webview(app, id, WebviewUrl::External(url), private)?;
             }
         } else {
-            create_webview(app, id, url, private)?;
+            create_webview(app, id, WebviewUrl::External(url), private)?;
         }
     } else if let Some(label) = existing {
         if let Some(view) = app.get_webview(&label) { let _ = view.close(); }
@@ -361,6 +406,7 @@ fn browser_snapshot(app: tauri::AppHandle) -> Result<Snapshot,String> { snapshot
 #[tauri::command]
 async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Result<Value, String> {
     match name.as_str() {
+        "prepare-tab" => { prepare_active(&app)?; }
         "new" | "new-private" | "new-url" => {
             let private = name == "new-private";
             let id = {

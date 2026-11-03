@@ -104,10 +104,23 @@ byId('homeSearchForm').addEventListener('submit', event => {
   const q = byId('homeSearch').value;
   if (q.trim()) command('navigate', q);
 });
+// Warm the native renderer while the user begins typing. Nothing is fetched
+// until Enter; no speculative website requests, DNS prefetch, or privacy leak.
+let warmTimer;
+function prepareBlankTab() {
+  if (!window.__TAURI__) return;
+  clearTimeout(warmTimer);
+  warmTimer = setTimeout(() => {
+    const active = snapshot.tabs.find(t => t.id === snapshot.activeId);
+    if (active?.url === 'about:blank') void api.command('prepare-tab').catch(() => {});
+  }, 75);
+}
 byId('address').addEventListener('focus', event => {
   addressFocused = true;
   event.target.select();
+  prepareBlankTab();
 });
+byId('homeSearch').addEventListener('focus', prepareBlankTab);
 byId('address').addEventListener('blur', () => {
   addressFocused = false;
   const active = snapshot.tabs.find(t => t.id === snapshot.activeId);
