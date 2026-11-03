@@ -132,6 +132,12 @@ fn title_for(url: &str) -> String {
 }
 
 fn parse_address(text: &str) -> Result<Option<tauri::Url>, String> {
+    parse_address_with_engine(text, "google")
+}
+
+// Provider is selected from a strict allowlist: untrusted website content
+// cannot supply a search URL or inject a different navigation scheme.
+fn parse_address_with_engine(text: &str, engine: &str) -> Result<Option<tauri::Url>, String> {
     let s = text.trim();
     if s.is_empty() || s == HOME { return Ok(None); }
     if s.len() > 4096 { return Err("Address too long".into()); }
@@ -150,7 +156,15 @@ fn parse_address(text: &str) -> Result<Option<tauri::Url>, String> {
               !s.contains(':') && !s.starts_with('.') {
         format!("https://{s}")
     } else {
-        format!("https://duckduckgo.com/?q={}", percent_encode_search(s))
+        let (base,query_param) = match engine {
+            "duckduckgo" => ("https://duckduckgo.com/?q=", ""),
+            "bing" => ("https://www.bing.com/search?q=", ""),
+            "brave" => ("https://search.brave.com/search?q=", ""),
+            "startpage" => ("https://www.startpage.com/sp/search?query=", ""),
+            "ecosia" => ("https://www.ecosia.org/search?q=", ""),
+            _ => ("https://www.google.com/search?q=", ""),
+        };
+        format!("{base}{query_param}{}", percent_encode_search(s))
     };
     let url = tauri::Url::parse(&candidate).map_err(|e| e.to_string())?;
     if url.scheme() != "https" || url.host_str().is_none() ||
@@ -472,6 +486,22 @@ fn browser_snapshot(app: tauri::AppHandle) -> Result<Snapshot,String> { snapshot
 #[tauri::command]
 async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Result<Value, String> {
     match name.as_str() {
+        "search-smoke-proof" => {
+            if !std::env::args().any(|a|a=="--minternet-search-smoke"){
+                return Err("Search test unavailable outside CI".into());
+            }
+            let engine=value.get("engine").and_then(Value::as_str).ok_or("Missing engine")?;
+            let phrase=value.get("query").and_then(Value::as_str).ok_or("Missing query")?;
+            let expected=parse_address_with_engine(phrase,engine)?
+                .ok_or("Search URL missing")?.to_string();
+            let actual=app.state::<Mutex<Browser>>().lock().map_err(|e|e.to_string())?
+                .active().ok_or("No active tab")?.url.clone();
+            if actual!=expected {return Err(format!("Search routed to {actual}, expected {expected}"))}
+            let marker=std::env::temp_dir()
+                .join(format!("minternet-search-{}-{engine}.ok",std::process::id()));
+            std::fs::write(marker,actual).map_err(|e|e.to_string())?;
+            return Ok(json!({"ok":true}));
+        }
         "window-drag" => {
             // Only trusted local chrome has this IPC bridge.
             let window=app.get_window("main").ok_or("Window unavailable")?;
@@ -628,7 +658,11 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         }
         "navigate" | "home" => {
             let url = if name=="home" { None } else {
-                parse_address(value.as_str().ok_or("Missing address")?)?
+                let address=value.as_str()
+                    .or_else(||value.get("address").and_then(Value::as_str))
+                    .ok_or("Missing address")?;
+                let engine=value.get("searchEngine").and_then(Value::as_str).unwrap_or("google");
+                parse_address_with_engine(address,engine)?
             };
             let id = {
                 let state = app.state::<Mutex<Browser>>();
@@ -795,6 +829,7 @@ fn main() {
             let bookmarks_smoke = std::env::args().any(|a| a == "--minternet-bookmarks-smoke");
             let bookmarks_reopen = std::env::args().any(|a| a == "--minternet-bookmarks-reopen");
             let menus_smoke = std::env::args().any(|a| a == "--minternet-menus-smoke");
+            let search_smoke = std::env::args().any(|a| a == "--minternet-search-smoke");
             let rapid_smoke = std::env::args().any(|a| a == "--minternet-rapid-ui-smoke");
             window.add_child(
                 WebviewBuilder::new("chrome",WebviewUrl::App("index.html".into()))
@@ -874,6 +909,23 @@ fn main() {
                                     await window.minternet?.command('rapid-ui-smoke-proof',{phase:'restore',ui});
                                     await window.minternet?.command('rapid-ui-smoke-stage','after-restore');
                                   },750);
+                                "#);
+                            } else if search_smoke {
+                                let _ = view.eval(r#"
+                                  setTimeout(async () => {
+                                    const phrase='minternet unique smoke phrase';
+                                    const search=window.minternetSearch;
+                                    const form=document.getElementById('addressForm');
+                                    const address=document.getElementById('address');
+                                    const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+                                    for (const engine of ['google','brave']) {
+                                      search.setEngine(engine);
+                                      address.value=phrase;
+                                      form.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
+                                      await sleep(800);
+                                      await window.minternet?.command('search-smoke-proof',{engine,query:phrase});
+                                    }
+                                  },550);
                                 "#);
                             } else if menus_smoke {
                                 let _ = view.eval(r#"
