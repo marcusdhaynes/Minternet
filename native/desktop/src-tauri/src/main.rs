@@ -1190,6 +1190,12 @@ fn main() {
                                 let _ = view.eval(r#"
                                   setTimeout(async () => {
                                     const $ = id => document.getElementById(id);
+                                    // An earlier native-menu smoke hides its test group and
+                                    // persists it in the same WebView2 profile. Restore a
+                                    // visible ungrouped tab before measuring window chrome.
+                                    const state=window.minternetGroups?.getLatest();
+                                    const first=state?.tabs?.[0];
+                                    if(first)window.minternetGroups?.ungroup(first.id);
                                     const row=document.querySelector('.tab-row');
                                     const tab=document.querySelector('.tab');
                                     const group=$('tabGroups'),logo=document.querySelector('.identity');
