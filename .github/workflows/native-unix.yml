@@ -32,6 +32,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: native/desktop/src-tauri -> target
@@ -46,8 +49,8 @@ jobs:
         run: npm install --no-fund --no-audit
       - name: Generate Branded Minternet App Icons
         run: |
-          python3 -m pip install --user --disable-pip-version-check --quiet pillow
-          python3 native/desktop/scripts/generate_icons.py
+          python -m pip install --disable-pip-version-check --quiet pillow
+          python native/desktop/scripts/generate_icons.py
       - name: Compile and bundle system-webview application
         working-directory: native/desktop
         run: npm exec tauri build -- --bundles ${{ matrix.target }}
