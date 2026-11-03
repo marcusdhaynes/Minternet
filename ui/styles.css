@@ -812,7 +812,7 @@ body.tab-dragging .tab-drag-source {opacity:.48;box-shadow:inset 0 0 0 1px #aab5
 .tabs .tab.group-member::before {
   content:"";
   position:absolute;
-  z-index:-1;
+  z-index:0;
   pointer-events:none;
   left:-2px;
   top:-1px;
