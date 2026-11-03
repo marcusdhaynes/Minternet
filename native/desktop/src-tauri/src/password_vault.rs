@@ -133,3 +133,41 @@ pub fn origin(address:&str)->Result<String,String>{
     }
     Ok(url.origin().ascii_serialization())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn encrypted_vault_round_trip_and_wrong_password() {
+        let mut random=[0u8;16];OsRng.fill_bytes(&mut random);
+        let unique=random.iter().map(|x|format!("{x:02x}")).collect::<String>();
+        let file=std::env::temp_dir().join(format!("minternet-vault-test-{unique}.enc"));
+        let mut vault=Vault::default();
+        vault.unlock(&file,"correct horse battery staple",true).unwrap();
+        vault.put("https://example.com".into(),"alice".into(),"a-secret-credential".into(),true).unwrap();
+        vault.save(&file).unwrap();
+        let stored=fs::read(&file).unwrap();
+        assert!(!String::from_utf8_lossy(&stored).contains("a-secret-credential"));
+        assert!(!String::from_utf8_lossy(&stored).contains("alice"));
+        vault.lock();
+        assert!(vault.matching("https://example.com",false,None).is_none());
+        assert!(vault.unlock(&file,"wrong master password",false).is_err());
+        vault.unlock(&file,"correct horse battery staple",false).unwrap();
+        assert_eq!(vault.matching("https://example.com",false,None).unwrap().password,"a-secret-credential");
+        assert!(vault.matching("https://example.org",false,None).is_none());
+        vault.remove("https://example.com","alice").unwrap();
+        vault.save(&file).unwrap();
+        vault.lock();
+        vault.unlock(&file,"correct horse battery staple",false).unwrap();
+        assert!(vault.matching("https://example.com",false,None).is_none());
+        let _=fs::remove_file(&file);
+    }
+    #[test]
+    fn only_exact_https_origins() {
+        assert_eq!(origin("https://example.com/login").unwrap(),"https://example.com");
+        assert_ne!(origin("https://sub.example.com").unwrap(),origin("https://example.com").unwrap());
+        assert!(origin("http://example.com").is_err());
+        assert!(origin("https://user:password@example.com").is_err());
+        assert!(origin("javascript:alert(1)").is_err());
+    }
+}
