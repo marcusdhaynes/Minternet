@@ -120,10 +120,19 @@
     const after=event.clientX>=element.getBoundingClientRect().left+
       element.getBoundingClientRect().width/2;
     const targetGroup=model.findTab(state,targetId);
+    const source=latest.tabs.find(t=>t.id===id);
     model.moveRelative(state,id,targetId,after);
     clearDropState();
-    // Dropping a tab beside an ordinary tab removes it from its group;
-    // beside a grouped tab places it in that group at the chosen position.
+    // Drag into pinned region pins; drag out into normal region unpins.
+    if(target.pinned) {
+      model.assign(state,id,null);
+      if(!source?.pinned){void pin(id,true);}
+      else persist();
+      return true;
+    }
+    if(source?.pinned){void pin(id,false);}
+    // Dropping into another group joins it; dropping beside an ordinary
+    // tab removes grouping without losing the page or introducing a new tab.
     return assign(id,targetGroup?.id||null);
   }
   function dropOutsideGroup(event){
@@ -131,7 +140,9 @@
     if(id===null)return false;
     event.preventDefault();
     event.stopPropagation();
+    const old=latest.tabs.find(t=>t.id===id);
     clearDropState();
+    if(old?.pinned){void pin(id,false);}
     return ungroup(id);
   }
   function acceptDrag(event,element,marker){
