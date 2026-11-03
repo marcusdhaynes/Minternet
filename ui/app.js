@@ -33,7 +33,13 @@ function buildTab(tab, active) {
   choose.addEventListener('click', () => command('activate', tab.id));
   const symbol = document.createElement('span');
   symbol.className = 'tab-symbol';
-  symbol.textContent = tab.pinned ? '◆' :
+  // Compact local site monogram; no third-party favicon requests/leaks.
+  let monogram='◆';
+  if(tab.pinned && tab.url?.startsWith('https://')){
+    try {monogram=new URL(tab.url).hostname.replace(/^www\./,'').charAt(0).toUpperCase()||'◆';}
+    catch {}
+  }
+  symbol.textContent = tab.pinned ? monogram :
     tab.private ? '◈' : (tab.suspended ? '◌' : tab.loading ? '◌' : '◉');
   const text = document.createElement('span');
   text.className = 'tab-text';
@@ -75,7 +81,8 @@ function render(data) {
         (tab.private ? ' private-tab' : '')+(tab.pinned ? ' pinned-tab' : '');
       el.setAttribute('aria-selected', String(activeTab));
       el.title = tab.suspended ? 'Inactive tab (reloads on selection) · ' + tab.url : tab.url;
-      el.querySelector('.tab-symbol').textContent = tab.pinned ? '◆' :
+      el.querySelector('.tab-symbol').textContent = tab.pinned ?
+        (tab.url?.startsWith('https://')?new URL(tab.url).hostname.replace(/^www\./,'').charAt(0).toUpperCase():'◆') :
         tab.private ? '◈' : tab.suspended || tab.loading ? '◌' : '◉';
       el.querySelector('.tab-text').textContent = tab.title || 'New Tab';
     }

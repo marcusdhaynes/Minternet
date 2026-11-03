@@ -73,26 +73,30 @@ jobs:
             echo "Skipping stale Windows binary $SHA; main is $CURRENT" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          TAG=v0.6.0-pointer-tabs-search
+          TAG=v0.7.0-pinned-tabs-menus
           cat > notes.md <<'NOTES'
-          ## Minternet Portable — Pointer Tabs and Default Search
+          ## Minternet Portable — Pinned Tabs and Glass Menus
 
           Single-file Windows x64 EXE under 50 MB; uses Windows WebView2 and
-          saves application/profile data separately. No installer.
+          saves application/browser profile data separately. No installer.
 
-          - M brand icon is far left; Tab Groups icon remains immediately to its right.
-          - Tabs use pointer-driven drag previews and group/ungroup placement,
-            avoiding Windows WebView2's forbidden HTML drag cursor.
-          - Bookmark Bar entries use tight spacing; folders stay accessible.
-          - Removed the bottom Ready to explore status bar.
-          - Removed the Normal button and both Normal/Tor text labels.
-            The remaining Tor icon is informational only; Tor is NOT integrated.
-          - Plain-text address searches use Google automatically, inside Minternet.
-          - Settings: Google, DuckDuckGo, Bing, Brave Search, Startpage, Ecosia.
-            Search preference is local and persists between launches.
-          - Existing bookmarks, folders and tab-group definitions are preserved.
+          - Manage Bookmarks now docks to the far right, even with many bookmarks.
+          - Symmetric spacing above and below the address field and centered Tor icon.
+          - Real pinned tabs: compact icon-only tabs, first in the strip, no close X.
+            Right-click to Pin, Unpin, Duplicate, Move to Group, and Close.
+            Pinned HTTPS tabs restore from the user's local app profile on restart.
+            Private/incognito tab URLs are never included in persisted pins.
+          - Dragging into or out of the pinned area pins/unpins accordingly.
+          - Group collapse/hide never fabricates an empty New Tab. Prefer a
+            pinned tab; otherwise fall back to an existing visible tab or
+            the genuinely tabless home view.
+          - If the home has no active tab, typing an address creates the
+            first real tab on demand.
+          - Tab and group menus have dark, purple-black glass styling.
+            Bookmark-folder popups remain native cascading menus.
 
-          Browser security has NOT received an independent production audit.
+          Tor is informational only and not integrated. This unsigned preview
+          has NOT been independently audited for production security.
 
           Download the EXE under Assets. This is an unsigned development build.
           Windows WebView2 runtime and its normal per-user browser data are separate.
@@ -107,7 +111,7 @@ jobs:
           else
             gh release create "$TAG" \
               release/Minternet-Portable-x64.exe release/Minternet-Portable-x64.exe.sha256 \
-              --title "Minternet Portable — Pointer Tabs and Search Settings" \
+              --title "Minternet Portable — Pinned Tabs and Glass Menus" \
               --notes-file notes.md --prerelease --target "$SHA" \
               --repo "$GITHUB_REPOSITORY"
           fi

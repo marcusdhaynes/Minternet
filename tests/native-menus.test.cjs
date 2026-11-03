@@ -12,7 +12,8 @@ function harness() {
   const sub=bm.add(bookmarks,'folder',root.id,{name:'Projects',icon:'🪐'});
   bm.add(bookmarks,'link',sub.id,{name:'Example',url:'https://example.com'});
   const groups=gm.blank(),g=gm.create(groups,{name:'Research',color:'teal'});
-  const flags={folderEdits:0,groupVisibility:0};
+  const flags={folderEdits:0,groupVisibility:0,tabPins:0};
+  const tabs=[{id:1,title:'Example',url:'https://example.com/',pinned:false}];
   const window={
     MinternetBookmarks:bm,
     minternetBookmarks:{
@@ -24,7 +25,8 @@ function harness() {
       getState:()=>groups, get:id=>gm.get(groups,id), displayName:x=>x.name,
       toggleVisible:id=>{flags.groupVisibility++;gm.update(groups,id,{visible:!gm.get(groups,id).visible})},
       openEditor:()=>{},assign:()=>{},toggleCollapsed:()=>{},removeGroup:()=>{},
-      getLatest:()=>({activeId:1})
+      pin:(id,yes)=>{flags.tabPins++;tabs.find(x=>x.id===id).pinned=yes;},
+      getLatest:()=>({activeId:1,tabs})
     }
   };
   const context={window, document:{getElementById:()=>null},console};
@@ -62,6 +64,15 @@ test('folder menu actions target the correct folder, without executable URLs',()
  assert.equal(h.bookmarks.items[0].children[0].children[0].url,'https://example.com/');
 });
 
+test('context tab menu pins and unpins a real tab without closing it',()=>{
+  const h=harness();
+  const menu=h.window.minternetMenus.inspectTab(1);
+  const pin=menu.find(i=>i.text?.includes('Pin Tab'));
+  assert.ok(pin);
+  pin.action();
+  assert.equal(h.flags.tabPins,1);
+  assert.ok(h.window.minternetMenus.inspectTab(1).some(i=>i.text?.includes('Unpin Tab')));
+});
 test('folder and subfolder context menus do not offer Bookmark This Page',()=>{
  const h=harness();
  for(const id of [h.root.id,h.sub.id]){

@@ -61,3 +61,11 @@ These optimizations reduce Minternet's overhead, not the destination site's netw
 - Plain text entered in the address bar or home search is routed inside the native WebView2 to Google by default; ordinary HTTPS websites remain direct website navigations.
 - Settings > Default Search Engine supports Google, DuckDuckGo, Bing, Brave Search, Startpage, and Ecosia. The trusted chrome stores this under `minternet.search-engine.v1`. Each navigation includes the selected enum, validated by the native backend against its allowlist.
 - The GitHub Pages UI companion is not a fully functional browser and never auto-launches restricted websites in the OS browser.
+
+## Pinned tabs and tabless home (v0.7.0)
+- Pinned tabs are compact, first in the tab strip, and kept out of tab groups. Pin/Unpin are in the tab's new dark-purple custom context menu, with Duplicate and Close options. Dragging across the pinned/ordinary tab boundary pins/unpins without destroying the WebView.
+- Only non-private, valid HTTPS pinned URLs persist locally as `pinned-tabs.v1.json` in Minternet's application data directory. Normal browsing tabs and private tab URLs are not restored. This file is separate from the EXE, as are normal WebView2 profile data.
+- A browser session can have zero tabs. Closing the last tab never creates a replacement. Navigating on the unselected homepage creates a new tab only at that moment.
+- Hiding or collapsing the selected group chooses another pinned tab first, then any visible ordinary tab; if none exists, it deselects rather than synthesizing a tab. All group tabs remain alive.
+- The Manage Bookmarks button is right-docked. Toolbar's 22px tab row / 30px address row now give equal 3px vertical clearance above and below the 24px address bar.
+- Tab/group menus use custom glass styling; folder menus keep Windows-native cascading behavior. Opening a custom tab menu temporarily covers the website without reloading or closing its WebView.
