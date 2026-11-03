@@ -472,6 +472,36 @@ fn browser_snapshot(app: tauri::AppHandle) -> Result<Snapshot,String> { snapshot
 #[tauri::command]
 async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Result<Value, String> {
     match name.as_str() {
+        "bookmarks-smoke-proof" => {
+            // Only enabled for CI's explicit smoke launch; not available during
+            // ordinary browsing. Validate nested unnamed folders persisted by
+            // the browser UI through its actual DOM form/event handlers.
+            if !std::env::args().any(|a| a == "--minternet-bookmarks-smoke") {
+                return Err("Unavailable outside bookmark smoke test".into());
+            }
+            let entries = value.get("items").and_then(Value::as_array).ok_or("Bookmark data missing")?;
+            let root = entries.iter().find(|x|
+                x.get("kind").and_then(Value::as_str) == Some("folder") &&
+                x.get("name").and_then(Value::as_str) == Some("") &&
+                x.get("icon").and_then(Value::as_str) == Some("🌿")
+            ).ok_or("Root folder missing")?;
+            let children = root.get("children").and_then(Value::as_array).ok_or("Child folder list missing")?;
+            if !children.iter().any(|x|
+                x.get("kind").and_then(Value::as_str) == Some("folder") &&
+                x.get("name").and_then(Value::as_str) == Some("") &&
+                x.get("icon").and_then(Value::as_str) == Some("🪐")
+            ) {
+                return Err("Nested unnamed emoji-icon folder missing".into());
+            }
+            if value.get("visible").and_then(Value::as_bool) != Some(true) {
+                return Err("Bookmark Bar toggle not persisted".into());
+            }
+            let marker = std::env::temp_dir()
+                .join(format!("minternet-bookmarks-{}.ok", std::process::id()));
+            std::fs::write(marker, "Bookmark Bar and nested unnamed folders saved")
+                .map_err(|e| e.to_string())?;
+            return Ok(json!({"ok":true}));
+        }
         "bookmark-bar-visibility" => {
             let visible = value.as_bool().ok_or("Bookmark bar setting must be true or false")?;
             {
@@ -677,6 +707,7 @@ fn main() {
             // not invoke the operating system's default browser.
             let smoke = std::env::args().any(|a| a == "--minternet-smoke");
             let turbo_smoke = std::env::args().any(|a| a == "--minternet-turbo-smoke");
+            let bookmarks_smoke = std::env::args().any(|a| a == "--minternet-bookmarks-smoke");
             window.add_child(
                 WebviewBuilder::new("chrome",WebviewUrl::App("index.html".into()))
                     .on_page_load(move |view, event| {
@@ -690,6 +721,32 @@ fn main() {
                                 let _ = view.eval(
                                     "setTimeout(async () => { await window.minternet?.command('prepare-tab'); await window.minternet?.command('navigate', 'https://example.com'); }, 200)"
                                 );
+                            } else if bookmarks_smoke {
+                                // Exercise real chrome UI actions without touching remote
+                                // websites or requiring a physical Windows installation.
+                                let _ = view.eval(r#"
+                                  setTimeout(async () => {
+                                    const $ = id => document.getElementById(id);
+                                    $('settings').click();
+                                    $('bookmarkBarToggle').checked = false;
+                                    $('bookmarkBarToggle').dispatchEvent(new Event('change'));
+                                    $('bookmarkBarToggle').checked = true;
+                                    $('bookmarkBarToggle').dispatchEvent(new Event('change'));
+                                    $('bookmarkSettingsFolder').click();
+                                    $('bookmarkIcon').value = '🌿';
+                                    $('bookmarkIcon').dispatchEvent(new Event('input'));
+                                    $('bookmarkEditForm').requestSubmit();
+                                    const root = JSON.parse(localStorage.getItem('minternet.bookmark-tree.v1')).items[0];
+                                    if (!root || root.kind !== 'folder') return;
+                                    document.querySelector('#bookmarkItems .bookmark-item').click();
+                                    $('bookmarkFolderNew').click();
+                                    $('bookmarkIcon').value = '🪐';
+                                    $('bookmarkIcon').dispatchEvent(new Event('input'));
+                                    $('bookmarkEditForm').requestSubmit();
+                                    const state = JSON.parse(localStorage.getItem('minternet.bookmark-tree.v1'));
+                                    await window.minternet?.command('bookmarks-smoke-proof', state);
+                                  }, 550);
+                                "#);
                             }
                         }
                     }),
