@@ -311,7 +311,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
 // Prepare one lightweight WebView2 controller only after the user focuses a
 // blank tab's address input. This does not connect to sites or leak typed URLs.
 fn prepare_active(app: &tauri::AppHandle) -> Result<(), String> {
-    let candidate = {
+    let (id, original_private) = {
         let store = app.state::<Mutex<Browser>>();
         let mut b = store.lock().map_err(|e| e.to_string())?;
         let Some(tab) = b.active() else { return Ok(()) };
@@ -322,30 +322,69 @@ fn prepare_active(app: &tauri::AppHandle) -> Result<(), String> {
         b.warming.insert(id);
         (id, private)
     };
-    let (id, private) = candidate;
-    let created = create_webview(app, id, WebviewUrl::App("warmup.html".into()), private);
-    let dest = {
+    let created = create_webview(
+        app, id, WebviewUrl::App("warmup.html".into()), original_private
+    );
+    let current = {
         let store = app.state::<Mutex<Browser>>();
         let mut b = store.lock().map_err(|e| e.to_string())?;
         b.warming.remove(&id);
-        b.tabs.iter().find(|t| t.id == id).map(|t| t.url.clone())
+        b.tabs.iter().find(|t| t.id == id)
+            .map(|t| (t.url.clone(), t.private, b.active_id == id))
     };
-    created?;
+    if let Err(err) = created {
+        // If Enter beat warmup, recover by making the real browser tab normally.
+        if let Some((url, _, _)) = current {
+            if url != HOME {
+                return navigate_tab(
+                    app, id, Some(tauri::Url::parse(&url).map_err(|e| e.to_string())?), false
+                );
+            }
+        }
+        return Err(err);
+    }
+
+    let label = format!("tab-{id}");
+    let Some(view) = app.get_webview(&label) else { return Ok(()) };
+    // A prepared tab may no longer be selected. Never expose a background
+    // controller on top of the currently visible website.
+    let _ = view.hide();
+
+    match current {
+        Some((url, current_private, active)) if current_private != original_private => {
+            // Critical isolation rule: a concurrently switched private tab MUST
+            // NOT reuse a normal-mode controller (or the reverse).
+            let _ = view.close();
+            {
+                let store = app.state::<Mutex<Browser>>();
+                let mut b = store.lock().map_err(|e| e.to_string())?;
+                if let Some(t) = b.tabs.iter_mut().find(|t| t.id == id) {
+                    if t.view.as_deref() == Some(label.as_str()) { t.view = None; }
+                }
+            }
+            if url != HOME {
+                navigate_tab(
+                    app, id, Some(tauri::Url::parse(&url).map_err(|e| e.to_string())?), false
+                )?;
+            } else if active {
+                display_active(app);
+            }
+        }
+        Some((url, _, active)) if url != HOME => {
+            // Enter may have arrived during initialization. The same prepared
+            // controller can now navigate, avoiding a second WebView2 startup.
+            view.navigate(tauri::Url::parse(&url).map_err(|e| e.to_string())?)
+                .map_err(|e| e.to_string())?;
+            if active { display_active(app); }
+        }
+        Some(_) => { /* Empty tab stays hidden until the first navigation. */ }
+        None => { let _ = view.close(); } // Tab was closed while preparing.
+    }
+
     if std::env::args().any(|a| a == "--minternet-turbo-smoke") {
         let marker = std::env::temp_dir()
             .join(format!("minternet-prepared-{}.ok", std::process::id()));
         let _ = std::fs::write(marker, "WebView2 tab created before navigation");
-    }
-    let Some(view) = app.get_webview(&format!("tab-{id}")) else { return Ok(()) };
-    match dest {
-        Some(url) if url != HOME => {
-            // Navigation may have arrived before warmup completed.
-            view.navigate(tauri::Url::parse(&url).map_err(|e| e.to_string())?)
-                .map_err(|e| e.to_string())?;
-            display_active(app);
-        }
-        Some(_) => { let _ = view.hide(); }
-        None => { let _ = view.close(); }
     }
     Ok(())
 }
