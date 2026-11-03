@@ -457,3 +457,28 @@ h1 em { color: #b3bfff; font-family: Georgia, serif; font-weight: 400; letter-sp
 .system-popup-has-child:hover>.system-popup-child,.system-popup-has-child.system-popup-open>.system-popup-child {display:flex;}
 .system-popup-arrow {margin-left:auto;color:#b9c7e9;}
 @media(max-width:600px){.group-editor-panel{left:7px;right:7px;width:auto}.group-chip{max-width:75px}.group-chip-label{max-width:40px}}
+
+/* Native frameless window: this row is the application's only title bar. */
+.tab-row{cursor:default}
+.tab-row .identity{cursor:grab;user-select:none;-webkit-user-select:none}
+.tab-row .identity:active{cursor:grabbing}
+.brand-mark{width:18px;height:18px;display:block;object-fit:contain;flex:none;pointer-events:none;user-select:none}
+.hero-logo{display:grid;place-items:center}
+.hero-logo img{width:76%;height:76%;object-fit:contain;display:block;filter:drop-shadow(0 9px 25px #534bce44)}
+.new-private-tab{align-self:flex-end;height:20px;flex:0 0 23px;width:23px;margin-bottom:1px;color:#c6bdff;-webkit-app-region:no-drag}
+.new-private-tab svg{display:block}
+.new-private-tab:hover{background:#56487a55;color:#fff}
+.mode-symbol-btn{display:grid;place-items:center;flex:0 0 25px;width:25px;min-width:25px;padding:0;height:23px;line-height:1}
+.mode-symbol-btn .mode-logo{width:17px;height:17px;display:block}
+.sr-only{position:absolute!important;clip-path:inset(50%);overflow:hidden;white-space:nowrap;width:1px;height:1px;margin:-1px;border:0;padding:0}
+.bookmark-bar .tab-groups-btn{height:19px;flex:0 0 23px;width:23px;margin:0 5px 0 0;align-self:center;border-right:1px solid #3a4564;border-radius:4px}
+.bookmark-bar .tab-groups-btn svg{width:17px;height:17px}
+:root.settings-visible .bookmark-items{visibility:hidden;pointer-events:none}
+:root.settings-visible .bookmark-bar .tab-groups-btn,:root.settings-visible .bookmark-bar #bookmarkBarManage{opacity:.4;pointer-events:none}
+.ungroup-drop-target{display:none;align-self:end;height:19px;padding:1px 8px;margin:0 2px 1px;flex:none;align-items:center;justify-content:center;border:1px dashed #8d9ac1;border-radius:5px 5px 0 0;color:#e0e7fa;font-size:10px;background:#283754;white-space:nowrap;-webkit-app-region:no-drag}
+body.tab-dragging .ungroup-drop-target{display:flex}
+.ungroup-drop-target.drag-target,.tabs.drag-ungroup-over{background:#4e5f8c;outline:1px solid #c3d4ff}
+.group-chip.drag-target{background:color-mix(in srgb,var(--group-accent) 36%,#1b2436);box-shadow:0 0 0 1px var(--group-accent)}
+.tab.group-drop-target{background:#606d9a66;outline:1px solid var(--group-accent,#9da9dc);outline-offset:-1px}
+.tab.tab-drag-source{opacity:.58}
+@media(max-width:600px){.ungroup-drop-target{padding-inline:5px;font-size:9px}.bookmark-bar .tab-groups-btn{margin-right:3px}}
