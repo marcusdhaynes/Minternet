@@ -288,7 +288,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                     tab.title = title.chars().take(140).collect();
                 }
             }
-            if confirmed_in_app && std::env::args().any(|a| a == "--minternet-smoke") {
+            if confirmed_in_app && std::env::args().any(|a| a == "--minternet-smoke" || a == "--minternet-turbo-smoke") {
                 let marker = std::env::temp_dir()
                     .join(format!("minternet-inapp-{}.ok", std::process::id()));
                 let _ = std::fs::write(marker, "Example Domain loaded in Minternet WebView2");
@@ -331,6 +331,11 @@ fn prepare_active(app: &tauri::AppHandle) -> Result<(), String> {
         b.tabs.iter().find(|t| t.id == id).map(|t| t.url.clone())
     };
     created?;
+    if std::env::args().any(|a| a == "--minternet-turbo-smoke") {
+        let marker = std::env::temp_dir()
+            .join(format!("minternet-prepared-{}.ok", std::process::id()));
+        let _ = std::fs::write(marker, "WebView2 tab created before navigation");
+    }
     let Some(view) = app.get_webview(&format!("tab-{id}")) else { return Ok(()) };
     match dest {
         Some(url) if url != HOME => {
@@ -560,13 +565,21 @@ fn main() {
             // frontend IPC bridge used by address-bar submissions. This does
             // not invoke the operating system's default browser.
             let smoke = std::env::args().any(|a| a == "--minternet-smoke");
+            let turbo_smoke = std::env::args().any(|a| a == "--minternet-turbo-smoke");
             window.add_child(
                 WebviewBuilder::new("chrome",WebviewUrl::App("index.html".into()))
                     .on_page_load(move |view, event| {
-                        if smoke && matches!(event.event(), PageLoadEvent::Finished) {
-                            let _ = view.eval(
-                                "setTimeout(() => window.minternet?.command('navigate', 'https://example.com'), 200)"
-                            );
+                        if matches!(event.event(), PageLoadEvent::Finished) {
+                            if smoke {
+                                let _ = view.eval(
+                                    "setTimeout(() => window.minternet?.command('navigate', 'https://example.com'), 200)"
+                                );
+                            } else if turbo_smoke {
+                                // Verifies a warmed controller can navigate normally.
+                                let _ = view.eval(
+                                    "setTimeout(async () => { await window.minternet?.command('prepare-tab'); await window.minternet?.command('navigate', 'https://example.com'); }, 200)"
+                                );
+                            }
                         }
                     }),
                 LogicalPosition::new(0.0,0.0),
