@@ -49,6 +49,11 @@
   function applyVisibility() {
     $('bookmarkBar').hidden = !data.visible;
     $('bookmarkBarToggle').checked = data.visible;
+    // Keep Tab Groups reachable when the optional Bookmark Bar is hidden.
+    // While visible, the control lives at its requested far-left position.
+    const groupControl=$('tabGroups');
+    if(data.visible)$('bookmarkBar').prepend(groupControl);
+    else document.querySelector('.tab-row').insertBefore(groupControl,$('tabs'));
     document.documentElement.classList.toggle('has-bookmarks', data.visible);
     if (window.__TAURI__) void act('bookmark-bar-visibility', data.visible);
   }
