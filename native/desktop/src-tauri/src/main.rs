@@ -523,12 +523,18 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             let phrase=value.get("query").and_then(Value::as_str).ok_or("Missing query")?;
             let expected=parse_address_with_engine(phrase,engine)?
                 .ok_or("Search URL missing")?.to_string();
-            let actual=app.state::<Mutex<Browser>>().lock().map_err(|e|e.to_string())?
+            // Search engines can redirect through regional consent or bot-check
+            // pages. Verify the *initiated native navigation* rather than the
+            // tab's eventual redirected URL, which is outside browser control.
+            let request=std::env::temp_dir()
+                .join(format!("minternet-search-request-{}-{engine}.txt",std::process::id()));
+            let actual=std::fs::read_to_string(request).map_err(|e|format!("No search request for {engine}: {e}"))?;
+            let active=app.state::<Mutex<Browser>>().lock().map_err(|e|e.to_string())?
                 .active().ok_or("No active tab")?.url.clone();
             let diagnosis=std::env::temp_dir()
                 .join(format!("minternet-search-check-{}-{engine}.txt",std::process::id()));
-            let _=std::fs::write(diagnosis,format!("actual={actual}; expected={expected}"));
-            if actual!=expected {return Err(format!("Search routed to {actual}, expected {expected}"))}
+            let _=std::fs::write(diagnosis,format!("requested={actual}; active={active}; expected={expected}"));
+            if actual!=expected {return Err(format!("Search requested {actual}, expected {expected}"))}
             let marker=std::env::temp_dir()
                 .join(format!("minternet-search-{}-{engine}.ok",std::process::id()));
             std::fs::write(marker,actual).map_err(|e|e.to_string())?;
@@ -694,7 +700,16 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                     .or_else(||value.get("address").and_then(Value::as_str))
                     .ok_or("Missing address")?;
                 let engine=value.get("searchEngine").and_then(Value::as_str).unwrap_or("google");
-                parse_address_with_engine(address,engine)?
+                let target=parse_address_with_engine(address,engine)?;
+                if std::env::args().any(|a|a=="--minternet-search-smoke") && 
+                    matches!(engine,"google"|"brave") {
+                    if let Some(ref target_url)=target {
+                        let path=std::env::temp_dir()
+                            .join(format!("minternet-search-request-{}-{engine}.txt",std::process::id()));
+                        let _=std::fs::write(path,target_url.as_str());
+                    }
+                }
+                target
             };
             let id = {
                 let state = app.state::<Mutex<Browser>>();
