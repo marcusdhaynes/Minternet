@@ -1,0 +1,90 @@
+name: Publish current Minternet Portable Windows download
+on:
+  workflow_run:
+    workflows: ["Minternet Windows portable single EXE (under 50 MB)"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful native Windows build run ID
+        required: true
+        type: string
+permissions:
+  actions: read
+  contents: write
+jobs:
+  release:
+    if: >-
+      (github.event_name == 'workflow_dispatch') ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Fetch only a successful first-party Windows portable artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_RUN_ID: ${{ inputs.run_id }}
+          TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          RUN_ID="$INPUT_RUN_ID"
+          if [ -z "$RUN_ID" ]; then RUN_ID="$TRIGGER_RUN_ID"; fi
+          test -n "$RUN_ID"
+          DETAILS=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID")
+          NAME=$(echo "$DETAILS" | jq -r .name)
+          RESULT=$(echo "$DETAILS" | jq -r .conclusion)
+          BRANCH=$(echo "$DETAILS" | jq -r .head_branch)
+          SRC=$(echo "$DETAILS" | jq -r .head_repository.full_name)
+          SHA=$(echo "$DETAILS" | jq -r .head_sha)
+          test "$NAME" = 'Minternet Windows portable single EXE (under 50 MB)'
+          test "$RESULT" = success
+          test "$BRANCH" = main
+          test "$SRC" = "$GITHUB_REPOSITORY"
+          echo "SHA=$SHA" >> "$GITHUB_ENV"
+          mkdir -p release
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name Minternet-Portable-Windows-x64 --dir release
+          test -f release/Minternet-Portable-x64.exe
+          BYTES=$(stat -c%s release/Minternet-Portable-x64.exe)
+          test "$BYTES" -gt 1000000
+          test "$BYTES" -lt 50000000
+          (cd release && sha256sum Minternet-Portable-x64.exe > Minternet-Portable-x64.exe.sha256)
+          echo "Verified test-passing Windows binary: $BYTES bytes" >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish permanent GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=v0.4.0-native-menus-tab-groups
+          cat > notes.md <<'NOTES'
+          ## Minternet Portable — Native Menus & Tab Groups
+
+          A single Windows x64 EXE using the existing WebView2 runtime. No installer
+          or adjacent application files. The portable package is under 50 MB.
+
+          - Native anchored bookmark-folder popups, cascading subfolders.
+          - Compact tab-group icon, groups with color and collapse/expand.
+          - Bookmark Bar right-click → Tab Groups → show/hide with eye indicator.
+          - Right-click tabs to assign them to groups, or drag tabs onto group chips.
+          - Local bookmark and group-definition persistence.
+
+          Download the EXE under Assets. This is an unsigned development build.
+          Windows WebView2 runtime and its normal per-user browser data are separate.
+          NOT audited or guaranteed compatible with every website.
+          NOTES
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" release/Minternet-Portable-x64.exe \
+              release/Minternet-Portable-x64.exe.sha256 \
+              --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$TAG" --target "$SHA" --notes-file notes.md \
+              --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" \
+              release/Minternet-Portable-x64.exe release/Minternet-Portable-x64.exe.sha256 \
+              --title "Minternet Portable — Native Menus & Tab Groups" \
+              --notes-file notes.md --prerelease --target "$SHA" \
+              --repo "$GITHUB_REPOSITORY"
+          fi
+          echo "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/Minternet-Portable-x64.exe" >> "$GITHUB_STEP_SUMMARY"
