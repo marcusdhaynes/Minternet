@@ -24,7 +24,7 @@ struct Tab {
     at: usize,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PublicTab {
     id: u32,
@@ -38,7 +38,7 @@ struct PublicTab {
     error: String,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Snapshot {
     tabs: Vec<PublicTab>,
@@ -50,6 +50,13 @@ struct Browser {
     tabs: Vec<Tab>,
     active_id: u32,
     next_id: u32,
+    last_notified: Option<Snapshot>,
+}
+
+#[derive(Default)]
+struct LayoutCache {
+    size_and_home: Option<(u32, u32, bool)>,
+    shown: Option<String>,
 }
 
 impl Browser {
@@ -61,6 +68,7 @@ impl Browser {
             }],
             active_id: 1,
             next_id: 2,
+            last_notified: None,
         }
     }
     fn active(&self) -> Option<&Tab> {
@@ -100,9 +108,15 @@ fn snapshot(app: &tauri::AppHandle) -> Result<Snapshot, String> {
 }
 
 fn notify(app: &tauri::AppHandle) {
-    if let Ok(state) = snapshot(app) {
-        let _ = app.emit_to("chrome", "minternet:state", state);
-    }
+    let state = {
+        let storage = app.state::<Mutex<Browser>>();
+        let Ok(mut b) = storage.lock() else { return };
+        let state = b.snapshot();
+        if b.last_notified.as_ref() == Some(&state) { return; }
+        b.last_notified = Some(state.clone());
+        state
+    };
+    let _ = app.emit_to("chrome", "minternet:state", state);
 }
 
 fn title_for(url: &str) -> String {
@@ -162,17 +176,22 @@ fn dimensions(window: &tauri::Window) -> Result<(f64, f64), String> {
 
 fn refresh_layout(app: &tauri::AppHandle) {
     let Some(window) = app.get_window("main") else { return };
+    let Ok(physical) = window.inner_size() else { return };
     let Ok((width, height)) = dimensions(&window) else { return };
-    // A full-height native chrome WebView sits ON TOP of child website views.
-    // Collapse it to the 52px toolbar whenever a website is active so real
-    // WebView2 pages are visible and interactive *inside* Minternet.
     let show_home = app.state::<Mutex<Browser>>()
         .lock()
         .map(|b| b.active().map(|t| t.url == HOME).unwrap_or(true))
         .unwrap_or(true);
+    // Native resizing is expensive. No resize is required on a same-size tab switch.
+    {
+        let cache = app.state::<Mutex<LayoutCache>>();
+        let Ok(mut cache) = cache.lock() else { return };
+        let signature = (physical.width, physical.height, show_home);
+        if cache.size_and_home == Some(signature) { return; }
+        cache.size_and_home = Some(signature);
+    }
     if let Some(chrome) = app.get_webview("chrome") {
-        let chrome_height = if show_home { height } else { CHROME.min(height) };
-        let _ = chrome.set_size(LogicalSize::new(width, chrome_height));
+        let _ = chrome.set_size(LogicalSize::new(width, if show_home { height } else { CHROME.min(height) }));
     }
     let available = (height - CHROME).max(1.0);
     for view in window.webviews() {
@@ -183,20 +202,29 @@ fn refresh_layout(app: &tauri::AppHandle) {
 }
 
 fn display_active(app: &tauri::AppHandle) {
-    let selected = match app.state::<Mutex<Browser>>().lock() {
-        Ok(state) => state.active_id,
-        Err(_) => return,
+    let target = {
+        let store = app.state::<Mutex<Browser>>();
+        let Ok(b) = store.lock() else { return };
+        b.active().and_then(|tab| if tab.url == HOME { None } else { tab.view.clone() })
     };
-    // Resize the local chrome before exposing the selected native website.
-    // Blank tabs still show the full local home page; active sites get a 52px
-    // toolbar with an independent WebView2 surface underneath it.
     refresh_layout(app);
-    let Some(window) = app.get_window("main") else { return };
-    for view in window.webviews() {
-        let label = view.label().to_string();
-        if label == "chrome" { continue; }
-        if label == format!("tab-{selected}") { let _ = view.show(); }
-        else { let _ = view.hide(); }
+    // Only toggle visibility for the previous and selected WebView2, not every tab.
+    let previous = {
+        let cache = app.state::<Mutex<LayoutCache>>();
+        let Ok(mut state) = cache.lock() else { return };
+        if state.shown == target {
+            notify(app);
+            return;
+        }
+        let old = state.shown.clone();
+        state.shown = target.clone();
+        old
+    };
+    if let Some(label) = previous {
+        if let Some(view) = app.get_webview(&label) { let _ = view.hide(); }
+    }
+    if let Some(label) = target {
+        if let Some(view) = app.get_webview(&label) { let _ = view.show(); }
     }
     notify(app);
 }
@@ -473,6 +501,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
 fn main() {
     tauri::Builder::default()
         .manage(Mutex::new(Browser::new()))
+        .manage(Mutex::new(LayoutCache::default()))
         .invoke_handler(tauri::generate_handler![browser_action, browser_snapshot])
         .setup(|app| {
             let window = WindowBuilder::new(app, "main")
