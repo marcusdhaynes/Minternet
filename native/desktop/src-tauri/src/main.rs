@@ -561,7 +561,8 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             let state=app.state::<Mutex<Browser>>();
             let browser=state.lock().map_err(|e|e.to_string())?;
             let valid=match phase {
-                "pinned"=>browser.tabs.iter().any(|t|t.pinned&&t.id==1)&&
+                "pinned"=>browser.tabs.len()==2&&
+                    browser.tabs.iter().any(|t|t.pinned&&t.id==1)&&
                     browser.active_id==1&&value.get("pinRendered").and_then(Value::as_bool)==Some(true),
                 "restored"=>browser.tabs.len()==1&&browser.tabs[0].pinned&&
                     browser.active_id==browser.tabs[0].id,
