@@ -721,3 +721,10 @@ body.tab-dragging .tab-drag-source {opacity:.48;box-shadow:inset 0 0 0 1px #aab5
 .group-inspector-sliders[hidden] {display:none;}
 .group-inspector-slider {display:grid;grid-template-columns:62px 1fr;align-items:center;gap:5px;font-size:9px;color:#d7c8ed;margin:4px 0;}
 .group-inspector-slider input {width:100%;height:13px;accent-color:#b99aec;cursor:pointer;}
+
+.group-overview {width:216px;}
+.group-overview-row {display:flex;align-items:center;gap:5px;padding:2px 3px;}
+.group-overview-name {min-width:0;flex:1;display:flex;align-items:center;gap:7px;background:transparent;color:#eee9ff;border:0;border-radius:4px;text-align:left;padding:5px 4px;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;}
+.group-overview-name:hover {background:#7561a355;}
+.group-overview-dot {flex:0 0 9px;width:9px;height:9px;border-radius:3px;}
+.group-overview-create {width:100%;margin-top:4px;border-top:1px solid #bfa6ff24!important;text-align:left;}
