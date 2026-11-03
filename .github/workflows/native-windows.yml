@@ -31,6 +31,22 @@ jobs:
         run: node --check ../../ui/native-bridge.js
       - name: Build installer using installed WebView2 runtime
         run: npm run build
+      - name: Windows GUI startup smoke test (hosted runner, not physical-device testing)
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path "src-tauri/target/release/minternet_native.exe").Path
+          $p = Start-Process -FilePath $exe -PassThru
+          try {
+            Start-Sleep -Seconds 8
+            $p.Refresh()
+            if ($p.HasExited) { throw "Minternet browser closed during startup (exit $($p.ExitCode))" }
+            if ($p.MainWindowHandle -eq [IntPtr]::Zero) {
+              throw "Minternet failed to create a native Windows top-level window"
+            }
+            "Windows runtime smoke: browser launched with a native window." >> $env:GITHUB_STEP_SUMMARY
+          } finally {
+            if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
+          }
       - name: Measure unpacked native app executable
         shell: pwsh
         run: |
