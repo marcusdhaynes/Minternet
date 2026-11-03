@@ -1,0 +1,44 @@
+name: Native Minternet iOS simulator build (under 50 MB)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'native/ios/**'
+      - '.github/workflows/native-ios.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  simulator-build:
+    runs-on: macos-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate native iOS project
+        working-directory: native/ios
+        run: xcodegen generate
+      - name: Build unsigned iPhone/iPad simulator app
+        working-directory: native/ios
+        run: |
+          xcodebuild -project Minternet.xcodeproj -scheme Minternet \
+            -configuration Debug -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO build
+      - name: Package simulator .app and verify its compressed size
+        run: |
+          set -eu
+          cd native/ios/build/Build/Products/Debug-iphonesimulator
+          test -d Minternet.app
+          zip -qr /tmp/Minternet-iOS-Simulator.zip Minternet.app
+          bytes=$(wc -c < /tmp/Minternet-iOS-Simulator.zip | tr -d ' ')
+          echo "Unsigned iOS simulator app ZIP: $bytes bytes" >> "$GITHUB_STEP_SUMMARY"
+          test "$bytes" -lt 50000000
+      - uses: actions/upload-artifact@v4
+        with:
+          name: minternet-ios-simulator
+          path: /tmp/Minternet-iOS-Simulator.zip
+          if-no-files-found: error
+          retention-days: 14
