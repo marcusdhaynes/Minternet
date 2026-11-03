@@ -1,110 +1,117 @@
 'use strict';
-// Minternet's STATIC GitHub Pages demo. No site is loaded inside this shell.
-// The real desktop app supplies window.minternet through its secure preload.
+// Hosted companion only. The real desktop app supplies window.minternet through preload.
 if (!window.minternet) {
-  let nextId = 1;
-  let activeId = 1;
-  const state = { tabs: [{ id: 1, title: 'New Tab', url: 'about:blank', private: false, history: ['about:blank'], pos: 0 }], activeId: 1, extensionsCount: 0 };
-  const stateListeners = [];
-  const focusListeners = [];
-  const active = () => state.tabs.find(t => t.id === activeId);
-  const titleFor = url => url === 'about:blank' ? 'New Tab' : (() => { try { return new URL(url).hostname; } catch { return 'Preview'; } })();
-  const normalizedUrl = input => {
-    const value = String(input || '').trim();
-    if (!value) return null;
-    if (value === 'about:blank') return 'about:blank';
-    if (/^https:\/\//i.test(value)) {
-      try { return new URL(value).href; } catch { return null; }
-    }
-    if (/^[a-z][a-z\d+.-]*:/i.test(value)) return null;
-    if (/^[\w-]+(\.[\w-]+)+(?::\d+)?(?:\/.*)?$/i.test(value)) {
-      try { return new URL('https://' + value).href; } catch { return null; }
-    }
-    return 'https://www.google.com/search?q=' + encodeURIComponent(value);
+  const tabs=[{id:1,title:'New Tab',url:'about:blank',history:['about:blank'],at:0}];
+  let activeId=1,nextId=1,renderedUrl='',listeners=[];
+  const $=id=>document.getElementById(id);
+  const current=()=>tabs.find(t=>t.id===activeId);
+  const title=url=>url==='about:blank'?'New Tab':new URL(url).hostname.replace(/^www\./,'');
+  const restricted=url=>{
+    const host=new URL(url).hostname;
+    return /(^|\.)((google|youtube|reddit|github|facebook|instagram|microsoft|openai|chatgpt|linkedin|amazon|paypal)\.com|x\.com)$/.test(host);
   };
-  function emit() {
-    state.activeId = activeId;
-    const snapshot = {
-      ...state,
-      tabs: state.tabs.map(t => ({
-        id: t.id, url: t.url, title: t.title, private: t.private,
-        loading: false, canBack: t.pos > 0, canForward: t.pos < t.history.length - 1
+  function parse(input){
+    const s=String(input||'').trim();
+    if(!s)return 'about:blank';
+    if(/^[a-z][\w+.-]*:/i.test(s)&&!/^https:\/\//i.test(s))return null;
+    const host=/^(?:localhost|(?:[a-z\d-]+\.)+[a-z]{2,})(?::\d+)?(?:[/?#]|$)/i;
+    const target=/^https:\/\//i.test(s)?s:host.test(s)?'https://'+s:'https://duckduckgo.com/?q='+encodeURIComponent(s);
+    try{const u=new URL(target);return u.protocol==='https:'&&!u.username&&!u.password&&u.hostname?u.href:null}
+    catch{return null}
+  }
+  function show(){
+    const t=current(),panel=$('preview-content'),frame=$('preview-frame');
+    if(!panel)return;
+    panel.hidden=t.url==='about:blank';
+    if(t.url==='about:blank'){
+      if(renderedUrl!==''){frame.removeAttribute('src');renderedUrl=''}
+      return;
+    }
+    const isRestricted=restricted(t.url);
+    $('preview-host').textContent=title(t.url);
+    $('preview-target').textContent=t.url;
+    $('preview-open').href=t.url;
+    $('preview-open-top').href=t.url;
+    $('preview-frame-wrap').hidden=isRestricted;
+    $('preview-launch').hidden=!isRestricted;
+    if(isRestricted){
+      if(renderedUrl!==''){frame.removeAttribute('src');renderedUrl=''}
+    }else if(renderedUrl!==t.url){frame.src=t.url;renderedUrl=t.url}
+  }
+  function emit(){
+    const t=current();
+    listeners.forEach(cb=>cb({
+      activeId,extensionsCount:0,
+      tabs:tabs.map(x=>({
+        id:x.id,title:x.title,url:x.url,private:false,loading:false,suspended:false,error:'',
+        canBack:x.at>0,canForward:x.at<x.history.length-1
       }))
-    };
-    stateListeners.forEach(fn => fn(snapshot));
-    const content = document.getElementById('preview-content');
-    if (content) {
-      const t = active();
-      content.hidden = !t || t.url === 'about:blank';
-      if (t && t.url !== 'about:blank') {
-        document.getElementById('preview-host').textContent = titleFor(t.url);
-        document.getElementById('preview-url').textContent = t.url;
-        document.getElementById('preview-mode').textContent = t.private ? 'Private mode (UI demonstration)' : 'Normal mode (UI demonstration)';
-        document.getElementById('preview-open').href = t.url;
-      }
-    }
+    }));
+    show();
   }
-  function addTab(isPrivate=false) {
-    const id = ++nextId;
-    state.tabs.push({id,title:'New Tab',url:'about:blank',private:isPrivate,history:['about:blank'],pos:0});
-    activeId=id;
+  function addTab(){
+    if(tabs.length>=35)return false;
+    const id=++nextId;tabs.push({id,title:'New Tab',url:'about:blank',history:['about:blank'],at:0});activeId=id;return true;
   }
-  function nav(url) {
-    const t=active();
-    t.url=url; t.title=titleFor(url);
-    t.history=t.history.slice(0,t.pos+1);
-    t.history.push(url);t.pos++;
+  function go(url){
+    const t=current();t.history=t.history.slice(0,t.at+1);t.history.push(url);t.at++;t.url=url;t.title=title(url)
   }
-  window.minternet = {
-    onState(callback) { stateListeners.push(callback); queueMicrotask(emit); },
-    onFocusAddress(callback) { focusListeners.push(callback); },
-    async command(name, value) {
-      const t=active();
-      switch(name) {
-        case 'new': addTab(); break;
-        case 'new-private': addTab(true); break;
-        case 'activate': if(state.tabs.some(x=>x.id===value)) activeId=value; break;
-        case 'close':
-          state.tabs=state.tabs.filter(x=>x.id!==value);
-          if(!state.tabs.length) addTab();
-          if(!state.tabs.some(x=>x.id===activeId)) activeId=state.tabs[state.tabs.length-1].id;
+  window.minternet={
+    onState(cb){listeners.push(cb);queueMicrotask(emit);return()=>{listeners=listeners.filter(x=>x!==cb)}},
+    onFocusAddress(){return()=>{}},
+    async command(name,value){
+      switch(name){
+        case 'new':if(!addTab())return {message:'Maximum 35 tabs.'};break;
+        case 'activate':if(tabs.some(t=>t.id===value))activeId=value;break;
+        case 'close':{
+          const i=tabs.findIndex(t=>t.id===value);
+          if(i!==-1)tabs.splice(i,1);
+          if(!tabs.length)addTab();
+          if(!tabs.some(t=>t.id===activeId))activeId=tabs[Math.max(0,Math.min(i,tabs.length-1))].id;
           break;
-        case 'privacy':
-          // This is a simulated session reset, NOT a security/privacy guarantee.
-          t.private=!t.private; t.history=[t.url]; t.pos=0; break;
-        case 'home': nav('about:blank'); break;
-        case 'navigate': {
-          const url=normalizedUrl(value);
-          if(!url) return {message:'Only HTTPS destinations and search terms are accepted in this preview.'};
-          nav(url); break;
         }
-        case 'back': if(t.pos>0){t.pos--;t.url=t.history[t.pos];t.title=titleFor(t.url);} break;
-        case 'forward': if(t.pos<t.history.length-1){t.pos++;t.url=t.history[t.pos];t.title=titleFor(t.url);} break;
-        case 'reload': break;
-        case 'tor': return {message:'Tor is NOT integrated in this demo or desktop prototype. Use official Tor Browser for anonymity.'};
-        case 'extension-install': return {message:'Extensions cannot be installed in a static web preview.'};
-        case 'minimize': case 'maximize': case 'quit':
-          return {message:'Window controls only work in the desktop application.'};
-        default: return {message:'This is a UI-only demonstration.'};
+        case 'navigate':{
+          const url=parse(value);if(!url)return {message:'Only HTTPS addresses and search terms are permitted.'};
+          go(url);break;
+        }
+        case 'home':go('about:blank');break;
+        case 'back':case 'forward':{
+          const t=current(),next=t.at+(name==='back'?-1:1);
+          if(next>=0&&next<t.history.length){t.at=next;t.url=t.history[next];t.title=title(t.url)}
+          break;
+        }
+        case 'reload':renderedUrl='';break;
+        case 'privacy':case 'new-private':
+          return {message:'A hosted website cannot create a real private browser. Use a private window or the Minternet desktop app.'};
+        case 'tor':return {message:'Tor is not integrated. Use official Tor Browser for anonymity.'};
+        case 'extension-install':return {message:'Install extensions in your real browser; GitHub Pages cannot install browser extensions.'};
+        case 'free-memory':$('preview-frame')?.removeAttribute('src');renderedUrl='';return {message:'Embedded page released. Reload to restore it.'};
+        case 'minimize':case 'maximize':case 'quit':return {message:'Window controls are available in the desktop app.'};
+        default:return {message:'Available in the desktop application.'};
       }
-      emit();
-      return null;
+      emit();return null;
     }
   };
-  window.addEventListener('DOMContentLoaded', () => {
-    const note = document.createElement('div');
-    note.className = 'preview-badge';
-    note.textContent = 'LIVE UI DEMO · NOT A FUNCTIONAL OR PRIVATE BROWSER';
-    document.body.append(note);
-    const view = document.createElement('section');
-    view.id = 'preview-content';
-    view.hidden=true;
-    view.className='preview-content';
-    view.innerHTML = '<div class="preview-page"><div class="preview-icon" aria-hidden="true">M</div><p id="preview-mode"></p><h2 id="preview-host"></h2><p id="preview-url"></p><p>This web-hosted version demonstrates the Minternet interface. Websites cannot be rendered here as independent browser tabs. The desktop app handles navigation in native browser views.</p><a id="preview-open" target="_blank" rel="noopener noreferrer">Open this address in your current browser ↗</a></div>';
-    document.body.append(view);
-    const css = document.createElement('style');
-    css.textContent = '.preview-badge{position:fixed;z-index:10;bottom:19px;right:15px;background:#312c46;border:1px solid #81739d;color:#f0ddff;padding:6px 11px;font:600 10px sans-serif;letter-spacing:.04em;border-radius:8px;pointer-events:none}.preview-content{position:fixed;inset:52px 0 14px;background:radial-gradient(circle at 50% 30%,#1e2b49,#0d1424 65%);display:grid;place-items:center;padding:30px}.preview-content[hidden]{display:none}.preview-page{width:min(590px,100%);text-align:center;color:#b7c5e0;font:14px/1.6 system-ui}.preview-page h2{color:white;font:600 clamp(22px,4vw,38px) system-ui;overflow-wrap:anywhere;margin:10px}.preview-page p{overflow-wrap:anywhere}.preview-icon{margin:auto;width:62px;height:62px;border-radius:18px;background:linear-gradient(130deg,#8179dd,#779bc7);display:grid;place-items:center;color:white;font-size:34px}.preview-page a{display:inline-block;margin-top:15px;color:#c5caff;text-decoration:none;border:1px solid #6773a5;border-radius:10px;padding:11px 15px}.preview-page a:hover{background:#343e5c}';
-    document.head.append(css);
+  document.addEventListener('DOMContentLoaded',()=>{
+    const panel=document.createElement('section');panel.id='preview-content';panel.className='preview-content';panel.hidden=true;
+    panel.innerHTML='<div class="preview-top"><span class="preview-legend">WEB VIEW</span><span id="preview-host"></span><a id="preview-open-top" target="_blank" rel="noopener noreferrer">Open Website ↗</a></div>'+
+      '<div id="preview-frame-wrap" class="preview-frame-wrap"><iframe id="preview-frame" title="Embedded website" sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer"></iframe><div class="preview-note">Some websites prevent embedding. If the page is blank or blocked, choose Open Website.</div></div>'+
+      '<div id="preview-launch" class="preview-launch" hidden><div class="preview-mark">M</div><div class="preview-caption">OPEN REAL WEBSITE</div><h2 id="preview-target"></h2><p>This website blocks embedded browsing. Open the real site in your existing browser.</p><a id="preview-open" target="_blank" rel="noopener noreferrer">Open Website ↗</a></div>';
+    document.body.append(panel);
+    const link=document.createElement('a');link.className='preview-build-link';
+    link.href='https://github.com/marcusdhaynes/Minternet/actions/workflows/desktop-build.yml';
+    link.target='_blank';link.rel='noopener noreferrer';link.textContent='Get the functional desktop browser ↗';
+    $('homeScreen')?.querySelector('.hero')?.append(link);
+    const badge=document.createElement('a');badge.className='preview-badge';
+    badge.href=link.href;badge.target='_blank';badge.rel='noopener noreferrer';badge.textContent='DESKTOP APP ↗';document.body.append(badge);
+    addEventListener('keydown',event=>{
+      if(!(event.ctrlKey||event.metaKey))return;
+      if(event.key.toLowerCase()==='t'){event.preventDefault();addTab();emit()}
+      if(event.key.toLowerCase()==='w'&&tabs.length>1){
+        event.preventDefault();const i=tabs.findIndex(t=>t.id===activeId);
+        tabs.splice(i,1);activeId=tabs[Math.min(i,tabs.length-1)].id;emit()
+      }
+    });
     emit();
   });
 }

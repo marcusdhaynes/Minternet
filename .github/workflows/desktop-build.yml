@@ -1,5 +1,12 @@
 name: Desktop build (unsigned preview)
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'ui/**'
+      - 'package.json'
+      - '.github/workflows/desktop-build.yml'
   workflow_dispatch:
 permissions:
   contents: read

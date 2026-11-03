@@ -5,6 +5,7 @@ on:
     paths:
       - 'ui/**'
       - 'docs/preview-bridge.js'
+      - 'docs/preview.css'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 permissions:
@@ -27,6 +28,7 @@ jobs:
           mkdir -p site
           cp ui/index.html ui/styles.css ui/app.js site/
           cp docs/preview-bridge.js site/preview-bridge.js
+          cp docs/preview.css site/preview.css
           python3 - <<'PY'
           from pathlib import Path
           p = Path("site/index.html")
@@ -34,8 +36,13 @@ jobs:
           needle = '<script src="./app.js" defer></script>'
           assert needle in s
           s = s.replace(needle, '<script src="./preview-bridge.js" defer></script>\n  ' + needle)
+          assert "frame-src 'none'" in s
+          s = s.replace("frame-src 'none'", 'frame-src https:')
+          s = s.replace('<link rel="stylesheet" href="./styles.css">', '<link rel="stylesheet" href="./styles.css">\n  <link rel="stylesheet" href="./preview.css">')
           p.write_text(s)
           PY
+          node --check site/preview-bridge.js
+          test -s site/preview.css
           touch site/.nojekyll
       - name: Configure Pages
         uses: actions/configure-pages@v5
