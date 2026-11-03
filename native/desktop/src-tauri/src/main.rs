@@ -759,8 +759,9 @@ fn main() {
                                     $('bookmarkEditForm').requestSubmit();
                                     const root = JSON.parse(localStorage.getItem('minternet.bookmark-tree.v1')).items[0];
                                     if (!root || root.kind !== 'folder') return;
-                                    document.querySelector('#bookmarkItems .bookmark-item').click();
-                                    $('bookmarkFolderNew').click();
+                                    // Native folder menus replaced the old full-page folder
+                                    // panel. Their "New Subfolder" action calls this controller.
+                                    window.minternetBookmarks.newFolder(root.id);
                                     $('bookmarkIcon').value = '🪐';
                                     $('bookmarkIcon').dispatchEvent(new Event('input'));
                                     $('bookmarkEditForm').requestSubmit();
