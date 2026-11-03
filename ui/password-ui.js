@@ -103,6 +103,29 @@
     const result=await invoke('vault-put',{origin,username,password,autofill});
     if(result?.ok){await list();report('Encrypted login saved.');}
   });
+
+  // Web Crypto CSPRNG with rejection sampling: no Math.random() for passwords.
+  function securePassword(){
+    const sets=['ABCDEFGHJKLMNPQRSTUVWXYZ','abcdefghijkmnopqrstuvwxyz','23456789','!@#$%^&*_-+='];
+    const alphabet=sets.join('');
+    function random(max){
+      const limit=256-(256%max);let n;
+      do{const bytes=new Uint8Array(1);crypto.getRandomValues(bytes);n=bytes[0];}while(n>=limit);
+      return n%max;
+    }
+    const chars=sets.map(set=>set[random(set.length)]);
+    while(chars.length<24)chars.push(alphabet[random(alphabet.length)]);
+    for(let i=chars.length-1;i>0;i--){const j=random(i+1);[chars[i],chars[j]]=[chars[j],chars[i]];}
+    return chars.join('');
+  }
+  $('vaultGeneratePassword').addEventListener('click',()=>{
+    $('vaultPassword').value=securePassword();
+    $('vaultPassword').type='text';
+    report('Generated a unique 24-character password. Save it to the encrypted vault.');
+  });
+  $('vaultShowPassword').addEventListener('click',()=>{
+    const input=$('vaultPassword');input.type=input.type==='password'?'text':'password';
+  });
   window.addEventListener('keydown',event=>{
     if(event.key==='Escape'&&!screen.hidden){event.preventDefault();close();}
   });
