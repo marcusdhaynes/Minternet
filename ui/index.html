@@ -14,6 +14,7 @@
   <script src="./bookmark-ui.js" defer></script>
   <script src="./tab-group-ui.js" defer></script>
   <script src="./chrome-native-menu.js" defer></script>
+  <script src="./password-ui.js" defer></script>
 </head>
 <body>
   <header class="chrome">
@@ -87,6 +88,7 @@
         </select>
       </label>
       <button class="bookmark-menu-action" id="bookmarkSettingsManage">☆ Manage Bookmarks <span>›</span></button>
+      <button class="bookmark-menu-action" id="passwordManagerOpen">♢ Passwords <span>›</span></button>
             <div class="bookmark-settings-foot">Saved locally · No account required</div>
     </aside>
     <aside id="bookmarkFolderMenu" class="bookmark-panel bookmark-folder-menu" hidden aria-label="Bookmark Folder">
@@ -124,6 +126,29 @@
       <div class="group-editor-field">Color <div class="group-editor-colors" id="groupEditorColor" role="group" aria-label="Tab group color"></div></div>
       <div class="group-editor-actions"><button type="button" id="groupEditorCancel">Cancel</button><button type="submit" class="group-editor-save">Save Group</button></div>
     </form>
+  </section>
+  <section id="passwordVaultScreen" class="vault-screen" hidden aria-label="Encrypted Password Manager">
+    <div class="vault-backdrop" id="vaultBackdrop"></div>
+    <aside class="vault-panel">
+      <div class="vault-head"><strong>Passwords</strong><button type="button" id="vaultLock" title="Lock vault">Lock</button><button type="button" id="vaultClose" aria-label="Close password manager">×</button></div>
+      <p class="vault-info">Encrypted on this device. Your master password is required after restarting Minternet. Never enter it on a website.</p>
+      <form id="vaultAuthForm" class="vault-auth" autocomplete="off">
+        <label>Master Password<input id="vaultMaster" type="password" autocomplete="off" minlength="12" required></label>
+        <button type="submit" id="vaultAuthButton">Unlock</button>
+      </form>
+      <div id="vaultUnlocked" hidden>
+        <form id="vaultEntryForm" class="vault-auth" autocomplete="off">
+          <label>HTTPS Website<input id="vaultOrigin" type="url" placeholder="https://example.com" required></label>
+          <label>Username / Email<input id="vaultUsername" autocomplete="off" maxlength="320"></label>
+          <label>Password<input id="vaultPassword" type="password" autocomplete="new-password" required maxlength="4096"></label>
+          <label class="vault-checkbox"><input type="checkbox" id="vaultAutofill" checked> Autofill on this HTTPS site</label>
+          <button type="submit">Save Credential</button>
+        </form>
+        <div class="vault-list-head">Saved Logins</div>
+        <div id="vaultEntries" class="vault-entries"></div>
+      </div>
+      <p id="vaultMessage" class="vault-message" role="status"></p>
+    </aside>
   </section>
   <main id="homeScreen" class="home-screen">
     <div class="background-shape shape-one"></div>
