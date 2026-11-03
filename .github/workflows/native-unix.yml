@@ -1,0 +1,72 @@
+name: Native Minternet macOS and Linux (under 50 MB)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'native/desktop/**'
+      - 'ui/**'
+      - '.github/workflows/native-unix.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build-native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            label: macOS
+            target: dmg
+          - os: ubuntu-22.04
+            label: Linux
+            target: deb
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/desktop/src-tauri -> target
+      - name: Install Linux system-webview development headers
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential \
+            curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - name: Install local Tauri CLI
+        working-directory: native/desktop
+        run: npm install --no-fund --no-audit
+      - name: Compile and bundle system-webview application
+        working-directory: native/desktop
+        run: npm exec tauri build -- --bundles ${{ matrix.target }}
+      - name: Locate, measure and enforce package size
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ '${{ matrix.label }}' = 'Linux' ]; then
+            find native/desktop/src-tauri/target/release/bundle/deb -name '*.deb' -type f -print0 > files.txt
+          else
+            find native/desktop/src-tauri/target/release/bundle/dmg -name '*.dmg' -type f -print0 > files.txt
+          fi
+          test -s files.txt
+          while IFS= read -r -d '' package; do
+            bytes=$(wc -c < "$package" | tr -d ' ')
+            echo "### ${{ matrix.label }} package: $(basename "$package") — $bytes bytes" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$bytes" -ge 50000000 ]; then
+              echo "Package exceeds 50 MB" >&2
+              exit 1
+            fi
+          done < files.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: minternet-native-${{ matrix.label }}
+          path: |
+            native/desktop/src-tauri/target/release/bundle/deb/*.deb
+            native/desktop/src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 14
