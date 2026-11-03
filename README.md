@@ -37,3 +37,25 @@ For Windows, download **Minternet-Portable-Windows-x64** from a successful run, 
 The legacy Electron prototype at the repository root remains for comparison and **does not** meet the strict sub-50 MB footprint because it bundles Chromium.
 
 No redistribution license selected yet.
+
+
+### Encrypted password vault (native desktop preview)
+
+The native Tauri browser includes a locally encrypted password vault under
+**Settings → Passwords**. Create a unique master password (at least 12
+characters), add an HTTPS site's username/password, and opt into automatic
+filling on that exact origin. Saved credentials are encrypted at rest with
+Argon2id-derived keys and ChaCha20-Poly1305 authenticated encryption, with a
+fresh random nonce for each write. Normal and private tabs are kept separate:
+private tabs never receive autofill. Lock the vault from its manager; restarting
+Minternet requires unlocking it again.
+
+Important limitations: This is a **development preview, not a complete
+Chrome/Firefox/Brave-equivalent password manager**. There is currently no
+automatic credential-capture/"Save password?" prompt, password import/export,
+passkey support, password breach checking, or independent security audit.
+Automatic filling may miss dynamically mounted forms or sites using unusual
+login controls. The master password is not recoverable; losing it makes saved
+credentials inaccessible. Passwords should not be entrusted to this preview
+as their only copy. Remote web pages receive no Tauri capabilities, and
+credentials are never written to browser chrome localStorage.
