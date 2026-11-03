@@ -21,7 +21,7 @@ jobs:
       - run: python3 scripts/security_invariants.py
       - name: Check checked-in files for common accidental credentials
         run: |
-          if git grep -n -I -E '(supabase_service_role|BEGIN (RSA |EC )?PRIVATE KEY|sk_live_[A-Za-z0-9]+)' -- ':!scripts/security_invariants.py' ':!docs/THREAT-MODEL.md'; then
+          if git grep -n -I -E '(supabase_service_role|BEGIN (RSA |EC )?PRIVATE KEY|sk_live_[A-Za-z0-9]+)' -- ':!scripts/security_invariants.py' ':!docs/THREAT-MODEL.md' ':!.github/workflows/native-security.yml'; then
             echo "Potential committed secret detected" >&2
             exit 1
           fi
