@@ -472,6 +472,19 @@ fn browser_snapshot(app: tauri::AppHandle) -> Result<Snapshot,String> { snapshot
 #[tauri::command]
 async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Result<Value, String> {
     match name.as_str() {
+        "menu-smoke-stage" => {
+            if !std::env::args().any(|a| a == "--minternet-menus-smoke") {
+                return Err("Not a native menu test".into());
+            }
+            use std::io::Write as _;
+            let trace = std::env::temp_dir()
+                .join(format!("minternet-menus-stage-{}.txt",std::process::id()));
+            let mut file = std::fs::OpenOptions::new()
+                .create(true).append(true).open(trace).map_err(|e| e.to_string())?;
+            writeln!(file,"{}",value.as_str().unwrap_or("unknown").chars().take(120).collect::<String>())
+                .map_err(|e|e.to_string())?;
+            return Ok(json!({"ok":true}));
+        }
         "menu-smoke-proof" => {
             if !std::env::args().any(|a| a == "--minternet-menus-smoke") {
                 return Err("Unavailable outside native menu smoke".into());
@@ -781,7 +794,9 @@ fn main() {
                                 let _ = view.eval(r#"
                                   setTimeout(async () => {
                                     const $ = id => document.getElementById(id);
+                                    const stage = async s => { await window.minternet?.command('menu-smoke-stage',s); };
                                     try {
+                                      await stage('init');
                                       $('bookmarkBarAdd').click();
                                       $('bookmarkName').value = 'Folder Menu Test';
                                       $('bookmarkEditForm').requestSubmit();
@@ -791,21 +806,29 @@ fn main() {
                                       window.minternetBookmarks.newFolder(root.id);
                                       $('bookmarkName').value = 'Subfolder Test';
                                       $('bookmarkEditForm').requestSubmit();
+                                      await stage('nested-created');
                                       const group = window.minternetGroups.createGroup('Reading','teal');
                                       window.minternetGroups.assign(1,group.id);
                                       window.minternetGroups.toggleVisible(group.id);
+                                      await stage('group-hidden');
                                       const desc=window.minternetMenus.inspectBar();
                                       const groupEntry=desc.find(n => n.text?.includes('Tab Groups'));
                                       const btn=[...document.querySelectorAll('.bookmark-item')].find(n=>n.dataset.bookmarkId===root.id);
-                                      if(!btn)return;
+                                      if(!btn){await stage('no-button');return;}
+                                      await stage('before-popup');
                                       await window.minternetMenus.folder(root.id,btn);
-                                      await window.minternet?.command('menu-smoke-proof',{
+                                      await stage('after-popup:'+window.minternetMenus.nativePopupCount());
+                                      const result=await window.minternet?.command('menu-smoke-proof',{
                                         folders:root.children.length+1,
                                         nativePopups:window.minternetMenus.nativePopupCount(),
                                         groupVisible:window.minternetGroups.get(group.id).visible,
                                         groupMenuRows:groupEntry?.items?.length||0
                                       });
-                                    } catch (e) { console.warn('Native menu smoke failed',e); }
+                                      await stage('proof-response:'+JSON.stringify(result));
+                                    } catch (e) {
+                                      await stage('exception:'+String(e));
+                                      console.warn('Native menu smoke failed',e);
+                                    }
                                   },650);
                                 "#);
                             }

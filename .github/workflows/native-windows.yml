@@ -146,6 +146,7 @@ jobs:
           $exe = "$env:RUNNER_TEMP\minternet-portable\Minternet-Portable-x64.exe"
           $p = Start-Process -FilePath $exe -ArgumentList "--minternet-menus-smoke" -PassThru
           $proof = Join-Path $env:TEMP "minternet-menus-$($p.Id).ok"
+          $trace = Join-Path $env:TEMP "minternet-menus-stage-$($p.Id).txt"
           try {
             $ok = $false
             for ($i = 0; $i -lt 35; $i++) {
@@ -157,8 +158,12 @@ jobs:
             if (!$ok) { throw "Native folder popup, cascading submenu or group-eye toggle failed" }
             "PASS: anchored native folder popup, nested submenu and tab group eye visibility." >> $env:GITHUB_STEP_SUMMARY
           } finally {
+            if (Test-Path $trace) {
+              "Native-menu diagnostic stages:"
+              Get-Content $trace
+            }
             if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
-            Remove-Item $proof -Force -ErrorAction SilentlyContinue
+            Remove-Item $proof,$trace -Force -ErrorAction SilentlyContinue
           }
       - uses: actions/upload-artifact@v4
         with:
