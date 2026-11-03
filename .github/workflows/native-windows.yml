@@ -1,4 +1,4 @@
-name: Native Minternet Windows EXE (< 50 MB)
+name: Minternet Windows portable single EXE (under 50 MB)
 on:
   push:
     branches: [main]
@@ -10,7 +10,7 @@ on:
 permissions:
   contents: read
 jobs:
-  build:
+  portable:
     runs-on: windows-latest
     timeout-minutes: 65
     defaults:
@@ -25,48 +25,52 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: native/desktop/src-tauri -> target
-      - name: Install CLI
+      - name: Install Tauri CLI
         run: npm install --no-fund --no-audit
-      - name: Verify JavaScript
+      - name: Validate frontend bridge JavaScript
         run: node --check ../../ui/native-bridge.js
-      - name: Build installer using installed WebView2 runtime
+      - name: Build native portable EXE with embedded UI, no installer
         run: npm run build
-      - name: Windows GUI startup smoke test (hosted runner, not physical-device testing)
+      - name: Copy EXE ALONE to clean directory, ensure no sidecar dependencies
         shell: pwsh
         run: |
           $exe = (Resolve-Path "src-tauri/target/release/minternet_native.exe").Path
-          $p = Start-Process -FilePath $exe -PassThru
+          New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\minternet-portable" -Force | Out-Null
+          Copy-Item -Path $exe -Destination "$env:RUNNER_TEMP\minternet-portable\Minternet-Portable-x64.exe" -Force
+          $files = @(Get-ChildItem "$env:RUNNER_TEMP\minternet-portable" -File)
+          if ($files.Count -ne 1) { throw "Portable test directory must contain exactly one EXE" }
+          $bytes = $files[0].Length
+          "Minternet standalone EXE: $bytes bytes" >> $env:GITHUB_STEP_SUMMARY
+          if ($bytes -ge 50000000) { throw "Portable executable exceeds 50,000,000 bytes" }
+          Copy-Item $files[0].FullName "Minternet-Portable-x64.exe"
+      - name: Test real website navigation INSIDE native WebView2 via chrome IPC
+        shell: pwsh
+        run: |
+          $exe = "$env:RUNNER_TEMP\minternet-portable\Minternet-Portable-x64.exe"
+          $p = Start-Process -FilePath $exe -ArgumentList "--minternet-smoke" -PassThru
+          $marker = Join-Path $env:TEMP "minternet-inapp-$($p.Id).ok"
           try {
-            Start-Sleep -Seconds 8
-            $p.Refresh()
-            if ($p.HasExited) { throw "Minternet browser closed during startup (exit $($p.ExitCode))" }
-            if ($p.MainWindowHandle -eq [IntPtr]::Zero) {
-              throw "Minternet failed to create a native Windows top-level window"
+            $found = $false
+            for ($i = 0; $i -lt 40; $i++) {
+              Start-Sleep -Seconds 2
+              $p.Refresh()
+              if ($p.HasExited) { throw "Native Minternet exited during real-site smoke test" }
+              if (Test-Path $marker) { $found = $true; break }
             }
-            "Windows runtime smoke: browser launched with a native window." >> $env:GITHUB_STEP_SUMMARY
+            if (!$found) { throw "Minternet did not report loading example.com in its native child webview" }
+            if ($p.MainWindowHandle -eq [IntPtr]::Zero) { throw "Minternet has no native window" }
+            $proof = Get-Content $marker -Raw
+            if ($proof -notmatch "Example Domain loaded in Minternet WebView2") {
+              throw "Incorrect native webview confirmation: $proof"
+            }
+            "PASS: Chrome IPC navigated to example.com and WebView2 returned the page title inside Minternet." >> $env:GITHUB_STEP_SUMMARY
           } finally {
             if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
-          }
-      - name: Measure unpacked native app executable
-        shell: pwsh
-        run: |
-          $binary = Get-Item "src-tauri/target/release/minternet_native.exe"
-          $bytes = $binary.Length
-          "Minternet unpacked native EXE: $bytes bytes" >> $env:GITHUB_STEP_SUMMARY
-          if ($bytes -ge 50000000) { throw "Native executable exceeds 50,000,000 bytes" }
-      - name: Enforce under 50MB Windows installer
-        shell: pwsh
-        run: |
-          $files = @(Get-ChildItem "src-tauri/target/release/bundle/nsis" -Filter '*.exe' -File -Recurse)
-          if ($files.Count -eq 0) { throw "No NSIS EXE produced" }
-          foreach ($file in $files) {
-            $bytes = $file.Length
-            "Minternet Windows EXE: $bytes bytes" >> $env:GITHUB_STEP_SUMMARY
-            if ($bytes -ge 50000000) { throw "Installer exceeds 50,000,000 bytes" }
+            Remove-Item $marker -Force -ErrorAction SilentlyContinue
           }
       - uses: actions/upload-artifact@v4
         with:
-          name: minternet-native-windows-exe
-          path: native/desktop/src-tauri/target/release/bundle/nsis/*.exe
+          name: Minternet-Portable-Windows-x64
+          path: native/desktop/Minternet-Portable-x64.exe
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 21

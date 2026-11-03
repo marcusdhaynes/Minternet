@@ -1,7 +1,14 @@
-# Minternet native desktop
+# Minternet for Windows — Portable 0.3
 
-Tauri 2 + the operating system web engine, not bundled Chromium. Windows builds use WebView2 runtime with a zero-extra-MB installer bootstrapper and generate an NSIS EXE. Browser tabs display sites as native child webviews **inside** the app, not iframes or Firefox/Chrome. The browser shell is the shared compact `ui/` frontend, with native Rust commands accessible **only** to the local `chrome` webview.
+**No installer. No Program Files writes. One executable:** `Minternet-Portable-x64.exe`.
 
-Build: `cd native/desktop && npm install && npm run build`. CI checks the resulting NSIS installer is below **50,000,000 bytes**. Other platforms require additional packaging and testing. On Windows, WebView2 is an existing system component or downloaded separately; its disk size is **not** counted toward Minternet's package.
+The Tauri 2 Windows GUI and the entire local frontend are compiled into the EXE. Run it directly from any writable location. No adjacent application folders or unpacking are required. It uses Microsoft's *existing* Windows WebView2 runtime, so the total operating-system footprint (including WebView2 itself and browser profile/cache files) is **not** under 50MB. Windows with no WebView2 runtime cannot run it without that OS component.
 
-Private tabs use `WebviewBuilder::incognito`, where supported by the OS. Switching modes recreates the tab; it does not retroactively erase the old normal browsing profile. Tor, full Chrome/Firefox extension support, downloads, website permissions, auto-update signing and audit certification are not finished. External webpages have no Tauri capability or IPC permissions, and only HTTPS top-level navigation is allowed.
+## In-app browsing
+The local navigation chrome occupies the full window on a blank tab, then shrinks to a **52-pixel top toolbar** when navigating to a website. Website tabs are independent native WebView2 child views drawn below that bar. External websites are not iframes and do not need permission to be embedded. The local chrome CSP permits only the Tauri IPC origins required for the trusted address bar to invoke native navigation, while remote pages are excluded from the Tauri capabilities.
+
+## Build + smoke
+`cd native/desktop && npm install && npm run build` produces `src-tauri/target/release/minternet_native.exe`. The [portable Windows GitHub Actions workflow](../../.github/workflows/native-windows.yml) renames that binary `Minternet-Portable-x64.exe`, copies it to an empty standalone test directory, and launches it with `--minternet-smoke`. The smoke checks whether the local chrome IPC successfully navigates to `https://example.com` and whether the native child webview observes the page title `Example Domain`. This is more meaningful than merely checking the window opened, but it is not hardware testing, exhaustive browsing QA, or a penetration test.
+
+## Limitations
+Normal browsing persists cookies/cache under Windows app data; no browser can operate fully without the OS web engine and its runtime dependencies. No Tor anonymity, full Chrome/Firefox add-on support, independent security audit or verified signed auto-updates yet.

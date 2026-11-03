@@ -163,8 +163,16 @@ fn dimensions(window: &tauri::Window) -> Result<(f64, f64), String> {
 fn refresh_layout(app: &tauri::AppHandle) {
     let Some(window) = app.get_window("main") else { return };
     let Ok((width, height)) = dimensions(&window) else { return };
+    // A full-height native chrome WebView sits ON TOP of child website views.
+    // Collapse it to the 52px toolbar whenever a website is active so real
+    // WebView2 pages are visible and interactive *inside* Minternet.
+    let show_home = app.state::<Mutex<Browser>>()
+        .lock()
+        .map(|b| b.active().map(|t| t.url == HOME).unwrap_or(true))
+        .unwrap_or(true);
     if let Some(chrome) = app.get_webview("chrome") {
-        let _ = chrome.set_size(LogicalSize::new(width, height));
+        let chrome_height = if show_home { height } else { CHROME.min(height) };
+        let _ = chrome.set_size(LogicalSize::new(width, chrome_height));
     }
     let available = (height - CHROME).max(1.0);
     for view in window.webviews() {
@@ -179,6 +187,10 @@ fn display_active(app: &tauri::AppHandle) {
         Ok(state) => state.active_id,
         Err(_) => return,
     };
+    // Resize the local chrome before exposing the selected native website.
+    // Blank tabs still show the full local home page; active sites get a 52px
+    // toolbar with an independent WebView2 surface underneath it.
+    refresh_layout(app);
     let Some(window) = app.get_window("main") else { return };
     for view in window.webviews() {
         let label = view.label().to_string();
@@ -235,10 +247,21 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: tauri::Url, private: boo
         })
         .on_document_title_changed(move |_view, title| {
             let state = for_title.state::<Mutex<Browser>>();
+            let mut confirmed_in_app = false;
             if let Ok(mut browser) = state.lock() {
                 if let Some(tab) = browser.tabs.iter_mut().find(|tab| tab.id == id) {
+                    // A real webview title from example.com is observable
+                    // only after the website loaded inside this child WebView.
+                    confirmed_in_app = tab.url.starts_with("https://example.com/")
+                        && title.contains("Example Domain")
+                        && tab.view.is_some();
                     tab.title = title.chars().take(140).collect();
                 }
+            }
+            if confirmed_in_app && std::env::args().any(|a| a == "--minternet-smoke") {
+                let marker = std::env::temp_dir()
+                    .join(format!("minternet-inapp-{}.ok", std::process::id()));
+                let _ = std::fs::write(marker, "Example Domain loaded in Minternet WebView2");
             }
             notify(&for_title);
         });
@@ -458,8 +481,19 @@ fn main() {
                 .min_inner_size(620.0, 400.0)
                 .build()?;
             let (width,height) = dimensions(&window)?;
+            // Smoke mode only: trigger a real navigation through the same
+            // frontend IPC bridge used by address-bar submissions. This does
+            // not invoke the operating system's default browser.
+            let smoke = std::env::args().any(|a| a == "--minternet-smoke");
             window.add_child(
-                WebviewBuilder::new("chrome",WebviewUrl::App("index.html".into())),
+                WebviewBuilder::new("chrome",WebviewUrl::App("index.html".into()))
+                    .on_page_load(move |view, event| {
+                        if smoke && matches!(event.event(), PageLoadEvent::Finished) {
+                            let _ = view.eval(
+                                "setTimeout(() => window.minternet?.command('navigate', 'https://example.com'), 200)"
+                            );
+                        }
+                    }),
                 LogicalPosition::new(0.0,0.0),
                 LogicalSize::new(width,height)
             )?;
