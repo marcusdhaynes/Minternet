@@ -1,39 +1,40 @@
-# Minternet
+# Minternet — Native, lightweight browser
 
-**Minternet** is a compact desktop browser prototype inspired by Firefox's layout density. It currently uses Electron / Chromium; it is **not** a Firefox fork, Tor Browser replacement, production security product, or full omni-platform release.
+Minternet is transitioning from a bundled Electron/Chromium proof of concept to small native applications that use the browser engines already installed on each operating system. This approach avoids shipping Chromium again, but **does not** make the operating system's browser runtime disappear.
 
-## Start
+## Download the native builds
 
-Requires Node.js 24+.
+- **Android (APK):** [verified build — below 50 MB](https://github.com/marcusdhaynes/Minternet/actions/runs/41562500606) → Artifacts → `minternet-android-debug-apk`. This development-signed APK uses Android System WebView. It navigates to Google and other HTTPS sites **inside** Minternet, in a top-level WebView rather than an iframe. It has not yet been tested on a physical device.
+- **Windows (.exe):** [native Tauri/WebView2 installer build and strict <50 MB gate](https://github.com/marcusdhaynes/Minternet/actions/workflows/native-windows.yml). View the latest successful run's Artifacts for `minternet-native-windows-exe`. Source is in [native/desktop](native/desktop/). Until a successful run, don't claim the Windows installer has passed.
+- **GitHub Pages:** [web preview](https://marcusdhaynes.github.io/Minternet/) is **not** an installed browser and cannot display Google or other sites that forbid iframe embedding. It is an interface preview with links to open such sites externally.
+- **Legacy Electron:** Root `npm start` remains available as a larger prototype for comparison, but its bundled Chromium footprint fails the requested small-installation target.
 
-```sh
-npm install
-npm start
-```
+## Architecture
 
-Run `npm run check && npm test`. Unsigned desktop previews are available via the manual GitHub Actions packaging workflow. Each source change also triggers a Linux unpacked-build size check.
+| Platform | Engine | Engine included in Minternet package? | Browsing |
+| --- | --- | --- | --- |
+| Windows native | Microsoft Edge WebView2 (Tauri 2) | No | Native child webview inside Minternet |
+| Android native | Android System WebView (Java) | No | Native WebView inside Minternet |
+| macOS and Linux | Planned native Tauri system webviews | No | Additional builds/testing required |
+| iOS | Not yet implemented | N/A | Native WKWebView design required |
+| Web | Browser iframe | N/A | Only embeddable third-party sites |
 
-## Current capabilities
+The existing WebView2 runtime and Android System WebView may themselves occupy significant disk space but are typically shared OS components; <50 MB refers to the **Minternet package**, not the total device footprint including the existing engine.
 
-- Compact tabs, search/address bar, navigation, dark browser chrome and keyboard shortcuts.
-- Per-tab **Normal / Private** switching: recreates the tab with a fresh session, preserving only the URL. It does **not** erase data that normal mode previously stored.
-- HTTPS-first navigation (explicit HTTP requires approval), sandboxed web contents, origin-specific temporary permissions, HTTPS-only sandboxed popups, and user-confirmed HTTPS downloads.
-- Experimental opt-in **unpacked Chromium extension** loading; many APIs and Firefox XPI addons are unsupported.
-- **Free Memory** control discards inactive non-audible tabs and reloads them on return; unsaved form state may be lost.
-- Packaged Electron fuses reduce unnecessary runtime capabilities and validate ASAR integrity (full installer builds are not yet verified).
-- Tor button explains limits and opens Tor Browser's official site. **Tor is not embedded**.
-- Optional Supabase encrypted-sync **schema only**. Client-side encryption, authentication, and sync are not yet connected.
+## Security and functional limitations
 
-## Planned
+HTTPS-only top-level navigation, no JavaScript-to-native bridge on Android websites, Tauri ACL restricted to the local `chrome` webview, and no special permission grants to untrusted pages. **Neither native version is independently audited.** Google sign-in, DRM, camera, downloads, advanced web permissions, malicious-site protections, update signing and exhaustive cross-site compatibility need more work.
 
-See `docs/ROADMAP.md` for Firefox-compatible engine options, integrated Tor research, Android/iOS builds, extension compatibility, independent security testing, and signed updates.
+The Windows native prototype supports incognito child views where supported; switching a normal tab into private mode does not erase the prior normal profile. The Android build explicitly **does not** claim private mode; Android WebView isolation is not implemented. Tor, Firefox XPI extensions and the complete Chrome extension ecosystem are not implemented. A small OS-webview application cannot promise exact compatibility with both Firefox and Chrome.
 
-See `docs/SECURITY.md` for the exact threat-model limitations. Do **not** use this prototype for sensitive or anonymous browsing.
+The [legacy Electron architecture](docs/SECURITY.md) has additional functionality but bundles Chromium. No credentials or Supabase private keys should be committed.
 
-## Repository visibility
+## Developer links
 
-This source repository can be public, but do not commit credentials or private keys. Supabase service-role/secret keys must never ship in client applications.
+- [Android source](native/android/)
+- [Desktop native source](native/desktop/)
+- [Android build](.github/workflows/native-android.yml)
+- [Windows native build](.github/workflows/native-windows.yml)
+- [Web-only preview details](docs/WEB-PREVIEW.md)
 
-## License
-
-No redistribution license selected.
+No redistribution license selected yet.
