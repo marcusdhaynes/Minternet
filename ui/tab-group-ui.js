@@ -40,12 +40,7 @@
   function createGroup(name='New Group',color='violet',tabId=null) {
     const group=model.create(state,{name,color});
     if(!group) {window.minternetToast?.('Too many tab groups.');return null;}
-    if(tabId!=null) {
-      // Pinned tabs cannot be children of groups. Unpin before grouping.
-      const tab=latest.tabs.find(t=>t.id===tabId);
-      if(tab?.pinned)void api.command('unpin',tabId);
-      model.assign(state,tabId,group.id);
-    }
+    if(tabId!=null)assign(tabId,group.id);
     persist();
     return group;
   }
@@ -66,7 +61,18 @@
   }
   function assign(tabId,groupId) {
     const tab=latest.tabs.find(t=>t.id===tabId);
-    if(tab?.pinned&&groupId)void api.command('unpin',tabId);
+    if(tab?.pinned&&groupId) {
+      // Native state confirmation must arrive BEFORE the group assignment,
+      // otherwise a re-render sees pinned=true and detaches it immediately.
+      void api.command('unpin',tabId).then(result=>{
+        if(result?.message){window.minternetToast?.(result.message);return;}
+        model.assign(state,tabId,groupId);
+        const group=model.get(state,groupId);
+        if(group){group.visible=true;group.collapsed=false;}
+        persist();
+      });
+      return true;
+    }
     if(!model.assign(state,tabId,groupId))return false;
     if(groupId){
       const g=model.get(state,groupId);

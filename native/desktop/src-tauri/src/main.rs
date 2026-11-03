@@ -488,11 +488,12 @@ fn prepare_active(app: &tauri::AppHandle) -> Result<(), String> {
 
 fn navigate_tab(app: &tauri::AppHandle, id: u32, url: Option<tauri::Url>, append: bool) -> Result<(), String> {
     let str_url = url.as_ref().map(|u| u.as_str()).unwrap_or(HOME).to_string();
-    let (existing, private, warming) = {
+    let (existing, private, warming, save_url) = {
         let state = app.state::<Mutex<Browser>>();
         let mut browser = state.lock().map_err(|e| e.to_string())?;
         let warming = browser.warming.contains(&id);
         let tab = browser.tabs.iter_mut().find(|t| t.id == id).ok_or("Tab not found")?;
+        let save_url=tab.pinned&&!tab.private&&tab.url!=str_url;
         if append && tab.url != str_url {
             tab.history.truncate(tab.at + 1);
             tab.history.push(str_url.clone());
@@ -500,7 +501,7 @@ fn navigate_tab(app: &tauri::AppHandle, id: u32, url: Option<tauri::Url>, append
         }
         tab.url = str_url.clone();
         tab.title = title_for(&str_url);
-        (tab.view.clone(), tab.private, warming)
+        (tab.view.clone(), tab.private, warming, save_url)
     };
     if let Some(url) = url {
         if warming && existing.is_none() {
@@ -524,7 +525,7 @@ fn navigate_tab(app: &tauri::AppHandle, id: u32, url: Option<tauri::Url>, append
             if let Some(tab) = b.tabs.iter_mut().find(|t| t.id == id) { tab.view = None; }
         };
     }
-    let _=save_pinned(app);
+    if save_url {let _=save_pinned(app);}
     display_active(app);
     Ok(())
 }
@@ -947,6 +948,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             }
             let dest=if url==HOME {None} else {Some(tauri::Url::parse(&url).map_err(|e|e.to_string())?)};
             navigate_tab(&app,id,dest,false)?;
+            let _=save_pinned(&app);
         }
         "free-memory" => {
             let candidates = {
