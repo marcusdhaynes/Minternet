@@ -463,8 +463,8 @@ h1 em { color: #b3bfff; font-family: Georgia, serif; font-weight: 400; letter-sp
 .tab-row .identity{cursor:grab;user-select:none;-webkit-user-select:none}
 .tab-row .identity:active{cursor:grabbing}
 .brand-mark{width:18px;height:18px;display:block;object-fit:contain;flex:none;pointer-events:none;user-select:none}
-.hero-logo{display:grid;place-items:center}
-.hero-logo img{width:76%;height:76%;object-fit:contain;display:block;filter:drop-shadow(0 9px 25px #534bce44)}
+.hero-logo{display:grid;place-items:center;background:transparent;box-shadow:none}
+.hero-logo img{width:100%;height:100%;object-fit:contain;display:block;filter:drop-shadow(0 9px 25px #534bce44)}
 .new-private-tab{align-self:flex-end;height:20px;flex:0 0 23px;width:23px;margin-bottom:1px;color:#c6bdff;-webkit-app-region:no-drag}
 .new-private-tab svg{display:block}
 .new-private-tab:hover{background:#56487a55;color:#fff}
