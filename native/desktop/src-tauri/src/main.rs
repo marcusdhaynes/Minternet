@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::{sync::Mutex, collections::HashSet};
+use std::{sync::Mutex, collections::HashSet, path::PathBuf};
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{
@@ -20,6 +20,7 @@ struct Tab {
     title: String,
     url: String,
     private: bool,
+    pinned: bool,
     view: Option<String>,
     history: Vec<String>,
     at: usize,
@@ -32,6 +33,7 @@ struct PublicTab {
     title: String,
     url: String,
     private: bool,
+    pinned: bool,
     loading: bool,
     can_back: bool,
     can_forward: bool,
@@ -66,12 +68,10 @@ struct LayoutCache {
 impl Browser {
     fn new() -> Self {
         Self {
-            tabs: vec![Tab {
-                id: 1, title: "New Tab".into(), url: HOME.into(),
-                private: false, view: None, history: vec![HOME.into()], at: 0,
-            }],
-            active_id: 1,
-            next_id: 2,
+            // The home page can be displayed without creating any tab.
+            tabs: Vec::new(),
+            active_id: 0,
+            next_id: 1,
             last_notified: None,
             warming: HashSet::new(),
         }
@@ -88,7 +88,7 @@ impl Browser {
         self.next_id += 1;
         self.tabs.push(Tab {
             id, title: "New Tab".into(), url: HOME.into(), private,
-            view: None, history: vec![HOME.into()], at: 0,
+            pinned: false, view: None, history: vec![HOME.into()], at: 0,
         });
         self.active_id = id;
         Ok(id)
@@ -99,11 +99,64 @@ impl Browser {
             extensions_count: 0,
             tabs: self.tabs.iter().map(|t| PublicTab {
                 id: t.id, title: t.title.clone(), url: t.url.clone(), private: t.private,
-                loading: false, can_back: t.at > 0, can_forward: t.at + 1 < t.history.len(),
+                pinned: t.pinned, loading: false, can_back: t.at > 0, can_forward: t.at + 1 < t.history.len(),
                 suspended: t.view.is_none() && t.url != HOME, error: String::new(),
             }).collect(),
         }
     }
+}
+
+// Only non-private, HTTPS pinned pages survive application restarts.
+// The file is in Minternet's own user profile, never beside the single EXE.
+fn pinned_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir=app.path().app_data_dir().map_err(|e|e.to_string())?;
+    Ok(dir.join("pinned-tabs.v1.json"))
+}
+fn save_pinned(app: &tauri::AppHandle) -> Result<(), String> {
+    let pages = {
+        let state=app.state::<Mutex<Browser>>();
+        let browser=state.lock().map_err(|e|e.to_string())?;
+        browser.tabs.iter()
+            .filter(|tab|tab.pinned && !tab.private)
+            .filter(|tab|tab.url.starts_with("https://"))
+            .map(|tab|tab.url.clone()).take(MAX_TABS).collect::<Vec<_>>()
+    };
+    let file=pinned_file(app)?;
+    if let Some(dir)=file.parent(){std::fs::create_dir_all(dir).map_err(|e|e.to_string())?;}
+    let contents=serde_json::to_vec(&pages).map_err(|e|e.to_string())?;
+    // Write atomically to avoid losing pinned pages on an interrupted update.
+    let temp=file.with_extension("tmp");
+    std::fs::write(&temp,contents).map_err(|e|e.to_string())?;
+    if std::fs::rename(&temp,&file).is_err(){
+        // Windows cannot always replace an existing file using rename.
+        std::fs::copy(&temp,&file).map_err(|e|e.to_string())?;
+        let _=std::fs::remove_file(&temp);
+    }
+    Ok(())
+}
+fn restore_pinned(app: &tauri::AppHandle) {
+    let Ok(path)=pinned_file(app) else {return};
+    let Ok(bytes)=std::fs::read(path) else {return};
+    if bytes.len()>128_000{return}
+    let Ok(pages)=serde_json::from_slice::<Vec<String>>(&bytes) else {return};
+    let state=app.state::<Mutex<Browser>>();
+    let Ok(mut browser)=state.lock() else {return};
+    for address in pages.into_iter().take(MAX_TABS) {
+        let Ok(url)=tauri::Url::parse(&address) else {continue};
+        if url.scheme()!="https"||url.host_str().is_none()||
+           !url.username().is_empty()||url.password().is_some(){continue;}
+        if let Ok(id)=browser.add(false){
+            if let Some(tab)=browser.tabs.iter_mut().find(|t|t.id==id){
+                tab.pinned=true;
+                tab.url=address.clone();
+                tab.title=title_for(&address);
+                tab.history=vec![address];
+                tab.at=0;
+            }
+        }
+    }
+    // On launch, focus the first pinned tab; otherwise show the tabless home.
+    browser.active_id=browser.tabs.first().map(|tab|tab.id).unwrap_or(0);
 }
 
 fn snapshot(app: &tauri::AppHandle) -> Result<Snapshot, String> {
@@ -284,6 +337,7 @@ fn update_from_site(app: &tauri::AppHandle, id: u32, url: &str) {
             }
         };
     }
+    let _=save_pinned(app);
     notify(app);
 }
 
@@ -463,6 +517,7 @@ fn navigate_tab(app: &tauri::AppHandle, id: u32, url: Option<tauri::Url>, append
             if let Some(tab) = b.tabs.iter_mut().find(|t| t.id == id) { tab.view = None; }
         };
     }
+    let _=save_pinned(app);
     display_active(app);
     Ok(())
 }
@@ -471,7 +526,7 @@ fn activated(app: &tauri::AppHandle) -> Result<(), String> {
     let (id, url, view_exists) = {
         let state = app.state::<Mutex<Browser>>();
         let b = state.lock().map_err(|e| e.to_string())?;
-        let tab = b.active().ok_or("No active tab")?;
+        let Some(tab)=b.active() else {display_active(app);return Ok(())};
         (tab.id, tab.url.clone(), tab.view.is_some())
     };
     if url != HOME && !view_exists {
@@ -684,6 +739,30 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 navigate_tab(&app, id, parse_address(address)?, true)?;
             } else { display_active(&app); }
         }
+        "deselect" => {
+            {
+                let state=app.state::<Mutex<Browser>>();
+                let mut b=state.lock().map_err(|e|e.to_string())?;
+                b.active_id=0;
+            }
+            display_active(&app);
+            return Ok(json!({"ok":true}));
+        }
+        "pin" | "unpin" | "toggle-pin" => {
+            let id=value.as_u64().ok_or("Invalid tab")? as u32;
+            let pinned = {
+                let state=app.state::<Mutex<Browser>>();
+                let mut b=state.lock().map_err(|e|e.to_string())?;
+                let tab=b.tabs.iter_mut().find(|t|t.id==id).ok_or("Tab not found")?;
+                tab.pinned=match name.as_str(){
+                    "pin"=>true,"unpin"=>false,_=>!tab.pinned
+                };
+                tab.pinned
+            };
+            save_pinned(&app)?;
+            notify(&app);
+            return Ok(json!({"ok":true,"pinned":pinned}));
+        }
         "activate" => {
             let id = value.as_u64().ok_or("Invalid tab")? as u32;
             {
@@ -713,8 +792,8 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             };
             let id = {
                 let state = app.state::<Mutex<Browser>>();
-                let b = state.lock().map_err(|e| e.to_string())?;
-                b.active_id
+                let mut b = state.lock().map_err(|e| e.to_string())?;
+                if b.active().is_none(){b.add(false)?} else {b.active_id}
             };
             navigate_tab(&app, id, url, true)?;
         }
@@ -725,13 +804,18 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 let mut b = state.lock().map_err(|e| e.to_string())?;
                 let ix = b.tabs.iter().position(|t|t.id==id).ok_or("Unknown tab")?;
                 let tab = b.tabs.remove(ix);
-                if b.tabs.is_empty() { b.add(false)?; }
-                else if b.active_id==id { b.active_id = b.tabs[ix.min(b.tabs.len()-1)].id; }
+                if b.active_id==id {
+                    // Prefer an existing pinned page; never synthesize a new tab.
+                    b.active_id = b.tabs.iter().find(|t|t.pinned).map(|t|t.id)
+                        .or_else(||b.tabs.get(ix.min(b.tabs.len().saturating_sub(1))).map(|t|t.id))
+                        .unwrap_or(0);
+                }
                 tab.view
             };
             if let Some(label)=label {
                 if let Some(wv)=app.get_webview(&label) { let _=wv.close(); }
             }
+            save_pinned(&app)?;
             activated(&app)?;
         }
         "back" | "forward" => {
@@ -856,6 +940,16 @@ fn main() {
         .manage(Mutex::new(LayoutCache::default()))
         .invoke_handler(tauri::generate_handler![browser_action, browser_snapshot])
         .setup(|app| {
+            // Automated tests use a deterministic fresh session. Real users
+            // restore their pinned pages or start with a tabless home.
+            let smoke=std::env::args().any(|a|a.starts_with("--minternet-")&&a.ends_with("-smoke"));
+            if smoke {
+                let store=app.state::<Mutex<Browser>>();
+                let mut b=store.lock().map_err(|e|e.to_string())?;
+                b.add(false)?;
+            } else {
+                restore_pinned(app.handle());
+            }
             let builder = WindowBuilder::new(app, "main")
                 .title("Minternet")
                 // Request dark OS chrome and native menus where supported.
