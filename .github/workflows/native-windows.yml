@@ -32,7 +32,10 @@ jobs:
           node --check ../../ui/native-bridge.js
           node --check ../../ui/bookmark-model.js
           node --check ../../ui/bookmark-ui.js
-          node --test ../../tests/bookmarks.test.cjs
+          node --check ../../ui/tab-group-model.js
+          node --check ../../ui/tab-group-ui.js
+          node --check ../../ui/chrome-native-menu.js
+          node --test ../../tests/bookmarks.test.cjs ../../tests/tab-groups.test.cjs
       - name: Build native portable EXE with embedded UI, no installer
         run: npm run build
       - name: Copy EXE ALONE to clean directory, ensure no sidecar dependencies

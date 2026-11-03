@@ -10,6 +10,7 @@
     "chrome"
   ],
   "permissions": [
-    "core:default"
+    "core:default",
+    "core:menu:default"
   ]
 }

@@ -46,12 +46,20 @@ function buildTab(tab, active) {
   root.append(choose, close);
   return root;
 }
+window.minternetToast = toast;
+window.minternetRenderTabs = () => {
+  if(window.minternetGroups?.renderTabs)
+    window.minternetGroups.renderTabs(snapshot,byId('tabs'),buildTab);
+};
 function render(data) {
   snapshot = data;
   const tabs = byId('tabs');
   const active = data.tabs.find(t => t.id === data.activeId);
   const signature = data.tabs.map(t => t.id).join(',');
-  if (signature !== render.lastSignature) {
+  if (window.minternetGroups?.renderTabs) {
+    window.minternetGroups.renderTabs(data,tabs,buildTab);
+    render.lastSignature = null;
+  } else if (signature !== render.lastSignature) {
     tabs.replaceChildren(...data.tabs.map(t => buildTab(t, t.id === data.activeId)));
     render.lastSignature = signature;
   } else {

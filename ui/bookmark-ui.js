@@ -71,12 +71,19 @@
         name.textContent = item.name;
         el.append(name);
       }
+      el.dataset.bookmarkId = item.id;
       el.title = item.kind === 'folder' ? textFor(item) : (item.name || item.url);
       el.setAttribute('aria-label', item.kind === 'folder' ? 'Open Folder: ' + textFor(item) : 'Open Bookmark: ' + textFor(item));
-      el.addEventListener('click', () => item.kind === 'folder' ? openFolder(item.id) : openLink(item.url));
+      el.addEventListener('click', () => {
+        if(item.kind === 'folder') {
+          if(window.minternetMenus?.folder) window.minternetMenus.folder(item.id,el);
+          else openFolder(item.id);
+        } else openLink(item.url);
+      });
       el.addEventListener('contextmenu', event => {
         event.preventDefault();
-        edit(item.id);
+        if(window.minternetMenus?.bookmark) window.minternetMenus.bookmark(item.id,event);
+        else edit(item.id);
       });
       holder.append(el);
     }
@@ -392,6 +399,23 @@
       toggleBookmark();
     }
   });
+  // Controllers are accessible only within trusted local chrome. Remote
+  // website WebView2 pages have neither this JS context nor native menu IPC.
+  window.minternetBookmarks = {
+    getState: () => data,
+    edit, newFolder: parent => openEditor('folder',null,parent||null),
+    savePage: parent => {
+      const target=model.url(currentUrl);
+      if(!target)return toast('Open an HTTPS page to bookmark it.');
+      if(!model.add(data,'link',parent||null,{
+        name:currentTitle||new URL(target).hostname,url:target
+      }))return toast('Unable to save bookmark.');
+      persist();toast('Page bookmarked');
+    },
+    openLink, toggleBookmark, manager:()=>{renderManager();setMode('manager');},
+    toggleBar:()=>changeVisibility(!data.visible),
+    closeOverlay
+  };
   api.onState(state => {
     const tab = state.tabs.find(t => t.id === state.activeId);
     currentUrl = tab?.url || '';

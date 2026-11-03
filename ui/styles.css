@@ -412,3 +412,48 @@ h1 em { color: #b3bfff; font-family: Georgia, serif; font-weight: 400; letter-sp
 
 /* Explicitly honor the folder editor's hidden URL field despite flex layout. */
 .bookmark-field[hidden] {display:none!important;}
+
+/* Compact native-browser tab groups (tabs remain alive when groups are hidden). */
+.tab-groups-btn { flex: 0 0 21px; width:21px; height:20px; align-self:end; margin:0 2px 1px 0; color:#a7b9e1; -webkit-app-region:no-drag; }
+.tab-groups-btn:hover {color:#e8e8ff;}
+.group-chip { display:flex; align-items:center; gap:3px; flex:0 0 auto; max-width:118px; height:20px; padding:0 6px;
+ background:color-mix(in srgb, var(--group-accent) 17%, #1b2436); border:1px solid color-mix(in srgb,var(--group-accent) 65%,#2b3552);
+ border-bottom:0; border-radius:6px 6px 0 0; color:#f6f7ff; font-size:10px; white-space:nowrap; -webkit-app-region:no-drag; }
+.group-chip:hover {filter:brightness(1.16);}
+.group-chip-symbol {color:var(--group-accent); font-size:12px; line-height:1;}
+.group-chip-label {max-width:75px; overflow:hidden; text-overflow:ellipsis;}
+.group-chip-count {color:var(--group-accent); font-size:9px; font-variant-numeric:tabular-nums;}
+.group-member {border-left:2px solid var(--group-accent);}
+.group-member.selected {box-shadow: inset 0 1px var(--group-accent);}
+.group-editor-screen {position:absolute;z-index:30;inset:var(--chrome-height) 0 var(--footer-height);}
+.group-editor-screen[hidden] {display:none!important;}
+.group-editor-backdrop {position:absolute;inset:0;background:transparent;}
+.group-editor-panel {position:absolute;top:4px;left:min(55vw,510px);width:min(285px,calc(100vw - 14px));max-height:calc(100% - 8px);
+ overflow:auto;background:#202b43;color:#e9edff;border:1px solid #697491;border-radius:9px;box-shadow:0 12px 35px #0009;}
+.group-editor-header {display:flex;align-items:center;justify-content:space-between;height:33px;padding:0 9px;border-bottom:1px solid #4a5670;}
+.group-editor-header strong {font-size:11px;}
+.group-editor-close {font-size:17px;background:none;border:0;color:#bfc9e0;}
+.group-editor-field {display:block;padding:9px 10px 0;color:#cbd4ed;font-size:10px;}
+.group-editor-field input {display:block;width:100%;height:28px;margin-top:4px;border:1px solid #5b6782;background:#111a2c;color:white;
+ padding:0 8px;border-radius:6px;font-size:11px;}
+.group-editor-colors {display:flex;gap:7px;align-items:center;padding:7px 0 4px;flex-wrap:wrap;}
+.group-color-option {width:18px;height:18px;border:2px solid transparent;border-radius:50%;cursor:pointer;}
+.group-color-option[aria-pressed=true] {outline:2px solid #e7ecff;outline-offset:1px;}
+.group-editor-actions {display:flex;justify-content:flex-end;gap:6px;padding:12px;}
+.group-editor-actions button {border:1px solid #687692;background:#384863;color:#eaf0ff;border-radius:5px;padding:6px 9px;font-size:10px;}
+.group-editor-actions .group-editor-save {background:#abb5fc;color:#17213b;font-weight:700;}
+/* Web preview fallback only: installed Minternet uses actual native OS cascading menus. */
+.system-popup-root {position:fixed;z-index:90;width:238px;max-height:min(76vh,550px);overflow:visible;background:#242d42;
+ color:#f0f3ff;border:1px solid #67718a;border-radius:8px;box-shadow:0 12px 36px #000a;padding:4px;}
+.system-popup-list {display:flex;flex-direction:column;gap:1px;}
+.system-popup-row {display:flex;width:100%;align-items:center;justify-content:space-between;gap:8px;min-height:26px;
+ background:transparent;border:0;border-radius:5px;padding:3px 9px;color:#e4eaff;text-align:left;font-size:11px;cursor:pointer;}
+.system-popup-row:hover,.system-popup-has-child:hover>.system-popup-row {background:#50658a;}
+.system-popup-row:disabled {opacity:.52;cursor:default;}
+.system-popup-separator {height:1px;margin:3px 5px;background:#49556f;}
+.system-popup-has-child {position:relative;}
+.system-popup-child {display:none;position:absolute;left:calc(100% - 2px);top:-4px;width:238px;max-height:min(70vh,450px);overflow-y:auto;
+ background:#242d42;border:1px solid #67718a;border-radius:8px;box-shadow:0 12px 36px #000a;padding:4px;}
+.system-popup-has-child:hover>.system-popup-child,.system-popup-has-child.system-popup-open>.system-popup-child {display:flex;}
+.system-popup-arrow {margin-left:auto;color:#b9c7e9;}
+@media(max-width:600px){.group-editor-panel{left:7px;right:7px;width:auto}.group-chip{max-width:75px}.group-chip-label{max-width:40px}}

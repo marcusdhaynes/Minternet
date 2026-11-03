@@ -35,3 +35,13 @@ These optimizations reduce Minternet's overhead, not the destination site's netw
 - Bookmarks live in the trusted local Tauri/WebView2 chrome profile under `minternet.bookmark-tree.v1` in localStorage; they are NOT uploaded to Supabase or exposed to untrusted page webviews.
 - When Settings/Folder/Manager opens, the local chrome temporarily expands and hides (but does not destroy) the current website view. Closing the panel restores the page immediately.
 - Keeping bookmarks stored locally means clearing Minternet's application data may erase them; export/import and optional encrypted synchronization are future work.
+
+## Native bookmark folders & tab groups
+
+- Click a bookmark-bar folder to open a **native OS popup** positioned at the folder's lower-left edge. Nested folders cascade on hover, with platform-native keyboard navigation, screen-edge flipping and dismissal. The website's WebView2 stays on screen and alive behind the popup.
+- Right-click the Bookmark Bar to open a context menu with **Tab Groups**. Each group displays an eye on the right; click its row to show/hide its group chip and tabs above.
+- The new overlapping-tabs icon beside the + button opens tab group controls. Right-click a tab to add it to a group, move it between groups or ungroup it.
+- Click a group chip to collapse/expand its tabs. Hiding a group does not close the tabs; if it contained the active tab, Minternet selects another visible tab or creates a new one.
+- Tab group definitions, names, colors and visibility persist locally. Membership is session-only to avoid accidentally applying old tab IDs to unrelated pages after restart.
+- Bookmark icons remain emoji or uploaded images on the bar; native popup menu entries show emojis and safe folder labels (image-backed entries use a folder symbol).
+- No remote website has access to Minternet's native popup-menu APIs.

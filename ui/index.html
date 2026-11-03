@@ -8,8 +8,11 @@
   <link rel="stylesheet" href="./styles.css">
   <script src="./native-bridge.js" defer></script>
   <script src="./bookmark-model.js" defer></script>
+  <script src="./tab-group-model.js" defer></script>
   <script src="./app.js" defer></script>
   <script src="./bookmark-ui.js" defer></script>
+  <script src="./tab-group-ui.js" defer></script>
+  <script src="./chrome-native-menu.js" defer></script>
 </head>
 <body>
   <header class="chrome">
@@ -17,6 +20,13 @@
       <div class="identity" aria-label="Minternet"><div class="glyph">M</div><span>MINTERNET</span></div>
       <nav class="tabs" id="tabs" aria-label="Browser tabs"></nav>
       <button id="newTab" class="icon-btn new-tab" aria-label="New tab" title="New tab (Ctrl+T)">+</button>
+      <button id="tabGroups" class="icon-btn tab-groups-btn" aria-label="Tab Groups" title="Tab Groups · Create, collapse or organize">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="4" width="13" height="11" rx="2"></rect>
+          <rect x="8" y="9" width="13" height="11" rx="2"></rect>
+          <circle cx="13" cy="14" r="1.5" fill="currentColor" stroke="none"></circle>
+        </svg>
+      </button>
       <div class="window-actions">
         <button id="minimize" class="win-btn" title="Minimize" aria-label="Minimize">−</button>
         <button id="maximize" class="win-btn" title="Maximize" aria-label="Maximize">▢</button>
@@ -88,6 +98,15 @@
         <div class="bookmark-editor-buttons"><button type="button" id="bookmarkRemove" class="bookmark-delete" hidden>Delete</button><span class="bookmark-fill"></span><button type="button" id="bookmarkCancel">Cancel</button><button type="submit" class="bookmark-save">Save</button></div>
       </form>
     </aside>
+  </section>
+  <section id="groupEditorScreen" class="group-editor-screen" hidden aria-label="Tab Group Editor">
+    <div id="groupEditorBackdrop" class="group-editor-backdrop"></div>
+    <form id="groupEditorForm" class="group-editor-panel" autocomplete="off">
+      <div class="group-editor-header"><strong id="groupEditorTitle">New Tab Group</strong><button type="button" class="group-editor-close" id="groupEditorClose" title="Close" aria-label="Close">×</button></div>
+      <label class="group-editor-field">Group Name <input id="groupEditorName" maxlength="42" placeholder="Work, Research, Reading…"></label>
+      <div class="group-editor-field">Color <div class="group-editor-colors" id="groupEditorColor" role="group" aria-label="Tab group color"></div></div>
+      <div class="group-editor-actions"><button type="button" id="groupEditorCancel">Cancel</button><button type="submit" class="group-editor-save">Save Group</button></div>
+    </form>
   </section>
   <main id="homeScreen" class="home-screen">
     <div class="background-shape shape-one"></div>
