@@ -187,16 +187,102 @@
     document.addEventListener('keydown',esc,true);
     return true;
   }
+  // Minimal inline group inspector. All controls update the live group state.
+  function groupInspector(id,point){
+    const group=groups()?.get(id);
+    if(!group)return;
+    closeFallback();
+    const host=document.createElement('div');
+    host.className='system-popup-root minternet-context-menu group-inspector';
+    host.setAttribute('role','dialog');
+    host.setAttribute('aria-label','Group options');
+    const head=document.createElement('div');
+    head.className='group-inspector-top';
+    const name=document.createElement('input');
+    name.className='group-inspector-name';
+    name.value=group.name;name.maxLength=42;name.title='Rename group';
+    name.setAttribute('aria-label','Group name');
+    name.addEventListener('input',()=>groups()?.updateGroup(id,{name:name.value}));
+    const eye=document.createElement('button');
+    eye.className='group-inspector-icon';
+    eye.setAttribute('aria-label','Toggle group visibility');
+    const syncEye=()=>{eye.textContent=group.visible?'◉':'◌';eye.title=group.visible?'Hide From Tab Bar':'Show In Tab Bar';eye.setAttribute('aria-pressed',String(group.visible));};
+    syncEye();
+    eye.addEventListener('click',()=>{groups()?.toggleVisible(id);syncEye();});
+    const del=document.createElement('button');del.className='group-inspector-icon delete';
+    del.textContent='×';del.title='Delete Group';del.setAttribute('aria-label','Delete group');
+    del.addEventListener('click',()=>{if(groups()?.removeGroup(id))closeFallback();});
+    head.append(name,eye,del);host.append(head);
+    const choices=document.createElement('div');choices.className='group-inspector-palette';
+    const presets=[['red','#ea5967'],['orange','#f39b52'],['yellow','#f1ce59'],['green','#65c98a'],['blue','#6b9ff0'],['purple','#ad8df6'],['pink','#e889c9'],['white','#f2f0f8'],['black','#202235']];
+    const huePanel=document.createElement('div');huePanel.className='group-inspector-sliders';huePanel.hidden=true;
+    const rgbToHsv=(hex)=>{
+      const c=[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255);
+      const max=Math.max(...c),min=Math.min(...c),delta=max-min;
+      let h=0;if(delta){if(max===c[0])h=((c[1]-c[2])/delta)%6;else if(max===c[1])h=(c[2]-c[0])/delta+2;else h=(c[0]-c[1])/delta+4;}
+      return [Math.round((h*60+360)%360),Math.round(max?delta/max*100:0),Math.round(max*100)];
+    };
+    const hsvToHex=(h,s,v)=>{
+      s/=100;v/=100;const c=v*s,x=c*(1-Math.abs((h/60)%2-1)),m=v-c;
+      const rgb=h<60?[c,x,0]:h<120?[x,c,0]:h<180?[0,c,x]:h<240?[0,x,c]:h<300?[x,0,c]:[c,0,x];
+      return '#'+rgb.map(n=>Math.round((n+m)*255).toString(16).padStart(2,'0')).join('');
+    };
+    const initial=groups()?.groupColor(group)||'#ad8df6';
+    const channels=rgbToHsv(initial);
+    const sliders=[];
+    for(const [i,title,max] of [['0','Hue',360],['1','Saturation',100],['2','Brightness',100]]){
+      const index=Number(i),line=document.createElement('label');line.className='group-inspector-slider';
+      const caption=document.createElement('span');caption.textContent=title;
+      const range=document.createElement('input');range.type='range';range.min='0';range.max=String(max);range.value=String(channels[index]);range.setAttribute('aria-label',title);
+      line.append(caption,range);huePanel.append(line);sliders.push(range);
+      range.addEventListener('input',()=>{
+        const hex=hsvToHex(...sliders.map(x=>Number(x.value)));
+        groups()?.updateGroup(id,{color:hex});refreshSelected();
+      });
+    }
+    function refreshSelected(){
+      for(const button of choices.children){
+        const key=button.dataset.color;
+        button.setAttribute('aria-pressed',String(key==='custom'?/^#/.test(group.color):group.color===key));
+      }
+    }
+    for(const [key,hex] of presets){
+      const button=document.createElement('button');button.type='button';button.className='group-inspector-swatch';
+      button.style.background=hex;button.dataset.color=key;button.title=key;button.setAttribute('aria-label',key+' group color');
+      button.addEventListener('click',()=>{groups()?.updateGroup(id,{color:key});huePanel.hidden=true;refreshSelected();});
+      choices.append(button);
+    }
+    const custom=document.createElement('button');custom.type='button';custom.className='group-inspector-swatch group-inspector-custom';
+    custom.dataset.color='custom';custom.title='Custom Color';custom.setAttribute('aria-label','Custom color sliders');
+    custom.addEventListener('click',()=>{
+      huePanel.hidden=!huePanel.hidden;
+      const values=rgbToHsv(groups()?.groupColor(group)||initial);
+      sliders.forEach((slider,i)=>slider.value=String(values[i]));
+      reposition();
+    });choices.append(custom);
+    host.append(choices,huePanel);refreshSelected();
+    document.body.append(host);fallback=host;
+    customOpen=true;
+    if(window.__TAURI__)void window.minternet?.command('chrome-overlay',true);
+    function reposition(){
+      const rect=host.getBoundingClientRect();
+      host.style.left=Math.max(3,Math.min(point.x||0,innerWidth-rect.width-3))+'px';
+      host.style.top=Math.max(3,Math.min(point.y||0,innerHeight-rect.height-3))+'px';
+    }
+    reposition();
+    document.addEventListener('pointerdown',outside,true);
+    document.addEventListener('keydown',esc,true);
+  }
   function fromElement(button){
     const bounds=button.getBoundingClientRect();
     return {x:bounds.left,y:bounds.bottom};
   }
   const handlers={
     folder:(id,button)=>popup(folderItems(id),fromElement(button)),
-    bookmark:(id,event)=>popup(barMenu(id),{x:event.clientX,y:event.clientY}),
-    bar:event=>popup(barMenu(),{x:event.clientX,y:event.clientY}),
+    bookmark:(id,event)=>popup(barMenu(id),{x:event.clientX,y:event.clientY},{custom:true,heading:'BOOKMARK FOLDER'}),
+    bar:event=>popup(barMenu(),{x:event.clientX,y:event.clientY},{custom:true,heading:'BOOKMARKS'}),
     groups:point=>popup(groupsMenu(),point,{custom:true,heading:'TAB GROUPS'}),
-    group:(id,point)=>popup(groupDetail(id),point,{custom:true,heading:groups()?.get(id)?.name||'GROUP OPTIONS'}),
+    group:(id,point)=>groupInspector(id,point),
     tab:(id,point)=>popup(tabMenu(id),point,{custom:true,heading:'TAB OPTIONS'}),
     inspectTab:id=>tabMenu(id),
     inspectBar:()=>barMenu(),
