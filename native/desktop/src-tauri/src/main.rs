@@ -1088,7 +1088,16 @@ fn main() {
                                     const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
                                     await api.command('navigate','https://example.com');
                                     await api.command('pin',1);
-                                    await sleep(400);
+                                    await api.command('new');
+                                    await sleep(240);
+                                    const groups=window.minternetGroups;
+                                    const group=groups.createGroup('Hidden Group Test','violet');
+                                    if(!group)return;
+                                    groups.assign(2,group.id);
+                                    groups.toggleVisible(group.id);
+                                    await sleep(450);
+                                    // Hiding the active grouped tab must focus pinned #1
+                                    // without creating a third phantom tab.
                                     const rendered=!!document.querySelector('.tab[data-tab-id="1"].pinned-tab');
                                     await api.command('pin-smoke-proof',{phase:'pinned',pinRendered:rendered});
                                   },550);
