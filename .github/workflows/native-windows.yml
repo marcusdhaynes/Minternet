@@ -110,6 +110,30 @@ jobs:
             if (!$ok) { throw "Nested bookmark folders or toolbar visibility failed" }
             "PASS: bookmark settings, unnamed emoji folders, nested folders and local persistence." >> $env:GITHUB_STEP_SUMMARY
           } finally {
+            if (!$p.HasExited) {
+              $null = $p.CloseMainWindow()
+              $null = $p.WaitForExit(6000)
+              if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
+            }
+            Remove-Item $proof -Force -ErrorAction SilentlyContinue
+          }
+      - name: Verify bookmark tree survives restarting portable Minternet
+        shell: pwsh
+        run: |
+          $exe = "$env:RUNNER_TEMP\minternet-portable\Minternet-Portable-x64.exe"
+          $p = Start-Process -FilePath $exe -ArgumentList "--minternet-bookmarks-reopen" -PassThru
+          $proof = Join-Path $env:TEMP "minternet-bookmarks-$($p.Id).ok"
+          try {
+            $ok = $false
+            for ($i = 0; $i -lt 30; $i++) {
+              Start-Sleep -Seconds 2
+              $p.Refresh()
+              if ($p.HasExited) { throw "Minternet exited during bookmark persistence check" }
+              if (Test-Path $proof) { $ok = $true; break }
+            }
+            if (!$ok) { throw "Bookmark data was not retained after application restart" }
+            "PASS: bookmark tree survives portable EXE restart." >> $env:GITHUB_STEP_SUMMARY
+          } finally {
             if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
             Remove-Item $proof -Force -ErrorAction SilentlyContinue
           }

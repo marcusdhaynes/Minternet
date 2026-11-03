@@ -476,7 +476,9 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             // Only enabled for CI's explicit smoke launch; not available during
             // ordinary browsing. Validate nested unnamed folders persisted by
             // the browser UI through its actual DOM form/event handlers.
-            if !std::env::args().any(|a| a == "--minternet-bookmarks-smoke") {
+            if !std::env::args().any(|a|
+                a == "--minternet-bookmarks-smoke" || a == "--minternet-bookmarks-reopen"
+            ) {
                 return Err("Unavailable outside bookmark smoke test".into());
             }
             let entries = value.get("items").and_then(Value::as_array).ok_or("Bookmark data missing")?;
@@ -708,6 +710,7 @@ fn main() {
             let smoke = std::env::args().any(|a| a == "--minternet-smoke");
             let turbo_smoke = std::env::args().any(|a| a == "--minternet-turbo-smoke");
             let bookmarks_smoke = std::env::args().any(|a| a == "--minternet-bookmarks-smoke");
+            let bookmarks_reopen = std::env::args().any(|a| a == "--minternet-bookmarks-reopen");
             window.add_child(
                 WebviewBuilder::new("chrome",WebviewUrl::App("index.html".into()))
                     .on_page_load(move |view, event| {
@@ -745,6 +748,14 @@ fn main() {
                                     $('bookmarkEditForm').requestSubmit();
                                     const state = JSON.parse(localStorage.getItem('minternet.bookmark-tree.v1'));
                                     await window.minternet?.command('bookmarks-smoke-proof', state);
+                                  }, 550);
+                                "#);
+                            } else if bookmarks_reopen {
+                                let _ = view.eval(r#"
+                                  setTimeout(async () => {
+                                    const saved = localStorage.getItem('minternet.bookmark-tree.v1');
+                                    if (!saved) return;
+                                    await window.minternet?.command('bookmarks-smoke-proof', JSON.parse(saved));
                                   }, 550);
                                 "#);
                             }
