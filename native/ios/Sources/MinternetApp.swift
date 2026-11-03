@@ -207,7 +207,7 @@ struct ContentView: View {
                     .accessibilityIdentifier("forward")
                 Button(action: { state.active?.webView.reload() }) { Image(systemName: "arrow.clockwise") }
                     .accessibilityIdentifier("reload")
-                TextField("Search or HTTPS address", text: $state.address)
+                TextField("", text: $state.address, prompt: Text("Search or HTTPS address").foregroundColor(Color(white: 0.70)))
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
