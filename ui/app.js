@@ -83,6 +83,10 @@ function render(data) {
   byId('modeLabel').textContent = active?.private ? 'Private' : 'Normal';
   byId('private').classList.toggle('active-mode', !!active?.private);
   byId('private').setAttribute('aria-pressed', String(!!active?.private));
+  byId('private').setAttribute('aria-label',
+    active?.private ? 'Private Mode · Switch to Normal' : 'Normal Mode · Switch to Private');
+  byId('private').title=active?.private ?
+    'Private Mode · Switch Current Tab to Normal' : 'Normal Mode · Switch Current Tab to Private';
   byId('connectionIcon').textContent = active?.url?.startsWith('http://') ? '!' : active?.private ? '◈' : '◇';
   byId('connectionIcon').title = active?.url?.startsWith('http://') ? 'Warning: unencrypted HTTP' : 'HTTPS preferred';
   byId('address').setAttribute('aria-label', active?.url?.startsWith('http://') ? 'Insecure HTTP address' : 'Search or enter address');
@@ -100,7 +104,7 @@ const bind = (id, name) => byId(id).addEventListener('click', () => command(name
 for (const [id, name] of [
   ['newTab','new'],['newPrivate','new-private'],['back','back'],['forward','forward'],
   ['reload','reload'],['home','home'],['private','privacy'],['tor','tor'],
-  ['extensions','extension-install'],['freeMemory','free-memory'],['minimize','minimize'],['maximize','maximize'],['quit','quit']
+  ['minimize','minimize'],['maximize','maximize'],['quit','quit']
 ]) bind(id,name);
 byId('addressForm').addEventListener('submit', event => {
   event.preventDefault();
@@ -139,3 +143,19 @@ window.addEventListener('keydown', event => {
     event.preventDefault(); byId('address').focus();
   }
 });
+
+/* The native Windows build is deliberately frameless. Only an empty patch of
+   the 22px app header or its logo can move the OS window; tab clicks/drags,
+   address input, and window controls continue functioning normally. */
+if(window.__TAURI__){
+  const topRow=document.querySelector('.tab-row');
+  const interactive='button,.tabs,.window-actions,.ungroup-drop-target,input,a,[role="tab"]';
+  topRow?.addEventListener('pointerdown',event=>{
+    if(event.button!==0||event.detail>1||event.target.closest(interactive))return;
+    void api.command('window-drag').catch(()=>{});
+  });
+  topRow?.addEventListener('dblclick',event=>{
+    if(event.target.closest(interactive))return;
+    void api.command('maximize').catch(()=>{});
+  });
+}
