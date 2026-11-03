@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod password_vault;
 
 use std::{sync::Mutex, collections::HashSet, path::PathBuf};
 use serde::Serialize;
@@ -437,6 +438,9 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
         .on_page_load(move |_view, event| {
             if matches!(event.event(), PageLoadEvent::Started | PageLoadEvent::Finished) {
                 update_from_site(&for_load, id, event.url().as_str());
+                if matches!(event.event(), PageLoadEvent::Finished) {
+                    let _=fill_saved_credential(&for_load,id,false,None);
+                }
             }
         })
         .on_document_title_changed(move |_view, title| {
@@ -470,6 +474,58 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
         tab.view = Some(label);
     }
     Ok(())
+}
+
+
+fn fill_saved_credential(app:&tauri::AppHandle,id:u32,manual:bool,username:Option<&str>)->Result<bool,String>{
+    let (label,address,private)={
+        let browser=app.state::<Mutex<Browser>>();
+        let b=browser.lock().map_err(|e|e.to_string())?;
+        let tab=b.tabs.iter().find(|t|t.id==id).ok_or("Tab not found")?;
+        (tab.view.clone(),tab.url.clone(),tab.private)
+    };
+    if private{return Ok(false);}
+    let Some(label)=label else {return Ok(false)};
+    let Some(view)=app.get_webview(&label) else{return Ok(false)};
+    let actual=view.url().map_err(|e|e.to_string())?;
+    let actual_origin=password_vault::origin(actual.as_str())?;
+    let tab_origin=password_vault::origin(&address)?;
+    if actual_origin!=tab_origin{return Ok(false);}
+    let credential={
+        let state=app.state::<Mutex<password_vault::Vault>>();
+        let vault=state.lock().map_err(|e|e.to_string())?;
+        vault.matching(&actual_origin,manual,username)
+    };
+    let Some(mut entry)=credential else {return Ok(false)};
+    let values=serde_json::json!({"origin":actual_origin,"username":entry.username,"password":entry.password});
+    // JSON escaping prevents credential values from becoming executable code.
+    let script=format!(r#"(function(){{
+        'use strict';
+        const data={};
+        if(location.origin!==data.origin || window.top!==window)return;
+        const visible=e=>!e.disabled&&!e.readOnly&&e.getClientRects().length>0;
+        const passwords=[...document.querySelectorAll('input[type="password"]')].filter(visible);
+        // Never populate registration, confirmation or password-change forms.
+        if(passwords.length!==1)return;
+        const password=passwords[0];
+        const form=password.form||document;
+        const inputs=[...form.querySelectorAll('input')].filter(visible);
+        const user=inputs.find(e=>e.autocomplete==='username')||
+            inputs.find(e=>e.type==='email')||
+            inputs.find(e=>e.type==='text'&&/user|email|login/i.test(e.name+' '+e.id));
+        const put=(element,value)=>{{
+            if(!element)return;
+            const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')?.set;
+            if(setter)setter.call(element,value);else element.value=value;
+            element.dispatchEvent(new Event('input',{{bubbles:true}}));
+            element.dispatchEvent(new Event('change',{{bubbles:true}}));
+        }};
+        put(user,data.username);put(password,data.password);
+    }})();"#,values);
+    use zeroize::Zeroize;
+    entry.password.zeroize();
+    view.eval(&script).map_err(|e|e.to_string())?;
+    Ok(true)
 }
 
 // Prepare one lightweight WebView2 controller only after the user focuses a
@@ -619,6 +675,54 @@ fn browser_snapshot(app: tauri::AppHandle) -> Result<Snapshot,String> { snapshot
 #[tauri::command]
 async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Result<Value, String> {
     match name.as_str() {
+        "vault-status" => {
+            let exists=password_vault::file(&app)?.exists();
+            let unlocked=app.state::<Mutex<password_vault::Vault>>().lock().map_err(|e|e.to_string())?.unlocked();
+            return Ok(json!({"exists":exists,"unlocked":unlocked}));
+        }
+        "vault-unlock" | "vault-create" => {
+            let password=value.as_str().ok_or("Master password required")?;
+            let state=app.state::<Mutex<password_vault::Vault>>();
+            state.lock().map_err(|e|e.to_string())?.unlock(
+                &password_vault::file(&app)?,password,name=="vault-create"
+            )?;
+            return Ok(json!({"ok":true}));
+        }
+        "vault-lock" => {
+            app.state::<Mutex<password_vault::Vault>>().lock().map_err(|e|e.to_string())?.lock();
+            return Ok(json!({"ok":true}));
+        }
+        "vault-list" => {
+            let state=app.state::<Mutex<password_vault::Vault>>();
+            return state.lock().map_err(|e|e.to_string())?.list();
+        }
+        "vault-put" => {
+            let url=value.get("origin").and_then(Value::as_str).ok_or("Missing site origin")?;
+            let origin=password_vault::origin(url)?;
+            let username=value.get("username").and_then(Value::as_str).ok_or("Missing username")?;
+            let password=value.get("password").and_then(Value::as_str).ok_or("Missing password")?;
+            let autofill=value.get("autofill").and_then(Value::as_bool).unwrap_or(true);
+            let state=app.state::<Mutex<password_vault::Vault>>();
+            let mut vault=state.lock().map_err(|e|e.to_string())?;
+            vault.put(origin,username.to_string(),password.to_string(),autofill)?;
+            vault.save(&password_vault::file(&app)?)?;
+            return Ok(json!({"ok":true}));
+        }
+        "vault-remove" => {
+            let url=value.get("origin").and_then(Value::as_str).ok_or("Missing origin")?;
+            let origin=password_vault::origin(url)?;
+            let username=value.get("username").and_then(Value::as_str).ok_or("Missing username")?;
+            let state=app.state::<Mutex<password_vault::Vault>>();
+            let mut vault=state.lock().map_err(|e|e.to_string())?;
+            vault.remove(&origin,username)?;
+            vault.save(&password_vault::file(&app)?)?;
+            return Ok(json!({"ok":true}));
+        }
+        "vault-fill" => {
+            let username=value.as_str().ok_or("Choose a saved username")?;
+            let id=app.state::<Mutex<Browser>>().lock().map_err(|e|e.to_string())?.active_id;
+            return Ok(json!({"filled":fill_saved_credential(&app,id,true,Some(username))?}));
+        }
         "pin-smoke-proof" => {
             if !std::env::args().any(|a|a=="--minternet-pin-smoke"||
                                         a=="--minternet-pin-reopen-smoke") {
@@ -1062,6 +1166,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
 fn main() {
     tauri::Builder::default()
         .manage(Mutex::new(Browser::new()))
+        .manage(Mutex::new(password_vault::Vault::default()))
         .manage(Mutex::new(LayoutCache::default()))
         .invoke_handler(tauri::generate_handler![browser_action, browser_snapshot])
         .setup(|app| {
