@@ -201,8 +201,13 @@ jobs:
             if (!$found) { throw "Double-click maximize/restore or compact chrome invariant failed" }
             "PASS: title-bar double-click maximizes/restores; group button left; uniform 71px tabs; no Home/Kbd buttons; Normal/Tor visible." >> $env:GITHUB_STEP_SUMMARY
           } finally {
+            $debug = @(Get-ChildItem $env:TEMP -Filter "minternet-rapid-stage-$($p.Id)-*.txt" -ErrorAction SilentlyContinue)
+            foreach ($file in $debug) {
+              Write-Host "$($file.Name): $(Get-Content $file.FullName -Raw)"
+            }
             if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
             Remove-Item $maxMarker,$restoreMarker -Force -ErrorAction SilentlyContinue
+            $debug | Remove-Item -Force -ErrorAction SilentlyContinue
           }
       - uses: actions/upload-artifact@v4
         with:

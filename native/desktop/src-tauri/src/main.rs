@@ -478,6 +478,17 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             window.start_dragging().map_err(|e|e.to_string())?;
             return Ok(json!({"ok":true}));
         }
+        "rapid-ui-smoke-stage" => {
+            if !std::env::args().any(|a|a=="--minternet-rapid-ui-smoke"){
+                return Err("Rapid UI diagnostic disabled".into());
+            }
+            let stage=value.as_str().unwrap_or("unknown");
+            if stage.len()>60 {return Err("Diagnostic stage invalid".into())}
+            let path=std::env::temp_dir()
+                .join(format!("minternet-rapid-stage-{}-{stage}.txt",std::process::id()));
+            std::fs::write(path,stage).map_err(|e|e.to_string())?;
+            return Ok(json!({"ok":true}));
+        }
         "rapid-ui-smoke-proof" => {
             if !std::env::args().any(|a|a=="--minternet-rapid-ui-smoke") {
                 return Err("Not a rapid UI test".into());
@@ -485,6 +496,9 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             let phase=value.get("phase").and_then(Value::as_str).ok_or("Missing test phase")?;
             let window=app.get_window("main").ok_or("No main window")?;
             let maximized=window.is_maximized().map_err(|e|e.to_string())?;
+            let inspect=std::env::temp_dir()
+                .join(format!("minternet-rapid-stage-{}-{phase}.txt",std::process::id()));
+            let _=std::fs::write(inspect,format!("maximized={maximized},payload={value}"));
             let ui=value.get("ui").ok_or("UI measurements missing")?;
             let width=ui.get("tabWidth").and_then(Value::as_f64).ok_or("No tab width")?;
             for key in ["groupFirst","homeRemoved","kbdRemoved","modeLabelsVisible","folderSaveRemoved"] {
@@ -852,10 +866,13 @@ fn main() {
                                     };
                                     const fire=()=>row.dispatchEvent(new MouseEvent('dblclick',{bubbles:true,button:0}));
                                     const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+                                    await window.minternet?.command('rapid-ui-smoke-stage','init');
                                     fire();await sleep(550);
                                     await window.minternet?.command('rapid-ui-smoke-proof',{phase:'maximize',ui});
+                                    await window.minternet?.command('rapid-ui-smoke-stage','after-max');
                                     fire();await sleep(550);
                                     await window.minternet?.command('rapid-ui-smoke-proof',{phase:'restore',ui});
+                                    await window.minternet?.command('rapid-ui-smoke-stage','after-restore');
                                   },750);
                                 "#);
                             } else if menus_smoke {
