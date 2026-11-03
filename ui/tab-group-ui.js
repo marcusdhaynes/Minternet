@@ -234,6 +234,15 @@
           attachTabMenu(item,tab.id);
           items.push(item);
         }
+        // A visible end-cap continues the group's tinted background beyond
+        // its final tab. It is decorative only and never affects tab actions.
+        if(members.length){
+          const end=document.createElement('span');
+          end.className='group-end-cap';
+          end.style.setProperty('--group-accent',groupColor(g));
+          end.setAttribute('aria-hidden','true');
+          items.push(end);
+        }
       }
     }
     for(const tab of model.sortedTabs(state,data.tabs)){
