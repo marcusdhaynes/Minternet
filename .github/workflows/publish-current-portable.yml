@@ -68,18 +68,29 @@ jobs:
             echo "Skipping older Windows run $SOURCE_RUN_ID (latest pass: $LATEST)" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          TAG=v0.4.0-native-menus-tab-groups
+          CURRENT=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          if [ "$SHA" != "$CURRENT" ]; then
+            echo "Skipping stale Windows binary $SHA; main is $CURRENT" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          TAG=v0.5.0-rapid-chrome-fixes
           cat > notes.md <<'NOTES'
-          ## Minternet Portable — Native Menus & Tab Groups
+          ## Minternet Portable — Rapid Chrome Fixes
 
-          A single Windows x64 EXE using the existing WebView2 runtime. No installer
-          or adjacent application files. The portable package is under 50 MB.
+          A single portable Windows x64 EXE under 50 MB, using the operating
+          system's existing WebView2 runtime. No installer or adjacent app files.
 
-          - Native anchored bookmark-folder popups, cascading subfolders.
-          - Compact tab-group icon, groups with color and collapse/expand.
-          - Bookmark Bar right-click → Tab Groups → show/hide with eye indicator.
-          - Right-click tabs to assign them to groups, or drag tabs onto group chips.
-          - Local bookmark and group-definition persistence.
+          - Double-click empty tab-bar space to maximize or restore the previous size.
+          - Fixed-width 71px tabs, half their previous 142px width.
+          - Group launcher moved to the far left of the tab strip.
+          - Drag tabs before/after one another, into groups and out of groups.
+          - Darker, cleaner native menus when supported by Windows.
+          - Removed Bookmark This Page from folder and subfolder menus.
+          - Normal and Tor buttons remain visibly labeled.
+          - Removed Home button and address-bar shortcut label; star is at the right.
+
+          Tor is NOT integrated: its control still provides information only.
+          Existing bookmarks and local group definitions are preserved.
 
           Download the EXE under Assets. This is an unsigned development build.
           Windows WebView2 runtime and its normal per-user browser data are separate.
@@ -94,7 +105,7 @@ jobs:
           else
             gh release create "$TAG" \
               release/Minternet-Portable-x64.exe release/Minternet-Portable-x64.exe.sha256 \
-              --title "Minternet Portable — Native Menus & Tab Groups" \
+              --title "Minternet Portable — Rapid Chrome Fixes" \
               --notes-file notes.md --prerelease --target "$SHA" \
               --repo "$GITHUB_REPOSITORY"
           fi
