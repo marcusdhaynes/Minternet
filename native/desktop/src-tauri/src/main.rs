@@ -24,7 +24,7 @@ struct Tab {
     at: usize,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PublicTab {
     id: u32,
@@ -38,7 +38,7 @@ struct PublicTab {
     error: String,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Snapshot {
     tabs: Vec<PublicTab>,
@@ -205,7 +205,7 @@ fn update_from_site(app: &tauri::AppHandle, id: u32, url: &str) {
                 }
                 if tab.title == "New Tab" { tab.title = title_for(url); }
             }
-        }
+        };
     }
     notify(app);
 }
@@ -285,7 +285,7 @@ fn navigate_tab(app: &tauri::AppHandle, id: u32, url: Option<tauri::Url>, append
         let state = app.state::<Mutex<Browser>>();
         if let Ok(mut b) = state.lock() {
             if let Some(tab) = b.tabs.iter_mut().find(|t| t.id == id) { tab.view = None; }
-        }
+        };
     }
     display_active(app);
     Ok(())
