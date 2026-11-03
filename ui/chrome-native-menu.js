@@ -74,16 +74,22 @@
   function tabMenu(tabId){
     const g=groups(), b=ctrl();
     if(!g)return [disabled('Unavailable')];
+    const tab=g.getLatest().tabs.find(t=>t.id===tabId);
+    if(!tab)return [disabled('Tab no longer exists')];
     const belonging=window.MinternetGroupModel.findTab(g.getState(),tabId);
     const assignOptions=[item('＋  New Group With Tab…',()=>{g.openEditor(null,tabId);})];
     for(const group of g.getState().groups) {
       assignOptions.push(item((belonging?.id===group.id?'✓  ':'●  ')+g.displayName(group),()=>g.assign(tabId,group.id)));
     }
     return [
-      sub('▣  Add Tab To Group',assignOptions),
-      ...(belonging?[item('Remove Tab From '+g.displayName(belonging),()=>g.ungroup(tabId))]:[]),
-      sep(),item('☆  Bookmark This Page',()=>b?.toggleBookmark()),
-      item('＋  New Tab',()=>window.minternet?.command('new'))
+      item(tab.pinned?'◇  Unpin Tab':'◆  Pin Tab',()=>g.pin(tabId,!tab.pinned)),
+      sub('▣  Move To Tab Group',assignOptions),
+      ...(belonging?[item('↙  Remove From '+g.displayName(belonging),()=>g.ungroup(tabId))]:[]),
+      sep(),
+      item('⧉  Duplicate Tab',()=>window.minternet?.command('duplicate',tabId)),
+      ...(tab.url?.startsWith('https://')?[item('☆  Bookmark Page',()=>window.minternet?.command('activate',tabId).then(()=>b?.toggleBookmark()))]:[]),
+      sep(),
+      item('×  Close Tab',()=>window.minternet?.command('close',tabId))
     ];
   }
   function barMenu(folderId=null){
@@ -105,11 +111,15 @@
 
   // For the GitHub Pages UI-only demo, use a small DOM popup and cascading
   // submenus. The actual installed browser uses the native OS menu above.
-  let fallback=null;
+  let fallback=null,customOpen=false;
   function closeFallback(){
     fallback?.remove();fallback=null;
     document.removeEventListener('pointerdown',outside,true);
     document.removeEventListener('keydown',esc,true);
+    if(customOpen){
+      customOpen=false;
+      if(window.__TAURI__)void window.minternet?.command('chrome-overlay',false);
+    }
   }
   function outside(e){if(fallback&&!fallback.contains(e.target))closeFallback();}
   function esc(e){if(e.key==='Escape'){e.preventDefault();closeFallback();}}
@@ -140,9 +150,9 @@
     }
     return list;
   }
-  async function popup(items,point){
+  async function popup(items,point,options={}){
     const x=Math.max(0,Math.round(point.x||0)), y=Math.max(0,Math.round(point.y||0));
-    if(window.__TAURI__?.menu?.Menu){
+    if(!options.custom&&window.__TAURI__?.menu?.Menu){
       const api=window.__TAURI__;
       try {
         const native=await api.menu.Menu.new({items});
@@ -157,12 +167,22 @@
       }
     }
     closeFallback();
-    const host=document.createElement('div');host.className='system-popup-root';
+    const host=document.createElement('div');
+    host.className='system-popup-root'+(options.custom?' minternet-context-menu':'');
+    if(options.custom){
+      const header=document.createElement('div');
+      header.className='minternet-context-heading';
+      header.textContent=options.heading||'MINTERNET';
+      host.append(header);
+      customOpen=true;
+      if(window.__TAURI__)void window.minternet?.command('chrome-overlay',true);
+    }
     const contents=domMenu(items);host.append(contents);
     document.body.append(host);fallback=host;
     const rect=host.getBoundingClientRect();
     host.style.left=Math.max(2,Math.min(x,innerWidth-rect.width-3))+'px';
     host.style.top=Math.max(3,Math.min(y,innerHeight-rect.height-4))+'px';
+    if(x+rect.width*2>innerWidth)host.classList.add('flip-left');
     document.addEventListener('pointerdown',outside,true);
     document.addEventListener('keydown',esc,true);
     return true;
@@ -175,9 +195,10 @@
     folder:(id,button)=>popup(folderItems(id),fromElement(button)),
     bookmark:(id,event)=>popup(barMenu(id),{x:event.clientX,y:event.clientY}),
     bar:event=>popup(barMenu(),{x:event.clientX,y:event.clientY}),
-    groups:point=>popup(groupsMenu(),point),
-    group:(id,point)=>popup(groupDetail(id),point),
-    tab:(id,point)=>popup(tabMenu(id),point),
+    groups:point=>popup(groupsMenu(),point,{custom:true,heading:'TAB GROUPS'}),
+    group:(id,point)=>popup(groupDetail(id),point,{custom:true,heading:groups()?.get(id)?.name||'GROUP OPTIONS'}),
+    tab:(id,point)=>popup(tabMenu(id),point,{custom:true,heading:'TAB OPTIONS'}),
+    inspectTab:id=>tabMenu(id),
     inspectBar:()=>barMenu(),
     inspectFolder:id=>folderItems(id),
     nativePopupCount:()=>nativePopupCount
