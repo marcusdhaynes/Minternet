@@ -18,6 +18,9 @@ jobs:
           - os: macos-latest
             label: macOS
             target: dmg
+          - os: macos-15-intel
+            label: macOS-Intel
+            target: dmg
           - os: ubuntu-22.04
             label: Linux
             target: deb
