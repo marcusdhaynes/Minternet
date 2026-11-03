@@ -16,6 +16,7 @@ function harness() {
   const tabs=[{id:1,title:'Example',url:'https://example.com/',pinned:false}];
   const window={
     MinternetBookmarks:bm,
+    MinternetGroupModel:gm,
     minternetBookmarks:{
       getState:()=>bookmarks,
       edit:()=>{flags.folderEdits++}, newFolder:()=>{},savePage:()=>{},
