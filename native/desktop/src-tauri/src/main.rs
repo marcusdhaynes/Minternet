@@ -321,23 +321,25 @@ fn display_active(app: &tauri::AppHandle) {
 
 fn update_from_site(app: &tauri::AppHandle, id: u32, url: &str) {
     if !url.starts_with("https://") { return; }
+    let mut pinned_change=false;
     {
-        let state = app.state::<Mutex<Browser>>();
-        if let Ok(mut browser) = state.lock() {
-            if let Some(tab) = browser.tabs.iter_mut().find(|tab| tab.id == id) {
-                if tab.url != url {
-                    tab.url = url.to_string();
-                    if tab.history.get(tab.at).map(|s| s.as_str()) != Some(url) {
-                        tab.history.truncate(tab.at + 1);
+        let state=app.state::<Mutex<Browser>>();
+        if let Ok(mut browser)=state.lock(){
+            if let Some(tab)=browser.tabs.iter_mut().find(|tab|tab.id==id){
+                if tab.url!=url {
+                    pinned_change=tab.pinned && !tab.private;
+                    tab.url=url.into();
+                    if tab.history.get(tab.at).map(|s|s.as_str())!=Some(url) {
+                        tab.history.truncate(tab.at+1);
                         tab.history.push(url.into());
-                        tab.at = tab.history.len() - 1;
+                        tab.at=tab.history.len()-1;
                     }
                 }
-                if tab.title == "New Tab" { tab.title = title_for(url); }
+                if tab.title=="New Tab"{tab.title=title_for(url);}
             }
-        };
+        }
     }
-    let _=save_pinned(app);
+    if pinned_change{let _=save_pinned(app);}
     notify(app);
 }
 
@@ -523,11 +525,14 @@ fn navigate_tab(app: &tauri::AppHandle, id: u32, url: Option<tauri::Url>, append
 }
 
 fn activated(app: &tauri::AppHandle) -> Result<(), String> {
-    let (id, url, view_exists) = {
-        let state = app.state::<Mutex<Browser>>();
-        let b = state.lock().map_err(|e| e.to_string())?;
-        let Some(tab)=b.active() else {display_active(app);return Ok(())};
-        (tab.id, tab.url.clone(), tab.view.is_some())
+    let current={
+        let state=app.state::<Mutex<Browser>>();
+        let b=state.lock().map_err(|e|e.to_string())?;
+        b.active().map(|tab|(tab.id,tab.url.clone(),tab.view.is_some()))
+    };
+    let Some((id,url,view_exists))=current else {
+        display_active(app);
+        return Ok(());
     };
     if url != HOME && !view_exists {
         navigate_tab(app, id, Some(tauri::Url::parse(&url).map_err(|e| e.to_string())?), false)?;
@@ -1160,6 +1165,9 @@ fn main() {
                 LogicalPosition::new(0.0,0.0),
                 LogicalSize::new(width,height)
             )?;
+            // Restored pinned URLs need their real WebView2 on first launch;
+            // without pins, activated displays the true tabless home view.
+            activated(app.handle()).map_err(std::io::Error::other)?;
             let handle = app.handle().clone();
             window.on_window_event(move |event| {
                 if matches!(event, tauri::WindowEvent::Resized(_)) {
