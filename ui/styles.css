@@ -403,3 +403,9 @@ h1 em { color: #b3bfff; font-family: Georgia, serif; font-weight: 400; letter-sp
 .bookmark-editor-buttons button.bookmark-delete {color:#ffc6c6;border-color:#88565b;background:transparent;}
 .bookmark-fill {flex:1;}
 @media(max-width:500px){.bookmark-panel{top:3px;max-height:calc(100% - 6px);}.bookmark-items{gap:0;}}
+
+.bookmark-folder-row {display:flex; align-items:center; gap:3px; padding:2px 2px; border-radius:5px;}
+.bookmark-folder-row:hover {background:#ffffff0c;}
+.bookmark-folder-row > .bookmark-folder-entry {flex:1; min-width:0; width:auto;}
+.bookmark-folder-row > .edit {flex:0 0 22px; width:22px; height:24px; border:0; border-radius:5px; background:transparent; color:#9caed4; font-size:12px;}
+.bookmark-folder-row > .edit:hover {background:#ffffff24; color:white;}

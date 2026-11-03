@@ -141,11 +141,11 @@
   function folderParent() {
     const info = model.location(data, folderId);
     if (info?.parent) openFolder(info.parent.id);
-    else setMode('manager');
+    else { renderManager(); setMode('manager'); }
   }
   function entryForMenu(item) {
     const row = document.createElement('div');
-    row.className = 'bookmark-folder-entry';
+    row.className = 'bookmark-folder-row';
     const open = document.createElement('button');
     open.className = 'bookmark-folder-entry';
     open.type = 'button';
@@ -196,7 +196,7 @@
       for (const item of items) {
         const row = document.createElement('div');
         row.className = 'bookmark-tree-line';
-        row.style.paddingLeft = Math.min(12, depth * 13 + 4) + 'px';
+        row.style.paddingLeft = Math.min(160, depth * 13 + 4) + 'px';
         const icon = iconNode(item);
         const label = document.createElement('button');
         label.className = 'label';
@@ -381,6 +381,12 @@
   });
   window.addEventListener('keydown', event => {
     if (event.key === 'Escape' && mode) { event.preventDefault(); closeOverlay(); }
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'b') {
+      event.preventDefault(); changeVisibility(!data.visible); return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'o') {
+      event.preventDefault(); renderManager(); setMode('manager'); return;
+    }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd') {
       event.preventDefault();
       toggleBookmark();
