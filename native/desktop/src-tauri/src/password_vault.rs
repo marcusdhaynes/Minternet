@@ -46,9 +46,9 @@ impl Vault {
             serde_json::json!({"origin":e.origin,"username":e.username,"autofill":e.autofill})
         ).collect::<Vec<_>>()))
     }
-    pub fn matching(&self, origin:&str) -> Option<Entry> {
+    pub fn matching(&self, origin:&str, manual:bool, username:Option<&str>) -> Option<Entry> {
         if !self.unlocked(){return None;}
-        self.entries.iter().find(|e|e.origin==origin&&e.autofill).cloned()
+        self.entries.iter().find(|e|e.origin==origin&&(manual||e.autofill)&&username.map(|name|name==e.username).unwrap_or(true)).cloned()
     }
     fn key_from(password:&str,salt:&[u8;16]) -> Result<[u8;32],String> {
         if password.len()<12||password.len()>1024{return Err("Master password must contain 12–1024 characters".into());}
