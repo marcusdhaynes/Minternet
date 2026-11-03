@@ -9,6 +9,7 @@
   let latest={tabs:[],activeId:null};
   let lastRenderKey='', editing=null, assignTarget=null, fallbackPending=false;
   let draggingTabId=null;
+  let gesture=null, ghost=null, suppressedClick=null;
   const ungroupTarget=$('tabUngroupDrop');
   const tabStrip=$('tabs');
   const palette={
@@ -74,6 +75,8 @@
   }
   function clearDropState(){
     draggingTabId=null;
+    ghost?.remove();
+    ghost=null;
     document.body.classList.remove('tab-dragging');
     tabStrip.classList.remove('drag-ungroup-over');
     ungroupTarget?.classList.remove('drag-target');
@@ -146,11 +149,6 @@
     const count=document.createElement('span');count.className='group-chip-count';count.textContent=String(tabs.length);
     node.append(dot,name,count);
     node.addEventListener('click',()=>toggleCollapsed(g.id));
-    node.addEventListener('dragover',event=>acceptDrag(event,node,'drag-target'));
-    node.addEventListener('dragleave',event=>{
-      if(!node.contains(event.relatedTarget))node.classList.remove('drag-target');
-    });
-    node.addEventListener('drop',event=>dropIntoGroup(event,g.id));
     node.addEventListener('contextmenu',event=>{
       event.preventDefault();
       window.minternetMenus?.group(g.id,{x:event.clientX,y:event.clientY});
@@ -196,57 +194,106 @@
     host.replaceChildren(...items);
   }
   function attachTabMenu(element,tabId){
-    element.draggable=true;
-    element.addEventListener('dragstart',event=>{
-      if(!event.dataTransfer){event.preventDefault();return;}
-      draggingTabId=tabId;
-      event.dataTransfer.setData('text/minternet-tab',String(tabId));
-      event.dataTransfer.setData('text/plain',String(tabId));
-      event.dataTransfer.effectAllowed='move';
-      document.body.classList.add('tab-dragging');
-      element.classList.add('tab-drag-source');
-    });
-    element.addEventListener('dragend',clearDropState);
-    element.addEventListener('dragover',event=>{
-      if(currentDraggedTab()===null||currentDraggedTab()===tabId)return;
-      acceptDrag(event,element,'group-drop-target');
-      const after=event.clientX>=element.getBoundingClientRect().left+
-        element.getBoundingClientRect().width/2;
-      element.classList.toggle('drop-before',!after);
-      element.classList.toggle('drop-after',after);
-      const group=model.findTab(state,tabId);
-      if(group)element.style.setProperty('--group-accent',groupColor(group));
-    });
-    element.addEventListener('dragleave',event=>{
-      if(!element.contains(event.relatedTarget))element.classList.remove('group-drop-target','drop-before','drop-after');
-    });
-    element.addEventListener('drop',event=>{
-      if(currentDraggedTab()===null||currentDraggedTab()===tabId)return;
-      dropNextTo(event,tabId,element);
-    });
+    // HTML5 drag/drop on Windows WebView2 shows a forbidden cursor because the
+    // system expects an external file/data destination. The browser's own
+    // tabs instead use capture-based pointer tracking, just like native tabs.
+    element.draggable=false;
+    element.addEventListener('dragstart',event=>event.preventDefault());
+    element.addEventListener('click',event=>{
+      if(suppressedClick?.id===tabId && performance.now()<suppressedClick.until){
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        suppressedClick=null;
+      }
+    },true);
     element.addEventListener('contextmenu',event=>{
       event.preventDefault();
       window.minternetMenus?.tab(tabId,{x:event.clientX,y:event.clientY});
     });
   }
-  // Dropping a grouped tab onto the empty strip, an ordinary tab, or the
-  // temporary Ungroup target removes membership without closing its webview.
-  tabStrip.addEventListener('dragover',event=>{
-    if(currentDraggedTab()===null||event.target.closest('.tab,.group-chip'))return;
-    acceptDrag(event,tabStrip,'drag-ungroup-over');
-  });
-  tabStrip.addEventListener('dragleave',event=>{
-    if(!tabStrip.contains(event.relatedTarget))tabStrip.classList.remove('drag-ungroup-over');
-  });
-  tabStrip.addEventListener('drop',event=>{
-    if(event.target.closest('.tab,.group-chip'))return;
-    dropOutsideGroup(event);
-  });
-  ungroupTarget?.addEventListener('dragover',event=>acceptDrag(event,ungroupTarget,'drag-target'));
-  ungroupTarget?.addEventListener('dragleave',()=>ungroupTarget.classList.remove('drag-target'));
-  ungroupTarget?.addEventListener('drop',dropOutsideGroup);
-  // Native WebView2 may cancel a drag if it leaves the browser chrome.
-  document.addEventListener('dragend',clearDropState);
+  function beginPointer(event){
+    if(event.button!==0||event.isPrimary===false||gesture)return;
+    if(event.target.closest('.tab-close'))return;
+    const tab=event.target.closest('.tab[data-tab-id]');
+    const id=Number(tab?.dataset.tabId);
+    if(!tab||!Number.isSafeInteger(id)||!latest.tabs.some(t=>t.id===id))return;
+    gesture={id,pointerId:event.pointerId,x:event.clientX,y:event.clientY,active:false};
+  }
+  function createGhost(tabId){
+    const tab=latest.tabs.find(t=>t.id===tabId);
+    ghost=document.createElement('div');
+    ghost.className='tab-drag-ghost';
+    ghost.setAttribute('aria-hidden','true');
+    ghost.textContent='◉  '+(tab?.title||'New Tab');
+    document.body.append(ghost);
+  }
+  function updateHover(x,y){
+    tabStrip.querySelectorAll('.drag-target,.group-drop-target,.drop-before,.drop-after')
+      .forEach(node=>node.classList.remove('drag-target','group-drop-target','drop-before','drop-after'));
+    tabStrip.classList.remove('drag-ungroup-over');
+    ungroupTarget?.classList.remove('drag-target');
+    const hit=document.elementFromPoint(x,y);
+    const chip=hit?.closest('.group-chip[data-group-id]');
+    if(chip){chip.classList.add('drag-target');return;}
+    const tab=hit?.closest('.tab[data-tab-id]');
+    if(tab){
+      const dest=Number(tab.dataset.tabId);
+      if(dest===draggingTabId)return;
+      tab.classList.add('group-drop-target');
+      const rect=tab.getBoundingClientRect();
+      tab.classList.add(x>=rect.left+rect.width/2?'drop-after':'drop-before');
+      return;
+    }
+    if(hit?.closest('#tabUngroupDrop'))ungroupTarget?.classList.add('drag-target');
+    else if(hit?.closest('#tabs'))tabStrip.classList.add('drag-ungroup-over');
+  }
+  function movePointer(event){
+    if(!gesture||event.pointerId!==gesture.pointerId)return;
+    if(!gesture.active){
+      if(Math.hypot(event.clientX-gesture.x,event.clientY-gesture.y)<5)return;
+      gesture.active=true;
+      draggingTabId=gesture.id;
+      createGhost(gesture.id);
+      document.body.classList.add('tab-dragging');
+      tabStrip.querySelectorAll('.tab[data-tab-id]').forEach(el=>{
+        el.classList.toggle('tab-drag-source',Number(el.dataset.tabId)===draggingTabId);
+      });
+      try {tabStrip.setPointerCapture(event.pointerId);}catch{}
+    }
+    event.preventDefault();
+    if(ghost){ghost.style.left=Math.round(event.clientX+11)+'px';ghost.style.top=Math.round(event.clientY+9)+'px';}
+    updateHover(event.clientX,event.clientY);
+  }
+  function finishPointer(event){
+    if(!gesture||event.pointerId!==gesture.pointerId)return;
+    const finished=gesture;
+    gesture=null;
+    if(!finished.active)return;
+    event.preventDefault();
+    suppressedClick={id:finished.id,until:performance.now()+350};
+    const hit=document.elementFromPoint(event.clientX,event.clientY);
+    const chip=hit?.closest('.group-chip[data-group-id]');
+    const tab=hit?.closest('.tab[data-tab-id]');
+    const groupId=chip?.dataset.groupId;
+    if(groupId)dropIntoGroup(event,groupId);
+    else if(tab&&Number(tab.dataset.tabId)!==finished.id)
+      dropNextTo(event,Number(tab.dataset.tabId),tab);
+    else if(hit?.closest('#tabUngroupDrop')||hit?.closest('#tabs'))
+      dropOutsideGroup(event);
+    try {if(tabStrip.hasPointerCapture(event.pointerId))tabStrip.releasePointerCapture(event.pointerId);}catch{}
+    clearDropState();
+  }
+  function cancelPointer(event){
+    if(!gesture||(event.pointerId!=null&&gesture.pointerId!==event.pointerId))return;
+    gesture=null;clearDropState();
+  }
+  tabStrip.addEventListener('pointerdown',beginPointer);
+  // Capture does not depend on HTML DataTransfer and keeps tracking over the
+  // group chip, ordinary tabs, blank strip or ungroup affordance.
+  document.addEventListener('pointermove',movePointer,{capture:true,passive:false});
+  document.addEventListener('pointerup',finishPointer,{capture:true,passive:false});
+  document.addEventListener('pointercancel',cancelPointer,true);
+  window.addEventListener('blur',()=>cancelPointer({}));
   function openEditor(groupId=null,withActive=false) {
     window.minternetBookmarks?.closeOverlay();
     const group=groupId?model.get(state,groupId):null;
