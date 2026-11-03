@@ -98,6 +98,19 @@ public class MainActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BG);
         setContentView(root);
+        // Android 15 enforces edge-to-edge layout for modern targetSdk apps.
+        // Respect status/navigation-bar insets so the clock cannot overlap tabs.
+        if(Build.VERSION.SDK_INT>=30) {
+            root.setOnApplyWindowInsetsListener((view,insets)->{
+                android.graphics.Insets bars=insets.getInsets(
+                    android.view.WindowInsets.Type.statusBars() |
+                    android.view.WindowInsets.Type.navigationBars() |
+                    android.view.WindowInsets.Type.displayCutout());
+                root.setPadding(0,bars.top,0,bars.bottom);
+                return insets;
+            });
+            root.requestApplyInsets();
+        }
         HorizontalScrollView strip=new HorizontalScrollView(this);
         strip.setHorizontalScrollBarEnabled(false);
         strip.setFillViewport(true);
