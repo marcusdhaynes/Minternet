@@ -533,3 +533,12 @@ body.tab-dragging .ungroup-drop-target{display:flex}
 .system-popup-row:focus-visible {background:linear-gradient(90deg,#5a638b,#495774);color:#fff;}
 .system-popup-separator {margin:4px 8px;height:1px;background:#53617e77;}
 .system-popup-arrow {color:#afbcdf;font-size:13px;}
+
+/* Both Normal and Tor remain visibly labeled in every browser state.
+   Override legacy icon-only width and small-screen span-hiding rules. */
+.toolbar-actions .mode-symbol-btn {flex:0 0 auto;width:auto;min-width:0;padding:0 7px;display:flex;align-items:center;gap:4px;}
+.toolbar-actions .mode-symbol-btn .mode-text {display:inline!important;opacity:1;font-size:10px;}
+@media(max-width:600px){
+  .toolbar-actions .mode-symbol-btn {padding:0 4px;gap:3px;}
+  .toolbar-actions .mode-symbol-btn .mode-text {display:inline!important;font-size:9px;}
+}
