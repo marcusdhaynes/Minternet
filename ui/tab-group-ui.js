@@ -13,8 +13,7 @@
   const ungroupTarget=$('tabUngroupDrop');
   const tabStrip=$('tabs');
   const palette={
-    violet:'#ad9cf9',blue:'#82aefa',teal:'#69d4c9',green:'#8bda9a',
-    amber:'#e8c16d',orange:'#e7a16c',pink:'#e89acb',red:'#e18591',slate:'#a1adbf'
+    red:'#ea5967',orange:'#f39b52',yellow:'#f1ce59',green:'#65c98a',blue:'#6b9ff0',purple:'#ad8df6',pink:'#e889c9',white:'#f2f0f8',black:'#202235',violet:'#ad9cf9',teal:'#69d4c9',amber:'#e8c16d',slate:'#a1adbf'
   };
   function persist() {
     try {localStorage.setItem(KEY,model.serialize(state));}
@@ -22,7 +21,7 @@
     repaint();
   }
   function displayName(g) {return g.name || 'Unnamed Group';}
-  function groupColor(g) {return palette[g.color]||palette.violet;}
+  function groupColor(g) {return palette[g.color]||(/^#[0-9a-f]{6}$/i.test(g.color)?g.color:palette.purple);}
   function eligibleFallback() {
     const t=latest.tabs.find(x=>x.id===latest.activeId);
     if(!t||model.isVisibleTab(state,t.id))return;
@@ -37,7 +36,7 @@
     eligibleFallback();
     if (typeof window.minternetRenderTabs==='function') window.minternetRenderTabs();
   }
-  function createGroup(name='New Group',color='violet',tabId=null) {
+  function createGroup(name='New Group',color='purple',tabId=null) {
     const group=model.create(state,{name,color});
     if(!group) {window.minternetToast?.('Too many tab groups.');return null;}
     if(tabId!=null)assign(tabId,group.id);
@@ -170,14 +169,14 @@
   function buildChip(g,tabs) {
     const node=document.createElement('button');
     node.type='button';
-    node.className='group-chip';
+    node.className='group-chip'+(g.collapsed?' group-collapsed':' group-expanded');
     node.style.setProperty('--group-accent',groupColor(g));
     node.dataset.groupId=g.id;
     node.setAttribute('aria-label',(g.collapsed?'Expand':'Collapse')+' Tab Group: '+displayName(g));
     node.setAttribute('aria-expanded',String(!g.collapsed));
     node.title=displayName(g)+' · '+tabs.length+' tabs · Click to '+(g.collapsed?'expand':'collapse');
     const dot=document.createElement('span');
-    dot.className='group-chip-symbol';dot.setAttribute('aria-hidden','true');dot.textContent='▣';
+    dot.className='group-chip-symbol';dot.setAttribute('aria-hidden','true');dot.textContent=g.collapsed?'▸':'▾';
     const name=document.createElement('span');name.className='group-chip-label';name.textContent=g.name;
     const count=document.createElement('span');count.className='group-chip-count';count.textContent=String(tabs.length);
     node.append(dot,name,count);
@@ -190,6 +189,11 @@
   }
   function renderTabs(data,host,buildTab) {
     latest=data;
+    if(state.restoredSlots){
+      // Native session restores in the saved tab order; never reuse old tab IDs.
+      data.tabs.forEach((tab,index)=>{if(!tab.private&&!tab.pinned&&model.get(state,state.restoredSlots[index]))model.assign(state,tab.id,state.restoredSlots[index]);});
+      state.restoredSlots=null;
+    }
     model.prune(state,data.tabs.map(t=>t.id));
     eligibleFallback();
     const signature=JSON.stringify([
@@ -201,6 +205,8 @@
     ]);
     if(lastRenderKey===signature)return;
     lastRenderKey=signature;
+    // Save the current slot order so group membership survives native restarts.
+    try {localStorage.setItem(KEY,model.serialize(state));}catch{}
     const items=[];
     // Chrome/Firefox-style pinned tabs precede groups and show no close X.
     for(const tab of model.sortedTabs(state,data.tabs).filter(t=>t.pinned)){
@@ -344,7 +350,7 @@
     $('groupEditorTitle').textContent=group?'Edit Tab Group':'New Tab Group';
     $('groupEditorName').value=group?.name??'';
     $('groupEditorColor').replaceChildren();
-    for(const [key,hex] of Object.entries(palette)){
+    for(const [key,hex] of Object.entries(palette).filter(([key])=>['red','orange','yellow','green','blue','purple','pink','white','black'].includes(key))){
       const circle=document.createElement('button');
       circle.type='button';circle.className='group-color-option';
       circle.style.backgroundColor=hex;
@@ -371,7 +377,7 @@
     event.preventDefault();
     const name=$('groupEditorName').value.trim().slice(0,42);
     const selected=[...$('groupEditorColor').children].find(x=>x.getAttribute('aria-pressed')==='true');
-    const color=selected?.dataset.color??'violet';
+    const color=selected?.dataset.color??'purple';
     if(editing)updateGroup(editing,{name,color});
     else createGroup(name||'New Group',color,assignTarget);
     closeEditor();
