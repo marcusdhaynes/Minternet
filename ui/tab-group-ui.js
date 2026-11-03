@@ -16,7 +16,7 @@
     red:'#ea5967',orange:'#f39b52',yellow:'#f1ce59',green:'#65c98a',blue:'#6b9ff0',purple:'#ad8df6',pink:'#e889c9',white:'#f2f0f8',black:'#202235',violet:'#ad9cf9',teal:'#69d4c9',amber:'#e8c16d',slate:'#a1adbf'
   };
   function persist() {
-    try {const stored=JSON.parse(model.serialize(state));stored.slots=latest.tabs.filter(t=>!t.private).map(t=>state.assignments[String(t.id)]||null);localStorage.setItem(KEY,JSON.stringify(stored));}
+    try {const stored=JSON.parse(model.serialize(state));stored.slots=latest.tabs.filter(t=>!t.private).map(t=>state.assignments[String(t.id)]||null);stored.visualOrder=state.order.map(id=>latest.tabs.filter(t=>!t.private).findIndex(t=>t.id===id)).filter(i=>i>=0);localStorage.setItem(KEY,JSON.stringify(stored));}
     catch { window.minternetToast?.('Cannot save tab groups locally.');}
     repaint();
   }
@@ -195,6 +195,11 @@
       state.restoredSlots=null;
     }
     model.prune(state,data.tabs.map(t=>t.id));
+    if(state.restoredOrder){
+      const native=data.tabs.filter(t=>!t.private);
+      state.order=[...new Set([...state.restoredOrder.map(i=>native[i]?.id).filter(Boolean),...data.tabs.map(t=>t.id)])];
+      state.restoredOrder=null;
+    }
     eligibleFallback();
     const signature=JSON.stringify([
       data.activeId,
@@ -206,7 +211,7 @@
     if(lastRenderKey===signature)return;
     lastRenderKey=signature;
     // Save the current slot order so group membership survives native restarts.
-    try {const stored=JSON.parse(model.serialize(state));stored.slots=data.tabs.filter(t=>!t.private).map(t=>state.assignments[String(t.id)]||null);localStorage.setItem(KEY,JSON.stringify(stored));}catch{}
+    try {const stored=JSON.parse(model.serialize(state));stored.slots=data.tabs.filter(t=>!t.private).map(t=>state.assignments[String(t.id)]||null);stored.visualOrder=state.order.map(id=>data.tabs.filter(t=>!t.private).findIndex(t=>t.id===id)).filter(i=>i>=0);localStorage.setItem(KEY,JSON.stringify(stored));}catch{}
     const items=[];
     // Chrome/Firefox-style pinned tabs precede groups and show no close X.
     for(const tab of model.sortedTabs(state,data.tabs).filter(t=>t.pinned)){
