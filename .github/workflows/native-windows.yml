@@ -210,6 +210,47 @@ jobs:
             Remove-Item $maxMarker,$restoreMarker -Force -ErrorAction SilentlyContinue
             $debug | Remove-Item -Force -ErrorAction SilentlyContinue
           }
+      - name: Verify pointer gestures join and leave groups inside WebView2
+        shell: pwsh
+        run: |
+          $exe = "$env:RUNNER_TEMP\minternet-portable\Minternet-Portable-x64.exe"
+          $p = Start-Process -FilePath $exe -ArgumentList "--minternet-pointer-smoke" -PassThru
+          $marker = Join-Path $env:TEMP "minternet-pointer-$($p.Id).ok"
+          try {
+            $passed = $false
+            for ($i = 0; $i -lt 25; $i++) {
+              Start-Sleep -Seconds 2
+              $p.Refresh()
+              if ($p.HasExited) { throw "Browser exited during pointer tab-group test" }
+              if (Test-Path $marker) { $passed = $true; break }
+            }
+            if (!$passed) { throw "Pointer gestures did not join and leave the group" }
+            "PASS: pointer-drag tab into/out of group without native DataTransfer." >> $env:GITHUB_STEP_SUMMARY
+          } finally {
+            if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
+            Remove-Item $marker -Force -ErrorAction SilentlyContinue
+          }
+      - name: Verify Google default and alternative search from native address bar
+        shell: pwsh
+        run: |
+          $exe = "$env:RUNNER_TEMP\minternet-portable\Minternet-Portable-x64.exe"
+          $p = Start-Process -FilePath $exe -ArgumentList "--minternet-search-smoke" -PassThru
+          $google = Join-Path $env:TEMP "minternet-search-$($p.Id)-google.ok"
+          $brave = Join-Path $env:TEMP "minternet-search-$($p.Id)-brave.ok"
+          try {
+            $passed = $false
+            for ($i = 0; $i -lt 35; $i++) {
+              Start-Sleep -Seconds 2
+              $p.Refresh()
+              if ($p.HasExited) { throw "Browser exited during search test" }
+              if ((Test-Path $google) -and (Test-Path $brave)) { $passed = $true; break }
+            }
+            if (!$passed) { throw "Default and selected engine searches did not route internally" }
+            "PASS: plain text searches Google or the selected HTTPS engine inside Minternet." >> $env:GITHUB_STEP_SUMMARY
+          } finally {
+            if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
+            Remove-Item $google,$brave -Force -ErrorAction SilentlyContinue
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: Minternet-Portable-Windows-x64
