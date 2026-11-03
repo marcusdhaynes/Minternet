@@ -7,11 +7,11 @@
   if (root) root.MinternetGroupModel = result;
 })(typeof window !== 'undefined' ? window : null, () => {
   const MAX_GROUPS = 40;
-  const colors = ['violet','blue','teal','green','amber','orange','pink','red','slate'];
+  const colors = ['red','orange','yellow','green','blue','purple','pink','white','black','violet','teal','amber','slate'];
   const makeId = () => typeof crypto !== 'undefined' && crypto.randomUUID
     ? crypto.randomUUID() : 'group-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
   const name = value => typeof value === 'string' ? value.trim().slice(0, 42) : '';
-  const color = value => colors.includes(value) ? value : 'violet';
+  const color = value => typeof value === 'string' && (/^#[0-9a-f]{6}$/i.test(value) || colors.includes(value)) ? value : 'purple';
   const blank = () => ({ version: 1, groups: [], assignments: Object.create(null), order: [] });
   function hydrate(json) {
     let raw;
@@ -28,10 +28,11 @@
       state.groups.push({ id, name: name(g.name), color: color(g.color), visible: g.visible !== false,
         collapsed: g.collapsed === true });
     }
-    // Never restore assignments: stale native tab IDs may point to another page.
+    // Assignments are restored separately against the native session's ordered tabs.
+    state.restoredSlots=Array.isArray(raw.slots)?raw.slots.slice(0,100).map(x=>typeof x==='string'?x:null):null;
     return state;
   }
-  const serialize = state => JSON.stringify({ version: 1, groups: state.groups });
+  const serialize = state => JSON.stringify({ version: 2, groups: state.groups, slots: state.order.map(id=>state.assignments[String(id)]||null) });
   const get = (state, id) => state.groups.find(g => g.id === id);
   const findTab = (state, tabId) => get(state, state.assignments[String(tabId)]);
   function create(state, attrs = {}) {
