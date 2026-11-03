@@ -501,6 +501,20 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 .map_err(|e|e.to_string())?;
             return Ok(json!({"ok":true}));
         }
+        "search-smoke-stage" => {
+            if !std::env::args().any(|a|a=="--minternet-search-smoke"){
+                return Err("Search trace unavailable".into());
+            }
+            let description=value.as_str().unwrap_or("unknown");
+            if description.len()>1000 {return Err("Trace too long".into())}
+            let destination=std::env::temp_dir()
+                .join(format!("minternet-search-stage-{}.txt",std::process::id()));
+            use std::io::Write as _;
+            let mut file=std::fs::OpenOptions::new().create(true).append(true)
+                .open(destination).map_err(|e|e.to_string())?;
+            writeln!(file,"{description}").map_err(|e|e.to_string())?;
+            return Ok(json!({"ok":true}));
+        }
         "search-smoke-proof" => {
             if !std::env::args().any(|a|a=="--minternet-search-smoke"){
                 return Err("Search test unavailable outside CI".into());
@@ -511,6 +525,9 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 .ok_or("Search URL missing")?.to_string();
             let actual=app.state::<Mutex<Browser>>().lock().map_err(|e|e.to_string())?
                 .active().ok_or("No active tab")?.url.clone();
+            let diagnosis=std::env::temp_dir()
+                .join(format!("minternet-search-check-{}-{engine}.txt",std::process::id()));
+            let _=std::fs::write(diagnosis,format!("actual={actual}; expected={expected}"));
             if actual!=expected {return Err(format!("Search routed to {actual}, expected {expected}"))}
             let marker=std::env::temp_dir()
                 .join(format!("minternet-search-{}-{engine}.ok",std::process::id()));
@@ -968,16 +985,21 @@ fn main() {
                                 let _ = view.eval(r#"
                                   setTimeout(async () => {
                                     const phrase='minternet unique smoke phrase';
+                                    const stage=s=>window.minternet?.command('search-smoke-stage',s);
                                     const search=window.minternetSearch;
+                                    await stage('init-search:'+search?.getEngine?.());
                                     const form=document.getElementById('addressForm');
                                     const address=document.getElementById('address');
                                     const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
                                     for (const engine of ['google','brave']) {
                                       search.setEngine(engine);
+                                      await stage('selected:'+engine);
                                       address.value=phrase;
                                       form.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
-                                      await sleep(800);
-                                      await window.minternet?.command('search-smoke-proof',{engine,query:phrase});
+                                      await stage('submitted:'+engine);
+                                      await sleep(1000);
+                                      const proof=await window.minternet?.command('search-smoke-proof',{engine,query:phrase});
+                                      await stage('proof:'+engine+':'+JSON.stringify(proof).slice(0,600));
                                     }
                                   },550);
                                 "#);
