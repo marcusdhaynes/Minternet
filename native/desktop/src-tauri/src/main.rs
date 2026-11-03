@@ -472,6 +472,12 @@ fn browser_snapshot(app: tauri::AppHandle) -> Result<Snapshot,String> { snapshot
 #[tauri::command]
 async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Result<Value, String> {
     match name.as_str() {
+        "window-drag" => {
+            // Only trusted local chrome has this IPC bridge.
+            let window=app.get_window("main").ok_or("Window unavailable")?;
+            window.start_dragging().map_err(|e|e.to_string())?;
+            return Ok(json!({"ok":true}));
+        }
         "menu-smoke-stage" => {
             if !std::env::args().any(|a| a == "--minternet-menus-smoke") {
                 return Err("Not a native menu test".into());
@@ -728,11 +734,15 @@ fn main() {
         .manage(Mutex::new(LayoutCache::default()))
         .invoke_handler(tauri::generate_handler![browser_action, browser_snapshot])
         .setup(|app| {
-            let window = WindowBuilder::new(app, "main")
+            let builder = WindowBuilder::new(app, "main")
                 .title("Minternet")
                 .inner_size(1160.0, 760.0)
-                .min_inner_size(620.0, 400.0)
-                .build()?;
+                .min_inner_size(620.0, 400.0);
+            // Windows portable EXE has no separate OS caption above the app.
+            // Keep resizing and the existing in-app window buttons functional.
+            #[cfg(target_os="windows")]
+            let builder=builder.decorations(false).resizable(true);
+            let window=builder.build()?;
             let (width,height) = dimensions(&window)?;
             // Smoke mode only: trigger a real navigation through the same
             // frontend IPC bridge used by address-bar submissions. This does
@@ -766,7 +776,8 @@ fn main() {
                                     $('bookmarkBarToggle').dispatchEvent(new Event('change'));
                                     $('bookmarkBarToggle').checked = true;
                                     $('bookmarkBarToggle').dispatchEvent(new Event('change'));
-                                    $('bookmarkSettingsFolder').click();
+                                    $('bookmarkSettingsManage').click();
+                                    $('bookmarkManageNewFolder').click();
                                     $('bookmarkIcon').value = '🌿';
                                     $('bookmarkIcon').dispatchEvent(new Event('input'));
                                     $('bookmarkEditForm').requestSubmit();
@@ -797,7 +808,8 @@ fn main() {
                                     const stage = async s => { await window.minternet?.command('menu-smoke-stage',s); };
                                     try {
                                       await stage('init');
-                                      $('bookmarkBarAdd').click();
+                                      $('bookmarkBarManage').click();
+                                      $('bookmarkManageNewFolder').click();
                                       $('bookmarkName').value = 'Folder Menu Test';
                                       $('bookmarkEditForm').requestSubmit();
                                       const data = window.minternetBookmarks.getState();
