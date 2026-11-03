@@ -768,6 +768,26 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             notify(&app);
             return Ok(json!({"ok":true,"pinned":pinned}));
         }
+        "duplicate" => {
+            let id=value.as_u64().ok_or("Invalid tab")? as u32;
+            let (url,private)={
+                let state=app.state::<Mutex<Browser>>();
+                let browser=state.lock().map_err(|e|e.to_string())?;
+                let tab=browser.tabs.iter().find(|t|t.id==id).ok_or("Unknown tab")?;
+                (tab.url.clone(),tab.private)
+            };
+            let new_id={
+                let state=app.state::<Mutex<Browser>>();
+                let mut browser=state.lock().map_err(|e|e.to_string())?;
+                browser.add(private)?
+            };
+            if url!=HOME {
+                let parsed=tauri::Url::parse(&url).map_err(|e|e.to_string())?;
+                if parsed.scheme()!="https" {return Err("Blocked unsafe duplicate URL".into());}
+                navigate_tab(&app,new_id,Some(parsed),true)?;
+            } else {display_active(&app);}
+            return Ok(json!({"ok":true,"id":new_id}));
+        }
         "activate" => {
             let id = value.as_u64().ok_or("Invalid tab")? as u32;
             {

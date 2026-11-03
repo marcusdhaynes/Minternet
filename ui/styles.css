@@ -598,3 +598,100 @@ body.tab-dragging .tab,.tab.tab-drag-source {cursor:grabbing!important;}
 body.tab-dragging .tab-drag-source {opacity:.48;box-shadow:inset 0 0 0 1px #aab5e9;}
 .tabs .group-chip.drag-target {background:#536a88;
   outline:2px solid var(--group-accent);outline-offset:-1px;}
+
+
+/* Browser-like pinned tabs: always before groups, never an extra New Tab. */
+.tab.pinned-tab {
+  flex:0 0 27px!important;min-width:27px!important;max-width:27px!important;
+  width:27px!important;border-radius:6px 6px 0 0;
+  background:linear-gradient(160deg,#3b355b66,#1c253a);
+  border-top:1px solid #a99efa55;position:relative;
+}
+.tab.pinned-tab.selected {background:#473d65;border-top-color:#c1afff;}
+.tab.pinned-tab .tab-choose {justify-content:center;padding:0;gap:0;}
+.tab.pinned-tab .tab-symbol {font-size:12px;color:#d2b7f5;}
+.tab.pinned-tab .tab-text,.tab.pinned-tab .tab-close {display:none!important;}
+.tab.pinned-tab::after {
+  content:"";position:absolute;bottom:1px;left:8px;right:8px;height:1px;
+  background:#b7a2f1;border-radius:3px;opacity:.55;pointer-events:none;
+}
+
+/* Equal vertical whitespace above/below the address field. The 52px native
+   chrome geometry is unchanged: 22px tab line plus 30px toolbar. */
+.toolbar {height:30px;padding:3px 6px!important;}
+.address-wrap {height:24px!important;min-height:24px;}
+/* Tor sits at the midpoint between address edge and settings divider. */
+.toolbar {column-gap:0!important;}
+.address-wrap {margin-left:4px;}
+.toolbar-actions {gap:0!important;margin:0;}
+.toolbar-actions #tor {
+  flex:0 0 25px;width:25px;height:23px;min-width:25px;
+  margin:0 6px!important;justify-self:center;
+}
+.toolbar-actions .settings-btn {
+  margin-left:0!important;border-left:1px solid #566482;
+}
+
+/* Bookmark rows fill available width but keep zero gaps between entries.
+   The manager icon is permanently docked at the far right. */
+.bookmark-bar {display:flex;align-items:center;padding:0 3px!important;gap:0!important;}
+.bookmark-bar .bookmark-items {
+  flex:1 1 0!important;min-width:0;max-width:none!important;width:auto!important;
+  gap:0!important;margin:0;padding:0;
+}
+.bookmark-bar #bookmarkBarManage {
+  margin:0 0 0 auto!important;flex:0 0 22px!important;
+  width:22px;height:19px;
+  border-left:1px solid #5b648152;
+  border-radius:5px;
+  color:#adb7dc;
+}
+
+/* Tab/group menus have their own luxurious purple-black glass treatment;
+   the native cascading bookmark folder menus remain system-native. */
+.minternet-context-menu {
+  width:242px;max-height:min(75vh,550px);
+  padding:6px;
+  border:1px solid #796e9eaa;
+  border-radius:10px;
+  background:linear-gradient(153deg,#302b4a 0%,#1b2138 43%,#131a2c 100%);
+  box-shadow:0 17px 46px #03040cc9,0 0 0 1px #ffffff0e,
+    inset 0 1px 0 #c8b6ff30;
+  backdrop-filter:blur(24px);
+  color:#eee9ff;
+}
+.minternet-context-heading {
+  font-size:9px;font-weight:750;letter-spacing:.15em;
+  text-transform:uppercase;
+  color:#c4abd9;
+  padding:6px 9px 8px;
+  margin-bottom:4px;
+  border-bottom:1px solid #bfa6ff24;
+}
+.minternet-context-menu .system-popup-row {
+  padding:6px 10px;min-height:30px;
+  border-radius:6px;color:#ede7ff;
+  font-size:11px;line-height:1.25;
+  transition:background .1s ease,color .1s ease;
+}
+.minternet-context-menu .system-popup-row:hover,
+.minternet-context-menu .system-popup-row:focus-visible,
+.minternet-context-menu .system-popup-has-child:hover>.system-popup-row {
+  background:linear-gradient(95deg,#70629a7b,#47507977);
+  color:#fff;
+  box-shadow:inset 2px 0 #ceaffb;
+}
+.minternet-context-menu .system-popup-separator {
+  height:1px;margin:5px 8px;background:#cdbfff23;
+}
+.minternet-context-menu .system-popup-child {
+  width:230px;min-width:210px;
+  background:linear-gradient(150deg,#312b4b,#192138);
+  border:1px solid #8173a2;
+  border-radius:9px;
+  box-shadow:0 12px 32px #000b, inset 0 1px #c8b6ff20;
+}
+.minternet-context-menu.flip-left .system-popup-child {
+  left:auto;right:calc(100% - 2px);
+}
+.minternet-context-menu .system-popup-arrow {color:#dac5fb;font-weight:800;}
