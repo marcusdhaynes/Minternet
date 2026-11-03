@@ -5,8 +5,8 @@
 ## Implemented
 - Sandboxed external web views, with Node integration disabled and no app IPC exposed to websites.
 - HTTPS-first top-level navigation. Explicit `http://` entry requires a warning/confirmation; non-HTTPS redirects remain blocked except within that tab's explicitly approved origin.
-- Site camera/microphone, location, notifications and clipboard-read permissions require an origin-specific, in-memory grant. Other privileged APIs default to denial; fullscreen and ordinary clipboard writes are permitted.
-- HTTPS-only sandboxed popup windows for conventional authentication; downloads remain blocked pending a secure implementation.
+- Camera/microphone, location, notifications, pointer lock, protected media keys and clipboard-read permissions require an origin-specific, in-memory grant. Other privileged APIs default to denial; fullscreen and ordinary clipboard writes are permitted.
+- HTTPS-only sandboxed popup windows for conventional authentication. Downloads are allowed only from HTTPS initiators, and require the operating system's Save dialog; no auto-execution.
 - Per-private-tab, nonpersistent session partitions and a new renderer when switching private state.
 - Switching from Normal to Private **does not** erase cookies or data previously created in Normal mode.
 - Opt-in unpacked Chromium extension loading; extensions run in normal session only.
@@ -15,7 +15,9 @@
 ## Not implemented or guaranteed
 - Tor transport, circuit isolation, fingerprint protection, DNS/WebRTC leak guarantees.
 - Firefox XPI compatibility, full Chrome Web Store API compatibility, extension safety audit.
-- Automatic verified security updates, signed installers, phishing protection, native Android/iOS engines, penetration tests.
+- Automatic verified security updates, signed installers, malware scanning, phishing protection, native Android/iOS engines, penetration tests.
+- Unsigned development installers are not a production-secure delivery method. ASAR validation and Electron fuses are enabled in packaging configuration, but full packaged builds require validation.
+- Browser-engine bugs, malicious extensions, compromised downloads, phishing, and OS compromise are not prevented by these controls.
 - End-to-end encrypted sync; only a proposed ciphertext schema is included.
 - HTTPS-first navigation does not guarantee all subresources are secure or anonymous; explicit HTTP exceptions are unencrypted.
 - Popup/login compatibility, camera/microphone, DRM streaming, passkeys and protected media need integration tests on each OS.

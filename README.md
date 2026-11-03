@@ -11,14 +11,16 @@ npm install
 npm start
 ```
 
-Run `npm run check && npm test`. Unsigned desktop previews are available via the manual GitHub Actions packaging workflow.
+Run `npm run check && npm test`. Unsigned desktop previews are available via the manual GitHub Actions packaging workflow. Each source change also triggers a Linux unpacked-build size check.
 
 ## Current capabilities
 
 - Compact tabs, search/address bar, navigation, dark browser chrome and keyboard shortcuts.
 - Per-tab **Normal / Private** switching: recreates the tab with a fresh session, preserving only the URL. It does **not** erase data that normal mode previously stored.
-- HTTPS-only navigation, sandboxed web contents, default-denied permissions, blocked downloads and popup windows.
+- HTTPS-first navigation (explicit HTTP requires approval), sandboxed web contents, origin-specific temporary permissions, HTTPS-only sandboxed popups, and user-confirmed HTTPS downloads.
 - Experimental opt-in **unpacked Chromium extension** loading; many APIs and Firefox XPI addons are unsupported.
+- **Free Memory** control discards inactive non-audible tabs and reloads them on return; unsaved form state may be lost.
+- Packaged Electron fuses reduce unnecessary runtime capabilities and validate ASAR integrity (full installer builds are not yet verified).
 - Tor button explains limits and opens Tor Browser's official site. **Tor is not embedded**.
 - Optional Supabase encrypted-sync **schema only**. Client-side encryption, authentication, and sync are not yet connected.
 

@@ -13,8 +13,7 @@ const FOOTER = 14;
 const MAX_TABS = 35;
 const tabs = [];
 const preparedSessions = new WeakSet();
-const sessionGrants = new WeakMap();
-const GRANTABLE_PERMISSIONS = new Set(['media', 'geolocation', 'geolocation-approximate', 'notifications', 'clipboard-read']);
+const GRANTABLE_PERMISSIONS = new Set(['media', 'geolocation', 'geolocation-approximate', 'notifications', 'clipboard-read', 'pointerLock', 'mediaKeySystem']);
 const PRIVACY_FREE_PERMISSIONS = new Set(['clipboard-sanitized-write', 'fullscreen']);
 const HTTP_WARNING = 'This page uses unencrypted HTTP. Anyone on the network may be able to read or alter it.';
 
@@ -35,7 +34,6 @@ function lockDown(s) {
   if (preparedSessions.has(s)) return;
   preparedSessions.add(s);
   const grants = new Set();
-  sessionGrants.set(s, grants);
   s.setPermissionCheckHandler((_contents, permission, requestingOrigin) => {
     if (PRIVACY_FREE_PERMISSIONS.has(permission)) return true;
     const origin = safeOrigin(requestingOrigin);
@@ -66,8 +64,22 @@ function lockDown(s) {
       respond(allowed);
     }).catch(() => respond(false));
   });
-  // Downloads remain disabled until a dedicated, safe file dialog is implemented.
-  s.on('will-download', event => event.preventDefault());
+  // Every download requires the OS save dialog; never silently write or execute files.
+  s.on('will-download', (event, item) => {
+    const origin = safeOrigin(item.getInitiatorOrigin?.());
+    if (!origin) {
+      event.preventDefault();
+      return;
+    }
+    const name = path.basename(item.getFilename() || 'download').replace(/[\\x00-\\x1f]/g, '').slice(0, 180) || 'download';
+    item.setSaveDialogOptions({
+      title: 'Save download from ' + origin,
+      defaultPath: path.join(app.getPath('downloads'), name),
+      buttonLabel: 'Save'
+    });
+    // Electron uses its native save dialog when no save path is assigned.
+    // The user can cancel; nothing is ever opened automatically.
+  });
 }
 
 function bounds() {
@@ -236,6 +248,7 @@ async function navigate(tab, input) {
     if (oldView && mainWindow.contentView.children.includes(oldView))
       mainWindow.contentView.removeChildView(oldView);
     tab.view = null;
+    tab.allowedHttpOrigin = null;
     if (oldView && !oldView.webContents.isDestroyed()) oldView.webContents.close();
     tab.url = 'about:blank';
     tab.title = 'New Tab';

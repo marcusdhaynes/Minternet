@@ -10,7 +10,8 @@
 - [x] Optional Supabase SQL schema, currently unconnected
 
 ## Desktop beta
-- [ ] Bookmarks, settings, safe downloads, profiles, persistent per-site permission controls
+- [x] Native save-dialog downloads from HTTPS initiators (not malware-scanned)
+- [ ] Bookmarks, settings, profiles, persistent per-site permission controls
 - [ ] Test video streaming, OAuth popups, WebRTC, passkeys, accessibility and hardware support on each platform
 - [ ] Memory/RAM/CPU and installer-size benchmarks (baseline versus Chrome/Firefox)
 - [ ] Signed auto-updates, repeatable builds and security monitoring

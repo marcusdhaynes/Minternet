@@ -1,0 +1,36 @@
+name: Packaging smoke and size (Linux)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'ui/**'
+      - 'package.json'
+      - '.github/workflows/package-size.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pack-size:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        run: npm install --no-fund --no-audit
+      - run: npm run check
+      - run: npm test
+      - name: Package unpacked Linux preview (verifies build config and fuses)
+        run: npm run pack
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Record actual build size
+        run: |
+          echo "### Minternet packaged size" >> "$GITHUB_STEP_SUMMARY"
+          echo "Unpacked Linux directory (includes Chromium):" >> "$GITHUB_STEP_SUMMARY"
+          du -sh release/* | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "This is a packaging smoke check, not a measured RAM/CPU benchmark." >> "$GITHUB_STEP_SUMMARY"
