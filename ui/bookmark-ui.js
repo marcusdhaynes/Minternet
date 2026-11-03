@@ -127,6 +127,9 @@
       ['manager', 'bookmarkManager'], ['editor', 'bookmarkEditor']
     ]) $(id).hidden = next !== name;
     $('settings').setAttribute('aria-expanded', String(next === 'settings'));
+    // Settings is separate from the bookmark manager; the bookmark list stays
+    // out of view until Manage Bookmarks is explicitly selected.
+    document.documentElement.classList.toggle('settings-visible',next==='settings');
     nativeOverlay(Boolean(next));
   }
   function closeOverlay() {
@@ -356,8 +359,6 @@
   $('bookmarkBarToggle').addEventListener('change', event => changeVisibility(event.target.checked));
   $('bookmarkSettingsManage').addEventListener('click', () => { renderManager(); setMode('manager'); });
   $('bookmarkBarManage').addEventListener('click', () => { renderManager(); setMode('manager'); });
-  $('bookmarkSettingsFolder').addEventListener('click', () => openEditor('folder'));
-  $('bookmarkBarAdd').addEventListener('click', () => openEditor('folder'));
   $('bookmarkManageNewFolder').addEventListener('click', () => openEditor('folder'));
   $('bookmarkManageNewLink').addEventListener('click', () => openEditor('link'));
   $('bookmarkFolderBack').addEventListener('click', folderParent);
