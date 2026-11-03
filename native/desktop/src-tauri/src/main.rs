@@ -531,7 +531,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             let _=std::fs::write(inspect,format!("maximized={maximized},payload={value}"));
             let ui=value.get("ui").ok_or("UI measurements missing")?;
             let width=ui.get("tabWidth").and_then(Value::as_f64).ok_or("No tab width")?;
-            for key in ["groupFirst","homeRemoved","kbdRemoved","modeLabelsVisible","folderSaveRemoved"] {
+            for key in ["logoFirst","homeRemoved","kbdRemoved","torOnly","footerRemoved","folderSaveRemoved","compactBookmarks","searchSetting"] {
                 if ui.get(key).and_then(Value::as_bool)!=Some(true) {
                     return Err(format!("Rapid chrome invariant failed: {key}"));
                 }
@@ -892,12 +892,14 @@ fn main() {
                                       getComputedStyle(node).visibility!=='hidden';
                                     const ui={
                                       tabWidth:tab.getBoundingClientRect().width,
-                                      groupFirst:group.getBoundingClientRect().left<logo.getBoundingClientRect().left,
+                                      logoFirst:logo.getBoundingClientRect().left<group.getBoundingClientRect().left,
                                       homeRemoved:!$('home'),
                                       kbdRemoved:!document.querySelector('.kbd'),
-                                      modeLabelsVisible:[...document.querySelectorAll('.mode-text')].some(x=>x.textContent==='Normal'&&visible(x)) &&
-                                        [...document.querySelectorAll('.mode-text')].some(x=>x.textContent==='Tor'&&visible(x)),
-                                      folderSaveRemoved:!$('bookmarkFolderPage')
+                                      torOnly:visible($('tor'))&&!$('private')&&!document.querySelector('.mode-text'),
+                                      footerRemoved:!document.querySelector('.statusbar'),
+                                      folderSaveRemoved:!$('bookmarkFolderPage'),
+                                      compactBookmarks:getComputedStyle($('bookmarkItems')).columnGap==='0px',
+                                      searchSetting:$('defaultSearchEngine')?.value==='google'&&!!window.minternetSearch
                                     };
                                     const fire=()=>row.dispatchEvent(new MouseEvent('dblclick',{bubbles:true,button:0}));
                                     const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
