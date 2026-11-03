@@ -41,7 +41,7 @@ jobs:
           test -s /tmp/Minternet-iOS-launch.png
       - name: Upload simulator startup screenshot
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: minternet-ios-simulator-launch-evidence
           path: /tmp/Minternet-iOS-launch.png
@@ -56,7 +56,7 @@ jobs:
           bytes=$(wc -c < /tmp/Minternet-iOS-Simulator.zip | tr -d ' ')
           echo "Unsigned iOS simulator app ZIP: $bytes bytes" >> "$GITHUB_STEP_SUMMARY"
           test "$bytes" -lt 50000000
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: minternet-ios-simulator
           path: /tmp/Minternet-iOS-Simulator.zip

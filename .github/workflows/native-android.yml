@@ -38,7 +38,7 @@ jobs:
           BYTES=$(stat -c%s "$APK")
           echo "Android APK: $BYTES bytes" >> "$GITHUB_STEP_SUMMARY"
           test "$BYTES" -lt 52428800
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: minternet-android-debug-apk
           path: native/android/app/build/outputs/apk/debug/app-debug.apk

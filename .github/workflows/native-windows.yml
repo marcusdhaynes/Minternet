@@ -299,7 +299,7 @@ jobs:
             if(!$p.HasExited){Stop-Process -Id $p.Id -Force}
             Remove-Item $restored,$tabless,$first,$saved -Force -ErrorAction SilentlyContinue
           }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Minternet-Portable-Windows-x64
           path: native/desktop/Minternet-Portable-x64.exe
