@@ -72,7 +72,15 @@ if (!window.minternet) {
         }
         case 'navigate':{
           const url=parse(value);if(!url)return {message:'Only HTTPS addresses and search terms are permitted.'};
-          go(url);break;
+          go(url);
+          if (url !== 'about:blank' && restricted(url)) {
+            // User explicitly asked to navigate here; open the real site now.
+            // Popup blockers may refuse it, so the ordinary Open Website anchor remains.
+            window.open(url, '_blank', 'noopener,noreferrer');
+            emit();
+            return {message:'This site cannot appear inside GitHub Pages. Opened it in your browser; use Open Website if it was blocked.'};
+          }
+          break;
         }
         case 'home':go('about:blank');break;
         case 'back':case 'forward':{
