@@ -409,3 +409,6 @@ h1 em { color: #b3bfff; font-family: Georgia, serif; font-weight: 400; letter-sp
 .bookmark-folder-row > .bookmark-folder-entry {flex:1; min-width:0; width:auto;}
 .bookmark-folder-row > .edit {flex:0 0 22px; width:22px; height:24px; border:0; border-radius:5px; background:transparent; color:#9caed4; font-size:12px;}
 .bookmark-folder-row > .edit:hover {background:#ffffff24; color:white;}
+
+/* Explicitly honor the folder editor's hidden URL field despite flex layout. */
+.bookmark-field[hidden] {display:none!important;}
