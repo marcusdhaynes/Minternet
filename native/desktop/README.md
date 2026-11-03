@@ -45,3 +45,11 @@ These optimizations reduce Minternet's overhead, not the destination site's netw
 - Tab group definitions, names, colors and visibility persist locally. Membership is session-only to avoid accidentally applying old tab IDs to unrelated pages after restart.
 - Bookmark icons remain emoji or uploaded images on the bar; native popup menu entries show emojis and safe folder labels (image-backed entries use a folder symbol).
 - No remote website has access to Minternet's native popup-menu APIs.
+
+## Rapid chrome fixes
+- Double-click empty title/tab-bar space to maximize or restore prior window size. Window dragging begins only after actual pointer movement, so the second click is not consumed.
+- Group button is at the far left, even when the bookmark bar is hidden.
+- Tabs have a stable 71px width; drag to a group chip or a grouped tab to add, beside an ungrouped tab to remove, and to either side of a tab to reorder.
+- Bookmark folders/subfolders no longer offer a redundant Bookmark This Page menu action. Context menus use the dark OS window theme when supported, with polished compact fallback styling.
+- The Home button and keyboard shortcut label at the address-bar end are removed; Favorites star sits at the right edge.
+- Normal and Tor controls are always visibly labeled. **Tor is still only an informational control; Tor routing has not been implemented.**

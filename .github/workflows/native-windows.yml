@@ -5,6 +5,7 @@ on:
     paths:
       - 'native/desktop/**'
       - 'ui/**'
+      - 'tests/**'
       - '.github/workflows/native-windows.yml'
   workflow_dispatch:
 permissions:
@@ -180,6 +181,27 @@ jobs:
             }
             if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
             Remove-Item $proof,$trace -Force -ErrorAction SilentlyContinue
+          }
+      - name: Verify double-click window restore and 71px chrome controls
+        shell: pwsh
+        run: |
+          $exe = "$env:RUNNER_TEMP\minternet-portable\Minternet-Portable-x64.exe"
+          $p = Start-Process -FilePath $exe -ArgumentList "--minternet-rapid-ui-smoke" -PassThru
+          $maxMarker = Join-Path $env:TEMP "minternet-rapid-$($p.Id)-maximize.ok"
+          $restoreMarker = Join-Path $env:TEMP "minternet-rapid-$($p.Id)-restore.ok"
+          try {
+            $found = $false
+            for ($i=0;$i -lt 35;$i++) {
+              Start-Sleep -Seconds 2
+              $p.Refresh()
+              if ($p.HasExited) { throw "Minternet closed during rapid UI test" }
+              if ((Test-Path $maxMarker) -and (Test-Path $restoreMarker)) { $found=$true;break }
+            }
+            if (!$found) { throw "Double-click maximize/restore or compact chrome invariant failed" }
+            "PASS: title-bar double-click maximizes/restores; group button left; uniform 71px tabs; no Home/Kbd buttons; Normal/Tor visible." >> $env:GITHUB_STEP_SUMMARY
+          } finally {
+            if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
+            Remove-Item $maxMarker,$restoreMarker -Force -ErrorAction SilentlyContinue
           }
       - uses: actions/upload-artifact@v4
         with:

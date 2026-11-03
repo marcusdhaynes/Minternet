@@ -478,6 +478,33 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             window.start_dragging().map_err(|e|e.to_string())?;
             return Ok(json!({"ok":true}));
         }
+        "rapid-ui-smoke-proof" => {
+            if !std::env::args().any(|a|a=="--minternet-rapid-ui-smoke") {
+                return Err("Not a rapid UI test".into());
+            }
+            let phase=value.get("phase").and_then(Value::as_str).ok_or("Missing test phase")?;
+            let window=app.get_window("main").ok_or("No main window")?;
+            let maximized=window.is_maximized().map_err(|e|e.to_string())?;
+            let ui=value.get("ui").ok_or("UI measurements missing")?;
+            let width=ui.get("tabWidth").and_then(Value::as_f64).ok_or("No tab width")?;
+            for key in ["groupFirst","homeRemoved","kbdRemoved","modeLabelsVisible","folderSaveRemoved"] {
+                if ui.get(key).and_then(Value::as_bool)!=Some(true) {
+                    return Err(format!("Rapid chrome invariant failed: {key}"));
+                }
+            }
+            if !(70.0..=72.0).contains(&width) {
+                return Err(format!("Expected 71px tabs, found {width}"));
+            }
+            match phase {
+                "maximize" if maximized => {},
+                "restore" if !maximized => {},
+                _ => return Err(format!("Window state incorrect for {phase}: maximized={maximized}"))
+            }
+            let marker=std::env::temp_dir()
+                .join(format!("minternet-rapid-{}-{phase}.ok",std::process::id()));
+            std::fs::write(marker,"Window state and condensed chrome verified").map_err(|e|e.to_string())?;
+            return Ok(json!({"ok":true}));
+        }
         "menu-smoke-stage" => {
             if !std::env::args().any(|a| a == "--minternet-menus-smoke") {
                 return Err("Not a native menu test".into());
@@ -754,6 +781,7 @@ fn main() {
             let bookmarks_smoke = std::env::args().any(|a| a == "--minternet-bookmarks-smoke");
             let bookmarks_reopen = std::env::args().any(|a| a == "--minternet-bookmarks-reopen");
             let menus_smoke = std::env::args().any(|a| a == "--minternet-menus-smoke");
+            let rapid_smoke = std::env::args().any(|a| a == "--minternet-rapid-ui-smoke");
             window.add_child(
                 WebviewBuilder::new("chrome",WebviewUrl::App("index.html".into()))
                     .on_page_load(move |view, event| {
@@ -802,6 +830,33 @@ fn main() {
                                     if (!saved) return;
                                     await window.minternet?.command('bookmarks-smoke-proof', JSON.parse(saved));
                                   }, 550);
+                                "#);
+                            } else if rapid_smoke {
+                                let _ = view.eval(r#"
+                                  setTimeout(async () => {
+                                    const $ = id => document.getElementById(id);
+                                    const row=document.querySelector('.tab-row');
+                                    const tab=document.querySelector('.tab');
+                                    const group=$('tabGroups'),logo=document.querySelector('.identity');
+                                    if (!tab||!group||!logo||!row)return;
+                                    const visible=node=>Boolean(node)&&getComputedStyle(node).display!=='none' &&
+                                      getComputedStyle(node).visibility!=='hidden';
+                                    const ui={
+                                      tabWidth:tab.getBoundingClientRect().width,
+                                      groupFirst:group.getBoundingClientRect().left<logo.getBoundingClientRect().left,
+                                      homeRemoved:!$('home'),
+                                      kbdRemoved:!document.querySelector('.kbd'),
+                                      modeLabelsVisible:[...document.querySelectorAll('.mode-text')].some(x=>x.textContent==='Normal'&&visible(x)) &&
+                                        [...document.querySelectorAll('.mode-text')].some(x=>x.textContent==='Tor'&&visible(x)),
+                                      folderSaveRemoved:!$('bookmarkFolderPage')
+                                    };
+                                    const fire=()=>row.dispatchEvent(new MouseEvent('dblclick',{bubbles:true,button:0}));
+                                    const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+                                    fire();await sleep(550);
+                                    await window.minternet?.command('rapid-ui-smoke-proof',{phase:'maximize',ui});
+                                    fire();await sleep(550);
+                                    await window.minternet?.command('rapid-ui-smoke-proof',{phase:'restore',ui});
+                                  },750);
                                 "#);
                             } else if menus_smoke {
                                 let _ = view.eval(r#"
