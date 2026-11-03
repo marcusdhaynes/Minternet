@@ -76,7 +76,7 @@
     const g=groups(), b=ctrl();
     if(!g)return [disabled('Unavailable')];
     const belonging=window.MinternetGroupModel.findTab(g.getState(),tabId);
-    const assignOptions=[item('＋  New Group With Tab…',()=>{g.openEditor(null,true);})];
+    const assignOptions=[item('＋  New Group With Tab…',()=>{g.openEditor(null,tabId);})];
     for(const group of g.getState().groups) {
       assignOptions.push(item((belonging?.id===group.id?'✓  ':'●  ')+g.displayName(group),()=>g.assign(tabId,group.id)));
     }

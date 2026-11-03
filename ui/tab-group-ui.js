@@ -7,7 +7,7 @@
   let state;
   try { state=model.hydrate(localStorage.getItem(KEY)); } catch {state=model.blank();}
   let latest={tabs:[],activeId:null};
-  let lastRenderKey='', editing=null, assignAfterCreate=false, fallbackPending=false;
+  let lastRenderKey='', editing=null, assignTarget=null, fallbackPending=false;
   const palette={
     violet:'#ad9cf9',blue:'#82aefa',teal:'#69d4c9',green:'#8bda9a',
     amber:'#e8c16d',orange:'#e7a16c',pink:'#e89acb',red:'#e18591',slate:'#a1adbf'
@@ -87,6 +87,14 @@
     const count=document.createElement('span');count.className='group-chip-count';count.textContent=String(tabs.length);
     node.append(dot,name,count);
     node.addEventListener('click',()=>toggleCollapsed(g.id));
+    node.addEventListener('dragover',event=>{
+      if(event.dataTransfer?.types.includes('text/minternet-tab')) event.preventDefault();
+    });
+    node.addEventListener('drop',event=>{
+      const id=Number(event.dataTransfer?.getData('text/minternet-tab'));
+      if(!Number.isSafeInteger(id)||!latest.tabs.some(tab=>tab.id===id))return;
+      event.preventDefault();assign(id,g.id);
+    });
     node.addEventListener('contextmenu',event=>{
       event.preventDefault();
       window.minternetMenus?.group(g.id,{x:event.clientX,y:event.clientY});
@@ -131,6 +139,11 @@
     host.replaceChildren(...items);
   }
   function attachTabMenu(element,tabId){
+    element.draggable=true;
+    element.addEventListener('dragstart',event=>{
+      event.dataTransfer?.setData('text/minternet-tab',String(tabId));
+      if(event.dataTransfer) event.dataTransfer.effectAllowed='move';
+    });
     element.addEventListener('contextmenu',event=>{
       event.preventDefault();
       window.minternetMenus?.tab(tabId,{x:event.clientX,y:event.clientY});
@@ -140,7 +153,8 @@
     window.minternetBookmarks?.closeOverlay();
     const group=groupId?model.get(state,groupId):null;
     editing=group?.id??null;
-    assignAfterCreate=withActive;
+    assignTarget=withActive === true ? latest.activeId
+      : Number.isSafeInteger(withActive) ? withActive : null;
     $('groupEditorTitle').textContent=group?'Edit Tab Group':'New Tab Group';
     $('groupEditorName').value=group?.name??'';
     $('groupEditorColor').replaceChildren();
@@ -173,7 +187,7 @@
     const selected=[...$('groupEditorColor').children].find(x=>x.getAttribute('aria-pressed')==='true');
     const color=selected?.dataset.color??'violet';
     if(editing)updateGroup(editing,{name,color});
-    else createGroup(name||'New Group',color,assignAfterCreate?latest.activeId:null);
+    else createGroup(name||'New Group',color,assignTarget);
     closeEditor();
   });
   $('groupEditorCancel').addEventListener('click',closeEditor);
