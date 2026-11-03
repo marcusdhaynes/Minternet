@@ -546,3 +546,9 @@ body.tab-dragging .ungroup-drop-target{display:flex}
 /* Prevent the engine's CSS drag-region handling from consuming title-bar
    double-clicks. JS starts OS dragging only after a real pointer movement. */
 .tab-row,.tab-row .identity {-webkit-app-region:no-drag!important;}
+
+/* The group control is physically pinned to the far-left edge. Using an
+   absolute anchor avoids native WebView2 flex-order layout inconsistencies. */
+.tab-row {position:relative;}
+.tab-row > #tabGroups {position:absolute;left:3px;top:1px;z-index:2;order:initial;margin:0;width:22px;height:20px;min-width:22px;}
+.tab-row > .identity {margin-left:24px;}
