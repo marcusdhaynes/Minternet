@@ -1,0 +1,44 @@
+name: Native security regression checks
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'native/**'
+      - 'scripts/security_invariants.py'
+      - '.github/workflows/native-security.yml'
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-invariants:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 scripts/security_invariants.py
+      - name: Check checked-in files for common accidental credentials
+        run: |
+          if git grep -n -I -E '(supabase_service_role|BEGIN (RSA |EC )?PRIVATE KEY|sk_live_[A-Za-z0-9]+)' -- ':!scripts/security_invariants.py' ':!docs/THREAT-MODEL.md'; then
+            echo "Potential committed secret detected" >&2
+            exit 1
+          fi
+      - name: Report scope
+        run: echo "Source-level policy checks only; NOT an independent security audit." >> "$GITHUB_STEP_SUMMARY"
+  android-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Android lint and compile
+        working-directory: native/android
+        run: gradle :app:lintDebug :app:assembleDebug --no-daemon
