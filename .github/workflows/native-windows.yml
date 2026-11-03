@@ -40,7 +40,8 @@ jobs:
           node --check ../../ui/tab-group-model.js
           node --check ../../ui/tab-group-ui.js
           node --check ../../ui/chrome-native-menu.js
-          node --test ../../tests/bookmarks.test.cjs ../../tests/tab-groups.test.cjs ../../tests/native-menus.test.cjs
+          node --check ../../ui/search-settings.js
+          node --test ../../tests/bookmarks.test.cjs ../../tests/tab-groups.test.cjs ../../tests/native-menus.test.cjs ../../tests/search-settings.test.cjs
       - name: Generate Branded Minternet App Icons
         run: |
           python -m pip install --disable-pip-version-check --quiet pillow
@@ -199,7 +200,7 @@ jobs:
               if ((Test-Path $maxMarker) -and (Test-Path $restoreMarker)) { $found=$true;break }
             }
             if (!$found) { throw "Double-click maximize/restore or compact chrome invariant failed" }
-            "PASS: title-bar double-click maximizes/restores; group button left; uniform 71px tabs; no Home/Kbd buttons; Normal/Tor visible." >> $env:GITHUB_STEP_SUMMARY
+            "PASS: title-bar maximize/restore; M logo far left; uniform 71px tabs; Tor-only; no footer; Google setting; compact bookmarks." >> $env:GITHUB_STEP_SUMMARY
           } finally {
             $debug = @(Get-ChildItem $env:TEMP -Filter "minternet-rapid-stage-$($p.Id)-*.txt" -ErrorAction SilentlyContinue)
             foreach ($file in $debug) {

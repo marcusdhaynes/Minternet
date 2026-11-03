@@ -585,3 +585,16 @@ body.tab-dragging .ungroup-drop-target{display:flex}
 .search-setting-field select {width:120px;max-width:43%;height:28px;padding:0 6px;
   background:#121a2c;border:1px solid #55617d;color:#e7edff;border-radius:6px;font-size:10px;}
 .search-setting-field select:focus-visible {outline:2px solid #a7a9f2;}
+
+/* Floating, in-app tab gesture: no native HTML DataTransfer cursor. */
+.tab-drag-ghost {position:fixed;z-index:300;pointer-events:none;user-select:none;
+  min-width:85px;max-width:165px;height:26px;display:flex;align-items:center;
+  overflow:hidden;white-space:nowrap;text-overflow:ellipsis;
+  padding:0 9px;border-radius:7px;background:linear-gradient(140deg,#3c4969,#242f49);
+  border:1px solid #95a3ce;color:#f8faff;
+  box-shadow:0 8px 24px #000a,0 0 0 1px #ffffff16;
+  font-size:10px;transform:translateZ(0);}
+body.tab-dragging .tab,.tab.tab-drag-source {cursor:grabbing!important;}
+body.tab-dragging .tab-drag-source {opacity:.48;box-shadow:inset 0 0 0 1px #aab5e9;}
+.tabs .group-chip.drag-target {background:#536a88;
+  outline:2px solid var(--group-accent);outline-offset:-1px;}
