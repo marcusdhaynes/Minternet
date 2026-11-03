@@ -482,3 +482,23 @@ body.tab-dragging .ungroup-drop-target{display:flex}
 .tab.group-drop-target{background:#606d9a66;outline:1px solid var(--group-accent,#9da9dc);outline-offset:-1px}
 .tab.tab-drag-source{opacity:.58}
 @media(max-width:600px){.ungroup-drop-target{padding-inline:5px;font-size:9px}.bookmark-bar .tab-groups-btn{margin-right:3px}}
+
+/* Rapid fixes: uniform half-width tabs, far-left group launcher, compact modes. */
+.tab { flex:0 0 71px; width:71px; min-width:71px; max-width:71px; }
+.tab-choose {padding-left:4px; gap:3px;}
+.tab-close {flex-basis:14px; width:14px; height:14px; margin-right:1px; font-size:12px;}
+.tab-text {font-size:9px;}
+.tab-row > .tab-groups-btn {order:-5;align-self:center;flex:0 0 22px;width:22px;height:20px;margin:0 3px 0 0;border-radius:5px; }
+.tab-row > .identity {order:-4;margin-right:2px;}
+.tab-row > .tabs {order:0;}
+.tab-row > .ungroup-drop-target {order:1;}
+.tab-row > .new-tab {order:2;}
+.tab-row > .new-private-tab {order:3;}
+.tab-row > .window-actions {order:4;}
+.mode-symbol-btn {display:flex;align-items:center;justify-content:center;gap:5px;padding:0 6px;}
+.mode-symbol-btn .mode-logo {flex:0 0 14px;width:14px;height:14px;}
+.mode-text {font-size:10px;line-height:1;white-space:nowrap;}
+.address-wrap {gap:4px;padding-right:4px;}
+.address-star {margin-left:auto;width:24px;flex-basis:24px;}
+.tab-row {cursor:default;}
+.tab-row button,.tab-row [role="tab"],.tab-row nav {-webkit-app-region:no-drag;}

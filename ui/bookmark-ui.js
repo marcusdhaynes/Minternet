@@ -196,7 +196,7 @@
       contents.append(empty);
     }
     for (const item of folder.children) contents.append(entryForMenu(item));
-    $('bookmarkFolderPage').disabled = !model.url(currentUrl);
+
   }
   function renderManager() {
     const tree = $('bookmarkTree');
@@ -369,13 +369,6 @@
   $('bookmarkFolderBack').addEventListener('click', folderParent);
   $('bookmarkFolderNew').addEventListener('click', () => openEditor('folder',null,folderId));
   $('bookmarkFolderEdit').addEventListener('click', () => edit(folderId));
-  $('bookmarkFolderPage').addEventListener('click', () => {
-    const target = model.url(currentUrl);
-    if (!target) return toast('Open a page before saving it here.');
-    if (!model.add(data,'link',folderId,{ name:currentTitle || new URL(target).hostname, url:target })) return toast('Cannot add bookmark.');
-    persist();
-    toast('Page saved in folder');
-  });
   $('bookmarkEditForm').addEventListener('submit', saveEditor);
   $('bookmarkRemove').addEventListener('click', deleteEditor);
   $('bookmarkIcon').addEventListener('input', event => {
@@ -427,7 +420,6 @@
     currentUrl = tab?.url || '';
     currentTitle = tab?.title || '';
     renderStar();
-    if (mode === 'folder') $('bookmarkFolderPage').disabled = !model.url(currentUrl);
   });
   // Initial hydration is synchronous and survives portable EXE restarts in the
   // trusted Tauri WebView2 profile, independent of website sessions.

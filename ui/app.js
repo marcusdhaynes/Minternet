@@ -103,7 +103,7 @@ api.onFocusAddress(() => byId('address').focus());
 const bind = (id, name) => byId(id).addEventListener('click', () => command(name));
 for (const [id, name] of [
   ['newTab','new'],['newPrivate','new-private'],['back','back'],['forward','forward'],
-  ['reload','reload'],['home','home'],['private','privacy'],['tor','tor'],
+  ['reload','reload'],['private','privacy'],['tor','tor'],
   ['minimize','minimize'],['maximize','maximize'],['quit','quit']
 ]) bind(id,name);
 byId('addressForm').addEventListener('submit', event => {
@@ -144,18 +144,28 @@ window.addEventListener('keydown', event => {
   }
 });
 
-/* The native Windows build is deliberately frameless. Only an empty patch of
-   the 22px app header or its logo can move the OS window; tab clicks/drags,
-   address input, and window controls continue functioning normally. */
+/* Frameless chrome: normal drag starts only AFTER movement. Starting native
+   dragging on pointerdown swallows Windows double-click events. */
 if(window.__TAURI__){
   const topRow=document.querySelector('.tab-row');
   const interactive='button,.tabs,.window-actions,.ungroup-drop-target,input,a,[role="tab"]';
+  let pendingDrag=null;
   topRow?.addEventListener('pointerdown',event=>{
-    if(event.button!==0||event.detail>1||event.target.closest(interactive))return;
+    if(event.button!==0 || event.detail>1 || event.target.closest(interactive))return;
+    pendingDrag={id:event.pointerId,x:event.clientX,y:event.clientY};
+  });
+  topRow?.addEventListener('pointermove',event=>{
+    if(!pendingDrag||event.pointerId!==pendingDrag.id)return;
+    if(Math.hypot(event.clientX-pendingDrag.x,event.clientY-pendingDrag.y)<4)return;
+    pendingDrag=null;
     void api.command('window-drag').catch(()=>{});
   });
+  for(const type of ['pointerup','pointercancel','lostpointercapture'])
+    topRow?.addEventListener(type,()=>{pendingDrag=null;});
   topRow?.addEventListener('dblclick',event=>{
-    if(event.target.closest(interactive))return;
+    if(event.button!==0||event.target.closest(interactive))return;
+    event.preventDefault();
+    pendingDrag=null;
     void api.command('maximize').catch(()=>{});
   });
 }
