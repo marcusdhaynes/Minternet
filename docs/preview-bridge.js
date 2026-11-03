@@ -107,11 +107,11 @@ if (!window.minternet) {
       '<div id="preview-launch" class="preview-launch" hidden><div class="preview-mark">M</div><div class="preview-caption">OPEN REAL WEBSITE</div><h2 id="preview-target"></h2><p>This website blocks embedded browsing. Open the real site in your existing browser.</p><a id="preview-open" target="_blank" rel="noopener noreferrer">Open Website ↗</a></div>';
     document.body.append(panel);
     const link=document.createElement('a');link.className='preview-build-link';
-    link.href='https://github.com/marcusdhaynes/Minternet/actions/workflows/desktop-build.yml';
-    link.target='_blank';link.rel='noopener noreferrer';link.textContent='Get the functional desktop browser ↗';
+    link.href='https://github.com/marcusdhaynes/Minternet/actions/workflows/native-windows.yml';
+    link.target='_blank';link.rel='noopener noreferrer';link.textContent='Get the PORTABLE Windows browser (one EXE) ↗';
     $('homeScreen')?.querySelector('.hero')?.append(link);
     const badge=document.createElement('a');badge.className='preview-badge';
-    badge.href=link.href;badge.target='_blank';badge.rel='noopener noreferrer';badge.textContent='DESKTOP APP ↗';document.body.append(badge);
+    badge.href=link.href;badge.target='_blank';badge.rel='noopener noreferrer';badge.textContent='PORTABLE EXE ↗';document.body.append(badge);
     addEventListener('keydown',event=>{
       if(!(event.ctrlKey||event.metaKey))return;
       if(event.key.toLowerCase()==='t'){event.preventDefault();addTab();emit()}

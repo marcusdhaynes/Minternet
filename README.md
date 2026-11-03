@@ -8,13 +8,13 @@ Minternet is transitioning away from a bundled Electron/Chromium browser toward 
 
 | Platform | Latest workflow | Engine | Status |
 |---|---|---|---|
-| Windows x64 EXE | [Native Windows](https://github.com/marcusdhaynes/Minternet/actions/workflows/native-windows.yml) | WebView2 | Installer compiled + size checked; no physical Windows test |
+| Windows portable EXE | [Portable Windows build](https://github.com/marcusdhaynes/Minternet/actions/workflows/native-windows.yml) | WebView2 | One EXE with embedded frontend; no installer or Program Files writes; in-app navigation smoke test |
 | Android APK | [Native Android](https://github.com/marcusdhaynes/Minternet/actions/workflows/native-android.yml) | Android System WebView | APK compiled + size checked, with separate-process private-window implementation; emulator smoke is being validated |
 | macOS DMG | [Native macOS/Linux](https://github.com/marcusdhaynes/Minternet/actions/workflows/native-unix.yml) | WKWebView | Bundle compiled + size checked; unsigned |
 | Linux DEB | [Native macOS/Linux](https://github.com/marcusdhaynes/Minternet/actions/workflows/native-unix.yml) | WebKitGTK | Bundle compiled + size checked; unsigned |
 | iPhone/iPad | [iOS simulator](https://github.com/marcusdhaynes/Minternet/actions/workflows/native-ios.yml) | WKWebView | Simulator app compiled + size checked; physical-device IPA requires Apple signing |
 
-Open a successful workflow run and download the artifact under **Artifacts**. The packaged native apps are designed to navigate and render websites **inside Minternet** as native top-level webviews; the [GitHub Pages live UI](https://marcusdhaynes.github.io/Minternet/) is only a web companion and must open sites such as Google in a real browser because of iframe policies.
+For Windows, download **Minternet-Portable-Windows-x64** from a successful run, extract its single EXE, and run it directly. **Do not run the older Minternet Setup installer.** The portable EXE contains the app code and UI but depends on the operating system's WebView2 runtime, which is normally present on modern Windows; browser profile/cache data is stored by Windows as needed. Open other platform artifacts from successful runs. The packaged native apps are designed to navigate and render websites **inside Minternet** as native top-level webviews; the [GitHub Pages live UI](https://marcusdhaynes.github.io/Minternet/) is only a web companion and must open sites such as Google in a real browser because of iframe policies.
 
 ## Browse / build
 
