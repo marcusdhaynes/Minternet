@@ -1,8 +1,8 @@
 'use strict';
 // Hosted companion only. The real desktop app supplies window.minternet through preload.
 if (!window.minternet) {
-  const tabs=[{id:1,title:'New Tab',url:'about:blank',history:['about:blank'],at:0}];
-  let activeId=1,nextId=1,renderedUrl='',listeners=[];
+  const tabs=[];
+  let activeId=0,nextId=0,renderedUrl='',listeners=[];
   const $=id=>document.getElementById(id);
   const current=()=>tabs.find(t=>t.id===activeId);
   const title=url=>url==='about:blank'?'New Tab':new URL(url).hostname.replace(/^www\./,'');
@@ -32,8 +32,8 @@ if (!window.minternet) {
   function show(){
     const t=current(),panel=$('preview-content'),frame=$('preview-frame');
     if(!panel)return;
-    panel.hidden=t.url==='about:blank';
-    if(t.url==='about:blank'){
+    panel.hidden=!t||t.url==='about:blank';
+    if(!t||t.url==='about:blank'){
       if(renderedUrl!==''){frame.removeAttribute('src');renderedUrl=''}
       return;
     }
@@ -53,7 +53,8 @@ if (!window.minternet) {
     listeners.forEach(cb=>cb({
       activeId,extensionsCount:0,
       tabs:tabs.map(x=>({
-        id:x.id,title:x.title,url:x.url,private:false,loading:false,suspended:false,error:'',
+        id:x.id,title:x.title,url:x.url,private:!!x.private,pinned:!!x.pinned,
+        loading:false,suspended:false,error:'',
         canBack:x.at>0,canForward:x.at<x.history.length-1
       }))
     }));
@@ -61,7 +62,8 @@ if (!window.minternet) {
   }
   function addTab(){
     if(tabs.length>=35)return false;
-    const id=++nextId;tabs.push({id,title:'New Tab',url:'about:blank',history:['about:blank'],at:0});activeId=id;return true;
+    const id=++nextId;tabs.push({id,title:'New Tab',url:'about:blank',private:false,
+      pinned:false,history:['about:blank'],at:0});activeId=id;return true;
   }
   function go(url){
     const t=current();t.history=t.history.slice(0,t.at+1);t.history.push(url);t.at++;t.url=url;t.title=title(url)
@@ -73,15 +75,35 @@ if (!window.minternet) {
       switch(name){
         case 'new':if(!addTab())return {message:'Maximum 35 tabs.'};break;
         case 'activate':if(tabs.some(t=>t.id===value))activeId=value;break;
+        case 'deselect':activeId=0;break;
+        case 'pin':case 'unpin':case 'toggle-pin':{
+          const tab=tabs.find(t=>t.id===value);
+          if(!tab)return {message:'Tab not found.'};
+          tab.pinned=name==='pin'?true:name==='unpin'?false:!tab.pinned;
+          break;
+        }
+        case 'duplicate':{
+          const original=tabs.find(t=>t.id===value);
+          if(!original)return {message:'Tab not found.'};
+          if(!addTab())return {message:'Maximum 35 tabs.'};
+          const fresh=current();
+          fresh.url=original.url;fresh.title=original.title;
+          fresh.private=original.private;fresh.history=[original.url];fresh.at=0;
+          break;
+        }
         case 'close':{
           const i=tabs.findIndex(t=>t.id===value);
-          if(i!==-1)tabs.splice(i,1);
-          if(!tabs.length)addTab();
-          if(!tabs.some(t=>t.id===activeId))activeId=tabs[Math.max(0,Math.min(i,tabs.length-1))].id;
+          if(i<0)break;
+          tabs.splice(i,1);
+          if(activeId===value){
+            activeId=tabs.find(t=>t.pinned)?.id ??
+              tabs[Math.min(i,tabs.length-1)]?.id ?? 0;
+          }
           break;
         }
         case 'navigate':{
           const url=parse(value);if(!url)return {message:'Only HTTPS addresses and search terms are permitted.'};
+          if(!current()&&!addTab())return {message:'Maximum 35 tabs.'};
           go(url);
           if (url !== 'about:blank' && restricted(url)) {
             // GitHub Pages cannot embed these websites. Do not silently open
@@ -91,9 +113,11 @@ if (!window.minternet) {
           }
           break;
         }
-        case 'home':go('about:blank');break;
+        case 'home':if(current())go('about:blank');break;
         case 'back':case 'forward':{
-          const t=current(),next=t.at+(name==='back'?-1:1);
+          const t=current();
+          if(!t)break;
+          const next=t.at+(name==='back'?-1:1);
           if(next>=0&&next<t.history.length){t.at=next;t.url=t.history[next];t.title=title(t.url)}
           break;
         }
@@ -124,9 +148,9 @@ if (!window.minternet) {
     addEventListener('keydown',event=>{
       if(!(event.ctrlKey||event.metaKey))return;
       if(event.key.toLowerCase()==='t'){event.preventDefault();addTab();emit()}
-      if(event.key.toLowerCase()==='w'&&tabs.length>1){
-        event.preventDefault();const i=tabs.findIndex(t=>t.id===activeId);
-        tabs.splice(i,1);activeId=tabs[Math.min(i,tabs.length-1)].id;emit()
+      if(event.key.toLowerCase()==='w'&&current()){
+        event.preventDefault();
+        void window.minternet.command('close',activeId);
       }
     });
     emit();
