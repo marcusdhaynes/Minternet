@@ -10,6 +10,7 @@ use tauri::{
 };
 
 const CHROME: f64 = 52.0;
+const BOOKMARK_BAR: f64 = 22.0;
 const MAX_TABS: usize = 35;
 const HOME: &str = "about:blank";
 
@@ -56,8 +57,10 @@ struct Browser {
 
 #[derive(Default)]
 struct LayoutCache {
-    size_and_home: Option<(u32, u32, bool)>,
+    size_and_home: Option<(u32, u32, bool, bool, bool)>,
     shown: Option<String>,
+    bookmark_bar_visible: bool,
+    overlay_open: bool,
 }
 
 impl Browser {
@@ -176,6 +179,12 @@ fn dimensions(window: &tauri::Window) -> Result<(f64, f64), String> {
     Ok((logical.width.max(1.0), logical.height.max(1.0)))
 }
 
+fn chrome_top(app: &tauri::AppHandle) -> f64 {
+    let cache = app.state::<Mutex<LayoutCache>>();
+    let bar_visible = cache.lock().map(|s| s.bookmark_bar_visible).unwrap_or(false);
+    CHROME + if bar_visible { BOOKMARK_BAR } else { 0.0 }
+}
+
 fn refresh_layout(app: &tauri::AppHandle) {
     let Some(window) = app.get_window("main") else { return };
     let Ok(physical) = window.inner_size() else { return };
@@ -184,33 +193,45 @@ fn refresh_layout(app: &tauri::AppHandle) {
         .lock()
         .map(|b| b.active().map(|t| t.url == HOME).unwrap_or(true))
         .unwrap_or(true);
-    // Native resizing is expensive. No resize is required on a same-size tab switch.
-    {
+    let (bar_visible, overlay_open) = {
         let cache = app.state::<Mutex<LayoutCache>>();
-        let Ok(mut cache) = cache.lock() else { return };
-        let signature = (physical.width, physical.height, show_home);
-        if cache.size_and_home == Some(signature) { return; }
-        cache.size_and_home = Some(signature);
-    }
+        let Ok(mut state) = cache.lock() else { return };
+        let signature = (
+            physical.width, physical.height, show_home,
+            state.bookmark_bar_visible, state.overlay_open
+        );
+        if state.size_and_home == Some(signature) { return; }
+        state.size_and_home = Some(signature);
+        (state.bookmark_bar_visible, state.overlay_open)
+    };
+    let top = CHROME + if bar_visible { BOOKMARK_BAR } else { 0.0 };
+    // When a folder/settings popover opens, temporarily show the full local
+    // chrome surface; website views remain alive but hidden, never reloaded.
     if let Some(chrome) = app.get_webview("chrome") {
-        let _ = chrome.set_size(LogicalSize::new(width, if show_home { height } else { CHROME.min(height) }));
+        let full = show_home || overlay_open;
+        let height_for_chrome = if full { height } else { top.min(height) };
+        let _ = chrome.set_size(LogicalSize::new(width, height_for_chrome));
     }
-    let available = (height - CHROME).max(1.0);
+    let available = (height - top).max(1.0);
     for view in window.webviews() {
         if view.label() == "chrome" { continue; }
-        let _ = view.set_position(LogicalPosition::new(0.0, CHROME));
+        let _ = view.set_position(LogicalPosition::new(0.0, top));
         let _ = view.set_size(LogicalSize::new(width, available));
     }
 }
 
 fn display_active(app: &tauri::AppHandle) {
-    let target = {
+    let overlay = {
+        let cache = app.state::<Mutex<LayoutCache>>();
+        cache.lock().map(|s| s.overlay_open).unwrap_or(false)
+    };
+    let target = if overlay { None } else {
         let store = app.state::<Mutex<Browser>>();
         let Ok(b) = store.lock() else { return };
         b.active().and_then(|tab| if tab.url == HOME { None } else { tab.view.clone() })
     };
     refresh_layout(app);
-    // Only toggle visibility for the previous and selected WebView2, not every tab.
+    // Only change visibility of the old and new browser views.
     let previous = {
         let cache = app.state::<Mutex<LayoutCache>>();
         let Ok(mut state) = cache.lock() else { return };
@@ -256,6 +277,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     let Some(window) = app.get_window("main") else { return Err("Missing window".into()) };
     let label = format!("tab-{id}");
     let (width, height) = dimensions(&window)?;
+    let top = chrome_top(app);
     let for_load = app.clone();
     let for_title = app.clone();
     let for_popup = app.clone();
@@ -297,8 +319,8 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
         });
     window.add_child(
         builder,
-        LogicalPosition::new(0.0, CHROME),
-        LogicalSize::new(width, (height - CHROME).max(1.0)),
+        LogicalPosition::new(0.0, top),
+        LogicalSize::new(width, (height - top).max(1.0)),
     ).map_err(|e| e.to_string())?;
     let state = app.state::<Mutex<Browser>>();
     let mut browser = state.lock().map_err(|e| e.to_string())?;
@@ -450,6 +472,28 @@ fn browser_snapshot(app: tauri::AppHandle) -> Result<Snapshot,String> { snapshot
 #[tauri::command]
 async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Result<Value, String> {
     match name.as_str() {
+        "bookmark-bar-visibility" => {
+            let visible = value.as_bool().ok_or("Bookmark bar setting must be true or false")?;
+            {
+                let cache = app.state::<Mutex<LayoutCache>>();
+                let mut state = cache.lock().map_err(|e| e.to_string())?;
+                state.bookmark_bar_visible = visible;
+                state.size_and_home = None;
+            }
+            display_active(&app);
+            return Ok(json!({"ok": true}));
+        }
+        "chrome-overlay" => {
+            let open = value.as_bool().ok_or("Overlay setting must be true or false")?;
+            {
+                let cache = app.state::<Mutex<LayoutCache>>();
+                let mut state = cache.lock().map_err(|e| e.to_string())?;
+                state.overlay_open = open;
+                state.size_and_home = None;
+            }
+            display_active(&app);
+            return Ok(json!({"ok": true}));
+        }
         "prepare-tab" => { prepare_active(&app)?; }
         "new" | "new-private" | "new-url" => {
             let private = name == "new-private";

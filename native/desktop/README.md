@@ -25,3 +25,13 @@ These optimizations reduce Minternet's overhead, not the destination site's netw
 
 - Back/Forward now uses WebView2's native navigation history and back-forward cache where available, preserving page state and avoiding forced reloads. Suspended tabs have an HTTPS navigation fallback.
   On the pinned Tauri version this uses the existing webview's JavaScript History API, not unsupported Rust history methods. The destination site may limit back-forward caching.
+
+
+## Compact bookmarks and settings (0.5)
+- The Settings gear is the rightmost address-row control; toggle the 22px optional Bookmark Bar.
+- Star a HTTPS page with ☆ or Ctrl+D. Click the saved star again to remove it; right-click the star to edit it.
+- Create nested folders (including unnamed folders), right-click a bar item to edit its name, move it between folders, or set an emoji or image icon.
+- Images are converted into small 32×32 PNG thumbnails and kept as data URLs, with no remote icon fetches or arbitrary SVG scripting.
+- Bookmarks live in the trusted local Tauri/WebView2 chrome profile under `minternet.bookmark-tree.v1` in localStorage; they are NOT uploaded to Supabase or exposed to untrusted page webviews.
+- When Settings/Folder/Manager opens, the local chrome temporarily expands and hides (but does not destroy) the current website view. Closing the panel restores the page immediately.
+- Keeping bookmarks stored locally means clearing Minternet's application data may erase them; export/import and optional encrypted synchronization are future work.
