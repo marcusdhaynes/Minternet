@@ -6,6 +6,7 @@ on:
       - 'native/desktop/**'
       - 'ui/**'
       - 'tests/**'
+      - 'docs/preview-bridge.js'
       - '.github/workflows/native-windows.yml'
       - '.github/workflows/publish-current-portable.yml'
   workflow_dispatch:
