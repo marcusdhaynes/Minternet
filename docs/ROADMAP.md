@@ -1,14 +1,18 @@
 # Minternet roadmap
 
 ## Desktop prototype
-- [x] Compact Firefox-inspired multi-tab interface and HTTPS navigation
+- [x] Ultra-compact interface; HTTPS-first navigation with explicit HTTP confirmation
 - [x] Normal/Private tab recreation with separate session partitions
+- [x] Lazy blank tabs, manual inactive-tab memory release, safe site permission prompts
+- [x] Sandboxed HTTPS popups for standard website login flows
 - [x] Chromium unpacked extension loader (limited support)
 - [x] GitHub CI, security checks, unsigned desktop packaging
 - [x] Optional Supabase SQL schema, currently unconnected
 
 ## Desktop beta
-- [ ] Bookmarks, settings, downloads, profile management, per-site permissions
+- [ ] Bookmarks, settings, safe downloads, profiles, persistent per-site permission controls
+- [ ] Test video streaming, OAuth popups, WebRTC, passkeys, accessibility and hardware support on each platform
+- [ ] Memory/RAM/CPU and installer-size benchmarks (baseline versus Chrome/Firefox)
 - [ ] Signed auto-updates, repeatable builds and security monitoring
 - [ ] Independent security review, integration tests and engine patch policy
 

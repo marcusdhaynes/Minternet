@@ -4,8 +4,9 @@
 
 ## Implemented
 - Sandboxed external web views, with Node integration disabled and no app IPC exposed to websites.
-- HTTPS-only top-level addresses/navigation; requests for site permissions default to denial.
-- Browser-initiated popup windows and downloads blocked.
+- HTTPS-first top-level navigation. Explicit `http://` entry requires a warning/confirmation; non-HTTPS redirects remain blocked except within that tab's explicitly approved origin.
+- Site camera/microphone, location, notifications and clipboard-read permissions require an origin-specific, in-memory grant. Other privileged APIs default to denial; fullscreen and ordinary clipboard writes are permitted.
+- HTTPS-only sandboxed popup windows for conventional authentication; downloads remain blocked pending a secure implementation.
 - Per-private-tab, nonpersistent session partitions and a new renderer when switching private state.
 - Switching from Normal to Private **does not** erase cookies or data previously created in Normal mode.
 - Opt-in unpacked Chromium extension loading; extensions run in normal session only.
@@ -16,7 +17,10 @@
 - Firefox XPI compatibility, full Chrome Web Store API compatibility, extension safety audit.
 - Automatic verified security updates, signed installers, phishing protection, native Android/iOS engines, penetration tests.
 - End-to-end encrypted sync; only a proposed ciphertext schema is included.
-- HTTPS-only top-level navigation does not guarantee all subresources are secure or anonymous.
+- HTTPS-first navigation does not guarantee all subresources are secure or anonymous; explicit HTTP exceptions are unencrypted.
+- Popup/login compatibility, camera/microphone, DRM streaming, passkeys and protected media need integration tests on each OS.
+- Manual inactive-tab release may discard unsaved forms, running scripts and page state. Background audio tabs are skipped.
+- The GitHub Pages demo is UI-only; browser engine settings apply only to the desktop application.
 
 ## Production security checklist
 1. Maintain browser-engine security patch SLA and verified signed updates.

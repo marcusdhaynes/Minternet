@@ -1,12 +1,14 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { navigateTarget, isSafePageUrl } = require('../src/core/url.cjs');
+const { navigateTarget, isSafePageUrl, isHttpPageUrl } = require('../src/core/url.cjs');
 const { createTab, replacePrivacy } = require('../src/core/tab-model.cjs');
 
 test('direct addresses use HTTPS while free text searches', () => {
   assert.equal(navigateTarget('example.com').url, 'https://example.com/');
-  assert.equal(navigateTarget('http://example.com/').url, 'https://example.com/');
+  assert.equal(navigateTarget('http://example.com/').url, 'http://example.com/');
+  assert.equal(navigateTarget('http://example.com/').kind, 'insecure');
+  assert.equal(navigateTarget('example.com').kind, 'web');
   assert.match(navigateTarget('privacy tools').url, /duckduckgo\.com/);
 });
 test('dangerous URLs are rejected', () => {
@@ -15,6 +17,9 @@ test('dangerous URLs are rejected', () => {
     assert.equal(navigateTarget(value).url, null, value);
   assert.equal(isSafePageUrl('http://example.com'), false);
   assert.equal(isSafePageUrl('https://example.com'), true);
+  assert.equal(isHttpPageUrl('http://example.com/'), true);
+  assert.equal(isHttpPageUrl('http://u:p@example.com/'), false);
+  assert.equal(isHttpPageUrl('file:///tmp/x'), false);
 });
 test('switching privacy creates a new tab model', () => {
   const normal = createTab(1, 'https://example.com/', false);
@@ -22,4 +27,5 @@ test('switching privacy creates a new tab model', () => {
   assert.equal(priv.private, true);
   assert.equal(priv.url, normal.url);
   assert.notEqual(priv, normal);
+  assert.equal(priv.suspended, false);
 });

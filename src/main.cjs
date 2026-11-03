@@ -4,7 +4,7 @@ const { app, BrowserWindow, WebContentsView, ipcMain, session, shell, dialog } =
 const path = require('node:path');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
-const { navigateTarget, isSafePageUrl } = require('./core/url.cjs');
+const { navigateTarget, isSafePageUrl, isHttpPageUrl } = require('./core/url.cjs');
 const { createTab, replacePrivacy, sanitizeTab } = require('./core/tab-model.cjs');
 
 app.enableSandbox();
@@ -13,17 +13,60 @@ const FOOTER = 14;
 const MAX_TABS = 35;
 const tabs = [];
 const preparedSessions = new WeakSet();
+const sessionGrants = new WeakMap();
+const GRANTABLE_PERMISSIONS = new Set(['media', 'geolocation', 'geolocation-approximate', 'notifications', 'clipboard-read']);
+const PRIVACY_FREE_PERMISSIONS = new Set(['clipboard-sanitized-write', 'fullscreen']);
+const HTTP_WARNING = 'This page uses unencrypted HTTP. Anyone on the network may be able to read or alter it.';
+
 let activeId = null;
 let nextId = 1;
 let mainWindow = null;
 const normalSession = () => session.fromPartition('persist:minternet-normal');
 const currentTab = () => tabs.find(t => t.id === activeId);
 
+function safeOrigin(value) {
+  try {
+    const url = new URL(String(value));
+    return url.protocol === 'https:' && !url.username && !url.password ? url.origin : null;
+  } catch { return null; }
+}
+
 function lockDown(s) {
   if (preparedSessions.has(s)) return;
   preparedSessions.add(s);
-  s.setPermissionRequestHandler((_contents, _permission, respond) => respond(false));
-  s.setPermissionCheckHandler(() => false);
+  const grants = new Set();
+  sessionGrants.set(s, grants);
+  s.setPermissionCheckHandler((_contents, permission, requestingOrigin) => {
+    if (PRIVACY_FREE_PERMISSIONS.has(permission)) return true;
+    const origin = safeOrigin(requestingOrigin);
+    return Boolean(origin && GRANTABLE_PERMISSIONS.has(permission) && grants.has(origin + '|' + permission));
+  });
+  s.setPermissionRequestHandler((contents, permission, respond, details) => {
+    if (PRIVACY_FREE_PERMISSIONS.has(permission)) return respond(true);
+    const origin = safeOrigin(details?.requestingUrl || contents?.getURL?.());
+    if (!origin || !GRANTABLE_PERMISSIONS.has(permission)) return respond(false);
+    const key = origin + '|' + permission;
+    if (grants.has(key)) return respond(true);
+    if (!mainWindow || mainWindow.isDestroyed()) return respond(false);
+    // Never persist grants: approvals end when Minternet exits (or a private session closes).
+    void dialog.showMessageBox(mainWindow, {
+      type: 'question',
+      title: 'Minternet site permission',
+      message: origin + ' requests ' + permission,
+      detail: permission === 'media'
+        ? 'This may access your camera and/or microphone. Approve only if you trust this site.'
+        : 'The permission is limited to this site and the current browser session.',
+      buttons: ['Deny', 'Allow for this session'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true
+    }).then(({ response }) => {
+      const allowed = response === 1 && !contents.isDestroyed();
+      if (allowed) grants.add(key);
+      respond(allowed);
+    }).catch(() => respond(false));
+  });
+  // Downloads remain disabled until a dedicated, safe file dialog is implemented.
   s.on('will-download', event => event.preventDefault());
 }
 
@@ -50,7 +93,7 @@ function redraw() {
       mainWindow.contentView.removeChildView(tab.view);
   }
   const active = currentTab();
-  if (active && active.url !== 'about:blank') {
+  if (active?.view && active.url !== 'about:blank') {
     mainWindow.contentView.addChildView(active.view);
     active.view.setBounds(bounds());
   }
@@ -104,17 +147,46 @@ function makeView(tab) {
       nodeIntegration: false,
       contextIsolation: true,
       webSecurity: true,
-      allowRunningInsecureContent: false
+      allowRunningInsecureContent: false,
+      backgroundThrottling: true
     }
   });
   tab.view = view;
   const wc = view.webContents;
-  wc.setWindowOpenHandler(() => ({ action: 'deny' }));
+  wc.setWindowOpenHandler(details => {
+    // Sandboxed, HTTPS-only popup windows enable common login/authentication flows.
+    if (!isSafePageUrl(details.url)) return { action: 'deny' };
+    return {
+      action: 'allow',
+      overrideBrowserWindowOptions: {
+        width: 780, height: 680, minWidth: 340, minHeight: 260,
+        autoHideMenuBar: true, backgroundColor: '#0b101c',
+        webPreferences: {
+          session: s, sandbox: true, nodeIntegration: false,
+          contextIsolation: true, webSecurity: true,
+          allowRunningInsecureContent: false, backgroundThrottling: true
+        }
+      }
+    };
+  });
+  wc.on('did-create-window', child => {
+    child.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    child.webContents.on('will-navigate', (event, url) => {
+      if (!isSafePageUrl(url)) event.preventDefault();
+    });
+    child.webContents.on('will-redirect', (event, url) => {
+      if (!isSafePageUrl(url)) event.preventDefault();
+    });
+  });
   wc.on('before-input-event', keyHandler);
   const rejectNavigation = (event, url) => {
-    if (!isSafePageUrl(url)) {
+    if (!isSafePageUrl(url) && !(
+      /^http:\/\//i.test(url) &&
+      isHttpPageUrl(url) &&
+      tab.allowedHttpOrigin === new URL(url).origin
+    )) {
       event.preventDefault();
-      tab.error = 'Blocked: only HTTPS addresses are permitted';
+      tab.error = 'Blocked unsafe navigation. To open an HTTP site, explicitly enter its http:// URL.';
       emitState();
     }
   };
@@ -142,21 +214,39 @@ async function navigate(tab, input) {
     emitState();
     return;
   }
+  if (dest.kind === 'insecure') {
+    const origin = new URL(dest.url).origin;
+    if (tab.allowedHttpOrigin !== origin) {
+      const choice = await dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        title: 'Insecure HTTP connection',
+        message: 'Open ' + origin + ' over HTTP?',
+        detail: HTTP_WARNING + '\\n\\nUse HTTPS whenever possible.',
+        buttons: ['Cancel', 'Open HTTP'],
+        defaultId: 0,
+        cancelId: 0
+      });
+      if (choice.response !== 1 || !tabs.includes(tab)) return;
+      tab.allowedHttpOrigin = origin;
+    }
+  }
   tab.error = '';
   if (dest.kind === 'blank') {
     const oldView = tab.view;
-    if (mainWindow.contentView.children.includes(oldView))
+    if (oldView && mainWindow.contentView.children.includes(oldView))
       mainWindow.contentView.removeChildView(oldView);
-    makeView(tab);
-    oldView.webContents.close();
+    tab.view = null;
+    if (oldView && !oldView.webContents.isDestroyed()) oldView.webContents.close();
     tab.url = 'about:blank';
     tab.title = 'New Tab';
     tab.loading = false;
     redraw();
     return;
   }
+  if (!tab.view) makeView(tab);
   tab.url = dest.url;
   tab.title = new URL(dest.url).hostname;
+  tab.suspended = false;
   redraw();
   try { await tab.view.webContents.loadURL(dest.url); }
   catch (err) { tab.error = 'Navigation failed: ' + String(err.message).slice(0, 120); emitState(); }
@@ -165,7 +255,10 @@ async function navigate(tab, input) {
 function addTab(privateMode = false, url = 'about:blank') {
   if (tabs.length >= MAX_TABS) return;
   const tab = createTab(nextId++, 'about:blank', privateMode);
-  makeView(tab);
+  // Blank tabs are lightweight models until they are actually navigated.
+  tab.view = null;
+  tab.allowedHttpOrigin = null;
+  tab.suspended = false;
   tabs.push(tab);
   activeId = tab.id;
   redraw();
@@ -176,9 +269,9 @@ function closeTab(id = activeId) {
   const index = tabs.findIndex(t => t.id === id);
   if (index < 0) return;
   const [tab] = tabs.splice(index, 1);
-  if (mainWindow.contentView.children.includes(tab.view))
+  if (tab.view && mainWindow.contentView.children.includes(tab.view))
     mainWindow.contentView.removeChildView(tab.view);
-  tab.view.webContents.close();
+  if (tab.view && !tab.view.webContents.isDestroyed()) tab.view.webContents.close();
   if (activeId === id) activeId = (tabs[Math.min(index, tabs.length - 1)] || {}).id || null;
   if (!tabs.length) addTab();
   else redraw();
@@ -189,11 +282,14 @@ function changePrivacy() {
   if (!old) return;
   const index = tabs.indexOf(old);
   const replacement = replacePrivacy(old, !old.private);
-  makeView(replacement);
+  // Session permissions and HTTP exceptions never transfer across privacy modes.
+  replacement.view = null;
+  replacement.allowedHttpOrigin = null;
+  replacement.suspended = false;
   tabs[index] = replacement;
-  if (mainWindow.contentView.children.includes(old.view))
+  if (old.view && mainWindow.contentView.children.includes(old.view))
     mainWindow.contentView.removeChildView(old.view);
-  old.view.webContents.close();
+  if (old.view && !old.view.webContents.isDestroyed()) old.view.webContents.close();
   redraw();
   if (replacement.url !== 'about:blank') void navigate(replacement, replacement.url);
 }
@@ -239,11 +335,16 @@ async function command(event, payload) {
     return { ok: false, message: 'Input too long' };
   const { name, value } = payload;
   const tab = currentTab();
-  const wc = tab?.view.webContents;
+  const wc = tab?.view?.webContents;
   switch (name) {
     case 'new': addTab(); break;
     case 'new-private': addTab(true); break;
-    case 'activate': if (Number.isSafeInteger(value) && tabs.some(t => t.id === value)) { activeId = value; redraw(); } break;
+    case 'activate': if (Number.isSafeInteger(value) && tabs.some(t => t.id === value)) {
+      activeId = value;
+      const selected = currentTab();
+      if (!selected.view && selected.url !== 'about:blank') void navigate(selected, selected.url);
+      else redraw();
+    } break;
     case 'close': if (Number.isSafeInteger(value)) closeTab(value); break;
     case 'navigate': if (tab && typeof value === 'string') void navigate(tab, value); break;
     case 'home': if (tab) void navigate(tab, 'about:blank'); break;
@@ -252,6 +353,24 @@ async function command(event, payload) {
     case 'reload': if (tab && tab.url !== 'about:blank') wc.reload(); break;
     case 'privacy': changePrivacy(); break;
     case 'extension-install': return addExtension();
+    case 'free-memory': {
+      let count = 0;
+      for (const background of tabs) {
+        if (background.id === activeId || !background.view || background.loading) continue;
+        const contents = background.view.webContents;
+        if (contents.isDestroyed() || contents.isCurrentlyAudible()) continue;
+        if (mainWindow.contentView.children.includes(background.view))
+          mainWindow.contentView.removeChildView(background.view);
+        background.view = null;
+        background.suspended = background.url !== 'about:blank';
+        contents.close();
+        count++;
+      }
+      emitState();
+      return { ok: true, message: count
+        ? count + ' inactive tab(s) released from RAM. Reloading one may lose unsaved page state.'
+        : 'No inactive tabs could be released.' };
+    }
     case 'tor': {
       const choice = await dialog.showMessageBox(mainWindow, {
         type: 'info',
@@ -273,6 +392,11 @@ async function command(event, payload) {
   emitState();
   return { ok: true };
 }
+
+app.on('web-contents-created', (_event, contents) => {
+  // Prevent remote pages from attaching privileged Electron webviews.
+  contents.on('will-attach-webview', event => event.preventDefault());
+});
 
 app.whenReady().then(async () => {
   lockDown(normalSession());
@@ -298,7 +422,7 @@ app.whenReady().then(async () => {
   mainWindow.on('maximize', emitState);
   mainWindow.on('unmaximize', emitState);
   mainWindow.on('closed', () => {
-    for (const tab of tabs) if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close();
+    for (const tab of tabs) if (tab.view && !tab.view.webContents.isDestroyed()) tab.view.webContents.close();
     mainWindow = null;
   });
   ipcMain.handle('minternet:command', command);

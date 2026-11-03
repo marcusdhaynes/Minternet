@@ -11,9 +11,8 @@ function navigateTarget(input) {
   if (!candidate) return { kind: 'search', url: SEARCH + encodeURIComponent(text) };
   try {
     const url = new URL(candidate);
-    url.protocol = 'https:';
     if (!url.hostname || url.username || url.password) return { kind: 'blocked', url: null };
-    return { kind: 'web', url: url.toString() };
+    return { kind: url.protocol === 'http:' ? 'insecure' : 'web', url: url.toString() };
   } catch { return { kind: 'blocked', url: null }; }
 }
 function isSafePageUrl(value) {
@@ -22,4 +21,10 @@ function isSafePageUrl(value) {
     return u.protocol === 'https:' && !u.username && !u.password;
   } catch { return false; }
 }
-module.exports = { navigateTarget, isSafePageUrl };
+function isHttpPageUrl(value) {
+  try {
+    const u = new URL(value);
+    return u.protocol === 'http:' && Boolean(u.hostname) && !u.username && !u.password;
+  } catch { return false; }
+}
+module.exports = { navigateTarget, isSafePageUrl, isHttpPageUrl };

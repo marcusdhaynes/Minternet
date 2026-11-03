@@ -25,14 +25,14 @@ function buildTab(tab, active) {
   root.className = 'tab' + (active ? ' selected' : '') + (tab.private ? ' private-tab' : '');
   root.setAttribute('role', 'tab');
   root.setAttribute('aria-selected', String(active));
-  root.title = tab.url === 'about:blank' ? 'New tab' : tab.url;
+  root.title = tab.suspended ? 'Inactive tab (reloads on selection) · ' + tab.url : (tab.url === 'about:blank' ? 'New tab' : tab.url);
   const choose = document.createElement('button');
   choose.className = 'tab-choose';
   choose.title = tab.title;
   choose.addEventListener('click', () => command('activate', tab.id));
   const symbol = document.createElement('span');
   symbol.className = 'tab-symbol';
-  symbol.textContent = tab.private ? '◈' : (tab.loading ? '◌' : '◉');
+  symbol.textContent = tab.private ? '◈' : (tab.suspended ? '◌' : tab.loading ? '◌' : '◉');
   const text = document.createElement('span');
   text.className = 'tab-text';
   text.textContent = tab.title || 'New Tab';
@@ -50,7 +50,23 @@ function render(data) {
   snapshot = data;
   const tabs = byId('tabs');
   const active = data.tabs.find(t => t.id === data.activeId);
-  tabs.replaceChildren(...data.tabs.map(t => buildTab(t, t.id === data.activeId)));
+  const signature = data.tabs.map(t => t.id).join(',');
+  if (signature !== render.lastSignature) {
+    tabs.replaceChildren(...data.tabs.map(t => buildTab(t, t.id === data.activeId)));
+    render.lastSignature = signature;
+  } else {
+    // Reuse tab DOM nodes during loading/title updates: avoids pointless reflows.
+    for (let i = 0; i < data.tabs.length; i++) {
+      const tab = data.tabs[i];
+      const el = tabs.children[i];
+      const activeTab = tab.id === data.activeId;
+      el.className = 'tab' + (activeTab ? ' selected' : '') + (tab.private ? ' private-tab' : '');
+      el.setAttribute('aria-selected', String(activeTab));
+      el.title = tab.suspended ? 'Inactive tab (reloads on selection) · ' + tab.url : tab.url;
+      el.querySelector('.tab-symbol').textContent = tab.private ? '◈' : tab.suspended || tab.loading ? '◌' : '◉';
+      el.querySelector('.tab-text').textContent = tab.title || 'New Tab';
+    }
+  }
   byId('back').disabled = !active?.canBack;
   byId('forward').disabled = !active?.canForward;
   byId('reload').disabled = !active || active.url === 'about:blank';
@@ -59,7 +75,9 @@ function render(data) {
   byId('modeLabel').textContent = active?.private ? 'Private' : 'Normal';
   byId('private').classList.toggle('active-mode', !!active?.private);
   byId('private').setAttribute('aria-pressed', String(!!active?.private));
-  byId('connectionIcon').textContent = active?.private ? '◈' : '◇';
+  byId('connectionIcon').textContent = active?.url?.startsWith('http://') ? '!' : active?.private ? '◈' : '◇';
+  byId('connectionIcon').title = active?.url?.startsWith('http://') ? 'Warning: unencrypted HTTP' : 'HTTPS preferred';
+  byId('address').setAttribute('aria-label', active?.url?.startsWith('http://') ? 'Insecure HTTP address' : 'Search or enter address');
   byId('pageStatus').textContent = active?.error || (active?.loading ? 'Connecting securely…' : (active?.private ? 'Private session' : 'Ready to explore'));
   byId('extensionStatus').textContent = (data.extensionsCount || 0) + ' extension(s) · ' + (active?.private ? 'Private' : 'Normal') + ' mode';
   if (!addressFocused) byId('address').value = isBlank ? '' : active.url;
@@ -74,7 +92,7 @@ const bind = (id, name) => byId(id).addEventListener('click', () => command(name
 for (const [id, name] of [
   ['newTab','new'],['newPrivate','new-private'],['back','back'],['forward','forward'],
   ['reload','reload'],['home','home'],['private','privacy'],['tor','tor'],
-  ['extensions','extension-install'],['minimize','minimize'],['maximize','maximize'],['quit','quit']
+  ['extensions','extension-install'],['freeMemory','free-memory'],['minimize','minimize'],['maximize','maximize'],['quit','quit']
 ]) bind(id,name);
 byId('addressForm').addEventListener('submit', event => {
   event.preventDefault();
