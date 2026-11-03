@@ -148,7 +148,8 @@ window.addEventListener('keydown', event => {
    dragging on pointerdown swallows Windows double-click events. */
 if(window.__TAURI__){
   const topRow=document.querySelector('.tab-row');
-  const interactive='button,.tabs,.window-actions,.ungroup-drop-target,input,a,[role="tab"]';
+  // Blank space inside .tabs counts as title-bar space; actual tabs/buttons do not.
+  const interactive='button,.window-actions,.ungroup-drop-target,input,a,[role="tab"]';
   let pendingDrag=null;
   topRow?.addEventListener('pointerdown',event=>{
     if(event.button!==0 || event.detail>1 || event.target.closest(interactive))return;
