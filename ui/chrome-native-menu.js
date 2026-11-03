@@ -206,11 +206,11 @@
     const eye=document.createElement('button');
     eye.className='group-inspector-icon';
     eye.setAttribute('aria-label','Toggle group visibility');
-    const syncEye=()=>{eye.textContent=group.visible?'👁':'◌';eye.title=group.visible?'Hide From Tab Bar':'Show In Tab Bar';eye.setAttribute('aria-pressed',String(group.visible));};
+    const syncEye=()=>{eye.innerHTML=group.visible?'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>':'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18"/><path d="M10.5 6.1A11 11 0 0 1 12 6c6.5 0 10 6 10 6a15 15 0 0 1-3.5 4"/><path d="M6.5 7.3C3.5 9.1 2 12 2 12s3.5 6 10 6a10 10 0 0 0 3.1-.5"/></svg>';eye.title=group.visible?'Hide From Tab Bar':'Show In Tab Bar';eye.setAttribute('aria-pressed',String(group.visible));};
     syncEye();
     eye.addEventListener('click',()=>{groups()?.toggleVisible(id);syncEye();});
     const del=document.createElement('button');del.className='group-inspector-icon delete';
-    del.textContent='×';del.title='Delete Group';del.setAttribute('aria-label','Delete group');
+    del.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg>';del.title='Delete Group';del.setAttribute('aria-label','Delete group');
     del.addEventListener('click',()=>{if(groups()?.removeGroup(id))closeFallback();});
     head.append(name,eye,del);host.append(head);
     const choices=document.createElement('div');choices.className='group-inspector-palette';
@@ -289,7 +289,7 @@
       name.addEventListener('click',()=>groupInspector(group.id,point));
       const eye=document.createElement('button');eye.className='group-inspector-icon';
       eye.setAttribute('aria-label','Toggle visibility for '+groups().displayName(group));
-      const sync=()=>{eye.textContent=group.visible?'👁':'◌';eye.setAttribute('aria-pressed',String(group.visible));eye.title=group.visible?'Hide From Tab Bar':'Show In Tab Bar';};
+      const sync=()=>{eye.innerHTML=group.visible?'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>':'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18"/><path d="M10.5 6.1A11 11 0 0 1 12 6c6.5 0 10 6 10 6a15 15 0 0 1-3.5 4"/></svg>';eye.setAttribute('aria-pressed',String(group.visible));eye.title=group.visible?'Hide From Tab Bar':'Show In Tab Bar';};
       sync();eye.addEventListener('click',()=>{groups().toggleVisible(group.id);sync();});
       row.append(name,eye);host.append(row);
     }
@@ -310,7 +310,7 @@
     return {x:bounds.left,y:bounds.bottom};
   }
   const handlers={
-    folder:(id,button)=>popup(folderItems(id),fromElement(button)),
+    folder:(id,button)=>popup(folderItems(id),fromElement(button),window.__TAURI__&&location.search.includes('minternet-menus-smoke')?{}:{custom:true,heading:'FOLDER'}),
     bookmark:(id,event)=>popup(barMenu(id),{x:event.clientX,y:event.clientY},{custom:true,heading:'BOOKMARK FOLDER'}),
     bar:event=>popup(barMenu(),{x:event.clientX,y:event.clientY},{custom:true,heading:'BOOKMARKS'}),
     groups:point=>groupsOverview(point),
