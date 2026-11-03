@@ -77,16 +77,35 @@
     document.body.classList.remove('tab-dragging');
     tabStrip.classList.remove('drag-ungroup-over');
     ungroupTarget?.classList.remove('drag-target');
-    document.querySelectorAll('.drag-target,.group-drop-target,.tab-drag-source')
-      .forEach(node=>node.classList.remove('drag-target','group-drop-target','tab-drag-source'));
+    document.querySelectorAll('.drag-target,.group-drop-target,.tab-drag-source,.drop-before,.drop-after')
+      .forEach(node=>node.classList.remove('drag-target','group-drop-target','tab-drag-source','drop-before','drop-after'));
   }
   function dropIntoGroup(event,gid){
     const id=currentDraggedTab();
     if(id===null)return false;
     event.preventDefault();
     event.stopPropagation();
+    const members=model.tabsIn(state,gid,latest.tabs).filter(tab=>tab.id!==id);
+    const last=members[members.length-1];
+    if(last)model.moveRelative(state,id,last.id,true);
     clearDropState();
     return assign(id,gid);
+  }
+  function dropNextTo(event,targetId,element) {
+    const id=currentDraggedTab();
+    if(id===null||id===targetId)return false;
+    const target=latest.tabs.find(t=>t.id===targetId);
+    if(!target)return false;
+    event.preventDefault();
+    event.stopPropagation();
+    const after=event.clientX>=element.getBoundingClientRect().left+
+      element.getBoundingClientRect().width/2;
+    const targetGroup=model.findTab(state,targetId);
+    model.moveRelative(state,id,targetId,after);
+    clearDropState();
+    // Dropping a tab beside an ordinary tab removes it from its group;
+    // beside a grouped tab places it in that group at the chosen position.
+    return assign(id,targetGroup?.id||null);
   }
   function dropOutsideGroup(event){
     const id=currentDraggedTab();
@@ -145,6 +164,7 @@
     const signature=JSON.stringify([
       data.activeId,
       data.tabs.map(t=>[t.id,t.title,t.url,t.private,t.loading,t.suspended]),
+      state.order,
       state.groups.map(g=>[g.id,g.name,g.color,g.visible,g.collapsed]),
       Object.entries(state.assignments).sort()
     ]);
@@ -166,7 +186,7 @@
         }
       }
     }
-    for(const tab of data.tabs){
+    for(const tab of model.sortedTabs(state,data.tabs)){
       if(model.findTab(state,tab.id))continue;
       const item=buildTab(tab,tab.id===data.activeId);
       item.dataset.tabId=String(tab.id);
@@ -190,17 +210,19 @@
     element.addEventListener('dragover',event=>{
       if(currentDraggedTab()===null||currentDraggedTab()===tabId)return;
       acceptDrag(event,element,'group-drop-target');
+      const after=event.clientX>=element.getBoundingClientRect().left+
+        element.getBoundingClientRect().width/2;
+      element.classList.toggle('drop-before',!after);
+      element.classList.toggle('drop-after',after);
       const group=model.findTab(state,tabId);
       if(group)element.style.setProperty('--group-accent',groupColor(group));
     });
     element.addEventListener('dragleave',event=>{
-      if(!element.contains(event.relatedTarget))element.classList.remove('group-drop-target');
+      if(!element.contains(event.relatedTarget))element.classList.remove('group-drop-target','drop-before','drop-after');
     });
     element.addEventListener('drop',event=>{
       if(currentDraggedTab()===null||currentDraggedTab()===tabId)return;
-      const group=model.findTab(state,tabId);
-      if(group)dropIntoGroup(event,group.id);
-      else dropOutsideGroup(event);
+      dropNextTo(event,tabId,element);
     });
     element.addEventListener('contextmenu',event=>{
       event.preventDefault();

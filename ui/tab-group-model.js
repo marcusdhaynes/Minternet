@@ -12,7 +12,7 @@
     ? crypto.randomUUID() : 'group-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
   const name = value => typeof value === 'string' ? value.trim().slice(0, 42) : '';
   const color = value => colors.includes(value) ? value : 'violet';
-  const blank = () => ({ version: 1, groups: [], assignments: Object.create(null) });
+  const blank = () => ({ version: 1, groups: [], assignments: Object.create(null), order: [] });
   function hydrate(json) {
     let raw;
     try { raw = typeof json === 'string' ? JSON.parse(json) : json; }
@@ -71,9 +71,24 @@
     for(const key of Object.keys(state.assignments)) {
       if(!valid.has(key)||!get(state,state.assignments[key]))delete state.assignments[key];
     }
+    state.order=state.order.filter(id=>valid.has(String(id)));
+    for(const id of tabIds)if(!state.order.includes(id))state.order.push(id);
+  }
+  function sortedTabs(state,tabs) {
+    const pos=new Map(state.order.map((id,i)=>[id,i]));
+    return [...tabs].sort((a,b)=>(pos.get(a.id)??Infinity)-(pos.get(b.id)??Infinity));
+  }
+  function moveRelative(state,movingId,targetId,after=false) {
+    if(movingId===targetId||!state.order.includes(movingId)||!state.order.includes(targetId))return false;
+    const next=state.order.filter(id=>id!==movingId);
+    const at=next.indexOf(targetId);
+    if(at<0)return false;
+    next.splice(at+(after?1:0),0,movingId);
+    state.order=next;
+    return true;
   }
   function tabsIn(state,gid,tabs) {
-    return tabs.filter(t=>state.assignments[String(t.id)]===gid);
+    return sortedTabs(state,tabs).filter(t=>state.assignments[String(t.id)]===gid);
   }
   function isVisibleTab(state,tabId) {
     const g=findTab(state,tabId);
@@ -83,5 +98,5 @@
     return tabs.find(t=>t.id!==excludeId && isVisibleTab(state,t.id))?.id ?? null;
   }
   return { colors, MAX_GROUPS, blank, hydrate, serialize, get, findTab, create, update, remove,
-    assign, prune, tabsIn, isVisibleTab, visibleFallback };
+    assign, prune, sortedTabs, moveRelative, tabsIn, isVisibleTab, visibleFallback };
 });

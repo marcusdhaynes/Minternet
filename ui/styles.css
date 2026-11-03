@@ -502,3 +502,13 @@ body.tab-dragging .ungroup-drop-target{display:flex}
 .address-star {margin-left:auto;width:24px;flex-basis:24px;}
 .tab-row {cursor:default;}
 .tab-row button,.tab-row [role="tab"],.tab-row nav {-webkit-app-region:no-drag;}
+
+/* Natural tab-to-tab drag placement and group entry/exit feedback. */
+.tab {position:relative;cursor:grab;}
+.tab.tab-drag-source {opacity:.43;cursor:grabbing;}
+.tab.group-drop-target {background:#626c8e33;}
+.tab.drop-before::before,.tab.drop-after::after {content:"";position:absolute;top:0;bottom:0;width:2px;border-radius:2px;background:#c0baff;box-shadow:0 0 6px #928cf4;pointer-events:none;}
+.tab.drop-before::before {left:-2px;}
+.tab.drop-after::after {right:-2px;}
+.group-chip.drag-target {outline:2px solid var(--group-accent);outline-offset:-1px;filter:brightness(1.4);}
+#tabUngroupDrop.drag-target {background:#6c70a45c;outline:1px solid #b3b2ff;}

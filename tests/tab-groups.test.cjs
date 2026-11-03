@@ -47,3 +47,17 @@ test('invisible group does not remove ungrouped tabs',()=>{
  assert.equal(m.visibleFallback(s,[{id:1},{id:2},{id:3}],2),1);
  assert.equal(m.isVisibleTab(s,3),true);
 });
+
+test('drag reorder adjacent tabs and across group boundaries without closing tabs',()=>{
+ const s=m.blank(),grp=m.create(s,{name:'Work'});
+ m.prune(s,[1,2,3,4]);
+ m.assign(s,2,grp.id);m.assign(s,3,grp.id);
+ assert.equal(m.moveRelative(s,4,2,false),true);
+ m.assign(s,4,grp.id);
+ assert.deepEqual(m.tabsIn(s,grp.id,[{id:1},{id:2},{id:3},{id:4}]).map(t=>t.id),[4,2,3]);
+ assert.equal(m.moveRelative(s,2,1,true),true);
+ m.assign(s,2,null);
+ assert.deepEqual(m.sortedTabs(s,[{id:1},{id:2},{id:3},{id:4}]).map(t=>t.id),[1,2,4,3]);
+ assert.equal(m.findTab(s,2),undefined);
+ assert.equal(m.moveRelative(s,2,2),false);
+});
