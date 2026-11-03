@@ -40,7 +40,7 @@ test('bookmarks popup contains native-style cascading submenus from folder',()=>
  assert.match(nested.text,/🪐/);
  assert.ok(nested.items.some(x=>x.text?.includes('Example')));
  assert.ok(items.some(x=>x.text?.includes('New Subfolder')));
- assert.ok(items.some(x=>x.text?.includes('Edit Folder')));
+ assert.ok(items.some(x=>x.text?.includes('Folder Properties')));
 });
 test('Bookmark Bar context has Tab Groups eyes on the right',()=>{
  const h=harness();
@@ -57,7 +57,7 @@ test('Bookmark Bar context has Tab Groups eyes on the right',()=>{
 test('folder menu actions target the correct folder, without executable URLs',()=>{
  const h=harness();
  const items=h.window.minternetMenus.inspectFolder(h.root.id);
- items.find(x=>x.text?.includes('Edit Folder')).action();
+ items.find(x=>x.text?.includes('Folder Properties')).action();
  assert.equal(h.flags.folderEdits,1);
  assert.equal(h.bookmarks.items[0].children[0].children[0].url,'https://example.com/');
 });
