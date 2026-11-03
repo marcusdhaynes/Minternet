@@ -1,0 +1,49 @@
+name: Native Minternet Windows EXE (< 50 MB)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'native/desktop/**'
+      - 'ui/**'
+      - '.github/workflows/native-windows.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 65
+    defaults:
+      run:
+        working-directory: native/desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/desktop/src-tauri -> target
+      - name: Install CLI
+        run: npm install --no-fund --no-audit
+      - name: Verify JavaScript
+        run: node --check ../../ui/native-bridge.js
+      - name: Build installer using installed WebView2 runtime
+        run: npm run build
+      - name: Enforce under 50MB Windows installer
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem "src-tauri/target/release/bundle/nsis" -Filter '*.exe' -File -Recurse)
+          if ($files.Count -eq 0) { throw "No NSIS EXE produced" }
+          foreach ($file in $files) {
+            $bytes = $file.Length
+            "Minternet Windows EXE: $bytes bytes" >> $env:GITHUB_STEP_SUMMARY
+            if ($bytes -ge 50000000) { throw "Installer exceeds 50,000,000 bytes" }
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: minternet-native-windows-exe
+          path: native/desktop/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,15 @@
+{
+  "$schema": "../../gen/schemas/desktop-schema.json",
+  "identifier": "chrome-ui",
+  "description": "Only the trusted local browser chrome can access Minternet native commands; remote sites receive no capabilities",
+  "local": true,
+  "windows": [
+    "main"
+  ],
+  "webviews": [
+    "chrome"
+  ],
+  "permissions": [
+    "core:default"
+  ]
+}
