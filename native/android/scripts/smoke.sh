@@ -3,7 +3,7 @@ set -euo pipefail
 APK="native/android/app/build/outputs/apk/debug/app-debug.apk"
 adb install -r "$APK"
 adb shell am start -W -n app.minternet.browser/.MainActivity
-sleep 5
+sleep 9
 
 dump() {
   adb shell uiautomator dump /sdcard/minternet-window.xml >/dev/null
@@ -29,7 +29,17 @@ PY
   read -r x y < /tmp/minternet-tap.txt
   adb shell input tap "$x" "$y"
 }
-tap_by_description "Go"
+# Capture the first screen to diagnose emulator UI/runtime failures.
+dump
+cp /tmp/minternet-window.xml /tmp/minternet-first-screen.xml
+adb shell screencap -p /sdcard/minternet-initial.png
+adb pull /sdcard/minternet-initial.png /tmp/minternet-initial.png >/dev/null
+if ! grep -q "Open isolated private window" /tmp/minternet-window.xml; then
+  echo "Expected private button missing: Android accessibility tree follows:"
+  cat /tmp/minternet-window.xml
+  adb shell dumpsys activity activities | grep -E 'mResumed|topResumedActivity|MainActivity' | head -20
+  exit 1
+fi
 tap_by_description "Open isolated private window"
 sleep 5
 dump
@@ -43,7 +53,6 @@ dump
 grep -q "Open isolated private window" /tmp/minternet-window.xml
 
 # Verify HTTPS navigation updates the in-app address bar and DOES NOT launch Chrome.
-tap_by_description "Go"
 tap_by_description "New tab"
 dump
 python3 - <<'PY' > /tmp/minternet-address.txt
