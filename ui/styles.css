@@ -1171,3 +1171,15 @@ html.minternet-overlay-active .group-editor-backdrop {
 .payment-card-delete{color:#ffb0c4!important;}
 .payment-empty,.payment-status{font-size:9px;line-height:1.5;color:#c6b4e0;}
 .payment-status{min-height:12px;margin:6px 0 0;}
+
+/* Keep incognito purple even when it is a tab-group member; privacy identity
+   must override a group's decorative background tint. */
+.tabs .tab.private-tab,.tabs .tab.private-tab.group-member{
+  background:#4a2376e0!important;
+  border-color:#a976e38a!important;
+}
+.tabs .tab.private-tab.selected,.tabs .tab.private-tab.group-member.selected{
+  background:#672e9a!important;
+  border-color:#dbadff!important;
+}
+.tabs .tab.private-tab .private-eye{color:#efd0ff!important;}
