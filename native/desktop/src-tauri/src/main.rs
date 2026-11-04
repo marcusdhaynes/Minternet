@@ -22,6 +22,8 @@ struct Tab {
     url: String,
     private: bool,
     pinned: bool,
+    audio_playing: bool,
+    audio_muted: bool,
     view: Option<String>,
     history: Vec<String>,
     at: usize,
@@ -35,6 +37,8 @@ struct PublicTab {
     url: String,
     private: bool,
     pinned: bool,
+    audio_playing: bool,
+    audio_muted: bool,
     loading: bool,
     can_back: bool,
     can_forward: bool,
@@ -143,7 +147,8 @@ impl Browser {
         self.next_id += 1;
         self.tabs.push(Tab {
             id, title: "New Tab".into(), url: HOME.into(), private,
-            pinned: false, view: None, history: vec![HOME.into()], at: 0,
+            pinned: false, audio_playing:false, audio_muted:false,
+            view: None, history: vec![HOME.into()], at: 0,
         });
         self.active_id = id;
         Ok(id)
@@ -154,7 +159,8 @@ impl Browser {
             extensions_count: 0,
             tabs: self.tabs.iter().map(|t| PublicTab {
                 id: t.id, title: t.title.clone(), url: t.url.clone(), private: t.private,
-                pinned: t.pinned, loading: false, can_back: t.at > 0, can_forward: t.at + 1 < t.history.len(),
+                pinned: t.pinned, audio_playing:t.audio_playing,
+                audio_muted:t.audio_muted, loading: false, can_back: t.at > 0, can_forward: t.at + 1 < t.history.len(),
                 suspended: t.view.is_none() && t.url != HOME, error: String::new(),
             }).collect(),
         }
@@ -550,6 +556,38 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     Ok(())
 }
 
+
+
+#[cfg(windows)]
+fn update_audio_state(app:&tauri::AppHandle,id:u32,playing:bool,muted:bool){
+    let mut changed=false;
+    {
+        let state=app.state::<Mutex<Browser>>();
+        if let Ok(mut browser)=state.lock(){
+            if let Some(tab)=browser.tabs.iter_mut().find(|t|t.id==id){
+                changed=tab.audio_playing!=playing||tab.audio_muted!=muted;
+                tab.audio_playing=playing;
+                tab.audio_muted=muted;
+            }
+        }
+    }
+    if changed{notify(app);}
+}
+#[cfg(windows)]
+fn native_audio_poll(app:&tauri::AppHandle,id:u32,label:&str)->Result<(),String>{
+    let Some(view)=app.get_webview(label) else{return Ok(())};
+    let handle=app.clone();
+    view.with_webview(move |native| {
+        use windows::core::Interface;
+        use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_8;
+        if let Ok(audio)=native.inner().cast::<ICoreWebView2_8>(){
+            let playing=unsafe{audio.IsDocumentPlayingAudio().map(|value|value.as_bool()).unwrap_or(false)};
+            let muted=unsafe{audio.IsMuted().map(|value|value.as_bool()).unwrap_or(false)};
+            update_audio_state(&handle,id,playing,muted);
+        }
+    }).map_err(|e|e.to_string())?;
+    Ok(())
+}
 
 fn fill_saved_credential(app:&tauri::AppHandle,id:u32,manual:bool,username:Option<&str>)->Result<bool,String>{
     let (label,address,private)={
@@ -1014,6 +1052,44 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             }
             display_active(&app);
             return Ok(json!({"ok": true}));
+        }
+        "audio-poll" => {
+            #[cfg(windows)]
+            {
+                let tabs={
+                    let state=app.state::<Mutex<Browser>>();
+                    let browser=state.lock().map_err(|e|e.to_string())?;
+                    browser.tabs.iter().filter_map(|tab|tab.view.as_ref().map(|label|(tab.id,label.clone())))
+                        .collect::<Vec<_>>()
+                };
+                for (id,label) in tabs {let _=native_audio_poll(&app,id,&label);}
+            }
+            return Ok(json!({"ok":true}));
+        }
+        "mute-tab" => {
+            let id=value.as_u64().ok_or("Invalid tab ID")? as u32;
+            let label={
+                let state=app.state::<Mutex<Browser>>();
+                let browser=state.lock().map_err(|e|e.to_string())?;
+                browser.tabs.iter().find(|tab|tab.id==id).and_then(|t|t.view.clone())
+                    .ok_or("Tab has no active audio renderer")?
+            };
+            #[cfg(windows)]
+            {
+                let view=app.get_webview(&label).ok_or("Tab renderer unavailable")?;
+                view.with_webview(move |native| {
+                    use windows::core::Interface;
+                    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_8;
+                    if let Ok(audio)=native.inner().cast::<ICoreWebView2_8>(){
+                        let current=unsafe{audio.IsMuted().map(|v|v.as_bool()).unwrap_or(false)};
+                        let _=unsafe{audio.SetIsMuted(windows::Win32::Foundation::BOOL((!current) as i32))};
+                    }
+                }).map_err(|e|e.to_string())?;
+                native_audio_poll(&app,id,&label)?;
+                return Ok(json!({"ok":true}));
+            }
+            #[cfg(not(windows))]
+            {let _=label;return Err("Native tab mute is currently supported on Windows".into());}
         }
         "zoom" => {
             let value=value.as_f64().ok_or("Zoom must be numeric")?;
