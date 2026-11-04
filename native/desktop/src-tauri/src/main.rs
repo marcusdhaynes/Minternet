@@ -580,6 +580,43 @@ fn declared_site_icons(html:&str,page:&tauri::Url)->Vec<String>{
     discovered.sort_by_key(|(priority,_)|*priority);
     discovered.into_iter().map(|(_,href)|href).collect()
 }
+#[cfg(test)]
+mod bookmark_favicon_tests {
+    use super::{declared_site_icons,html_attribute};
+    #[test]
+    fn detect_site_icons_relative_to_project_path(){
+        let page=tauri::Url::parse("https://marcusdhaynes.github.io/MarmaladePlayer/").unwrap();
+        let html=r#"<html><head>
+          <link rel="icon" type="image/svg+xml" href="./favicon.svg?v=20261104-fullbleed-v1">
+          <link rel="icon" type="image/png" href="./favicon-32.png">
+          <link rel="shortcut icon" href="./favicon.ico">
+          <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
+        </head></html>"#;
+        let icons=declared_site_icons(html,&page);
+        assert_eq!(icons[0],"https://marcusdhaynes.github.io/MarmaladePlayer/favicon.svg?v=20261104-fullbleed-v1");
+        assert_eq!(icons[1],"https://marcusdhaynes.github.io/MarmaladePlayer/favicon-32.png");
+        assert_eq!(icons[3],"https://marcusdhaynes.github.io/MarmaladePlayer/assets/apple-touch-icon.png");
+    }
+    #[test]
+    fn reject_javascript_data_and_insecure_icon_links(){
+        let page=tauri::Url::parse("https://example.org/docs/").unwrap();
+        let html=r#"<link rel="icon" href="javascript:alert(1)">
+        <link rel='icon' href='data:image/svg+xml,...'>
+        <link rel="icon" href="http://example.org/favicon.png">
+        <link rel="icon" href="https://user:pass@example.org/favicon.ico">
+        <link href='../assets/icon.png' rel='ICON'>"#;
+        assert_eq!(declared_site_icons(html,&page),
+            vec!["https://example.org/assets/icon.png".to_string()]);
+    }
+    #[test]
+    fn tolerate_case_and_attribute_order(){
+        let page=tauri::Url::parse("https://example.org/").unwrap();
+        let icons=declared_site_icons("<LINK HREF='/brand.svg?v=1&amp;x=2' TYPE='image/svg+xml' REL='shortcut icon'>",&page);
+        assert_eq!(icons,vec!["https://example.org/brand.svg?v=1&x=2".to_string()]);
+        assert_eq!(html_attribute("REL='icon' href=/favicon.ico","href").as_deref(),Some("/favicon.ico"));
+    }
+}
+
 fn lookup_site_icons(url:&str)->Vec<String>{
     use std::io::Read;
     let Ok(mut page)=tauri::Url::parse(url) else{return Vec::new()};
