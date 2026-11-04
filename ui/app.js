@@ -51,6 +51,18 @@ function buildTab(tab, active) {
   close.title = 'Close tab';
   close.setAttribute('aria-label', 'Close ' + (tab.title || 'tab'));
   close.addEventListener('click', () => command('close', tab.id));
+  if(tab.audioPlaying){
+    const audio=document.createElement('button');
+    audio.type='button';audio.className='tab-audio';
+    audio.title=tab.audioMuted?'Unmute this tab':'Mute this tab';
+    audio.setAttribute('aria-label',audio.title);
+    audio.textContent=tab.audioMuted?'◌':'♪';
+    audio.addEventListener('click',event=>{
+      event.stopPropagation();
+      void command('mute-tab',tab.id);
+    });
+    root.append(audio);
+  }
   root.append(choose);
   if(!tab.pinned)root.append(close);
   return root;
@@ -64,7 +76,7 @@ function render(data) {
   snapshot = data;
   const tabs = byId('tabs');
   const active = data.tabs.find(t => t.id === data.activeId);
-  const signature = data.tabs.map(t => t.id).join(',');
+  const signature = data.tabs.map(t => [t.id,t.audioPlaying,t.audioMuted]).join(';');
   if (window.minternetGroups?.renderTabs) {
     window.minternetGroups.renderTabs(data,tabs,buildTab);
     render.lastSignature = null;
