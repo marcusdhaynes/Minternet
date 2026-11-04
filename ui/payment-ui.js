@@ -21,10 +21,12 @@
     if(text!==undefined)el.textContent=text;return el;
   };
   let screen=null,panel=null,auth=null,form=null,list=null,status=null,master=null,locked=true,exists=false;
+  let editingId=null,editFields=null;
   function report(text){if(status)status.textContent=String(text||'');}
   function close(){
     if(!screen)return;
     screen.remove();screen=null;panel=null;auth=null;form=null;list=null;status=null;master=null;
+    editingId=null;editFields=null;
     if(window.__TAURI__)void window.minternet.command('chrome-overlay',false);
   }
   function field(label,opts={}){
@@ -75,6 +77,23 @@
         if(result?.filled){report('Card details sent to the active HTTPS page. Check the checkout fields before paying.');}
         else if(result){report('No matching checkout fields were found.');}
       });
+      const edit=create('button','payment-card-edit','✎');
+      edit.type='button';edit.title='Edit cardholder, label, expiry and billing postal code';
+      edit.addEventListener('click',()=>{
+        if(!editFields)return;
+        editingId=card.id;
+        editFields.name.value=card.name;
+        editFields.label.value=card.label;
+        editFields.month.value=String(card.month);
+        editFields.year.value=String(card.year);
+        editFields.postal.value=card.postal||'';
+        editFields.number.value='';
+        editFields.number.required=false;
+        editFields.numberWrapper.hidden=true;
+        editFields.save.textContent='Save Card Changes';
+        editFields.cancel.hidden=false;
+        editFields.name.focus();
+      });
       const del=create('button','payment-card-delete','×');
       del.type='button';del.title='Delete saved payment method';
       del.addEventListener('click',async()=>{
@@ -82,7 +101,7 @@
         const result=await invoke('vault-card-remove',card.id);
         if(result?.ok){report('Payment method deleted.');await renderCards();}
       });
-      row.append(caption,fill,del);list.append(row);
+      row.append(caption,fill,edit,del);list.append(row);
     }
   }
   async function open(){
@@ -136,17 +155,38 @@
     const postal=field('Billing Postal Code',{placeholder:'Optional'});
     const save=create('button','payment-save','Save Encrypted Payment Method');
     save.type='submit';
-    form.append(name.wrapper,label.wrapper,number.wrapper,expiry,postal.wrapper,save);
+    const cancel=create('button','payment-cancel','Cancel Edit');
+    cancel.type='button';cancel.hidden=true;
+    const resetEdit=()=>{
+      editingId=null;
+      form.reset();
+      number.input.value='';
+      number.input.required=true;
+      number.wrapper.hidden=false;
+      cancel.hidden=true;
+      save.textContent='Save Encrypted Payment Method';
+    };
+    cancel.addEventListener('click',resetEdit);
+    editFields={
+      name:name.input,label:label.input,number:number.input,
+      numberWrapper:number.wrapper,month:month.input,year:year.input,
+      postal:postal.input,save,cancel
+    };
+    form.append(name.wrapper,label.wrapper,number.wrapper,expiry,postal.wrapper,save,cancel);
     form.addEventListener('submit',async event=>{
       event.preventDefault();
-      const result=await invoke('vault-card-put',{
+      const details={
         name:name.input.value.trim(),label:label.input.value.trim(),
-        number:number.input.value,month:Number(month.input.value),
-        year:Number(year.input.value),postal:postal.input.value.trim()
-      });
+        month:Number(month.input.value),year:Number(year.input.value),
+        postal:postal.input.value.trim()
+      };
+      const editing=Boolean(editingId);
+      const result=await invoke(editing?'vault-card-update':'vault-card-put',
+        editing?{...details,id:editingId}:{...details,number:number.input.value});
       number.input.value='';
       if(result?.ok){
-        form.reset();report('Payment method encrypted and saved.');
+        resetEdit();
+        report(editing?'Payment method updated.':'Payment method encrypted and saved.');
         await renderCards();
       }
     });
