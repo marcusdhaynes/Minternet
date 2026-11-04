@@ -104,8 +104,6 @@ function render(data) {
   byId('reload').disabled = !active || active.url === 'about:blank';
   const isBlank = !active || active.url === 'about:blank';
   byId('homeScreen').hidden = !isBlank;
-  byId('connectionIcon').textContent = active?.url?.startsWith('http://') ? '!' : active?.private ? '◈' : '◇';
-  byId('connectionIcon').title = active?.url?.startsWith('http://') ? 'Warning: unencrypted HTTP' : 'HTTPS preferred';
   byId('address').setAttribute('aria-label', active?.url?.startsWith('http://') ? 'Insecure HTTP address' : 'Search or enter address');
   if (!addressFocused) byId('address').value = isBlank ? '' : active.url;
   if (lastUrl !== active?.url) {
