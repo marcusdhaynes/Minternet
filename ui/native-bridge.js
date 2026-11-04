@@ -2,7 +2,21 @@
 // Shared frontend: replaces the Electron preload only inside the Tauri native app.
 if (window.__TAURI__ && !window.minternet) {
   const api=window.__TAURI__;
-  const listeners=[];
+  // Register the native popup event ONCE, not once per onState subscriber.
+  // Several browser subsystems subscribe to state; each was opening a tab
+  // independently for the same Ctrl-click or window.open event.
+  let popupListenerStarted=false;
+  function ensurePopupListener(){
+    if(popupListenerStarted)return;
+    popupListenerStarted=true;
+    api.event.listen('minternet:open-tab',event=>{
+      const url=event.payload;
+      if(typeof url==='string'&&url.startsWith('https://')){
+        void api.core.invoke('browser_action',{name:'new-url',value:url}).catch(()=>{});
+      }
+    }).catch(()=>{popupListenerStarted=false;});
+  }
+  ensurePopupListener();
   window.minternet={
     command:async (name,value)=>{
       try {
@@ -20,9 +34,6 @@ if (window.__TAURI__ && !window.minternet) {
       api.event.listen('minternet:state',event=>{if(alive)cb(event.payload)})
         .then(unsub=>{unlisten=unsub;})
         .catch(()=>{});
-      api.event.listen('minternet:open-tab',event=>{
-        if(alive)api.core.invoke('browser_action',{name:'new-url',value:event.payload}).catch(()=>{});
-      }).then(unsub=>listeners.push(unsub)).catch(()=>{});
       api.core.invoke('browser_snapshot').then(state=>{if(alive)cb(state)}).catch(()=>{});
       return ()=>{alive=false;unlisten();};
     },
