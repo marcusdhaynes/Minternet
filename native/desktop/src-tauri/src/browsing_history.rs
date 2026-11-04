@@ -71,10 +71,13 @@ impl History {
         false
     }
     pub fn search(&self,needle:&str,limit:usize)->Vec<Entry>{
+        self.search_page(needle,0,limit)
+    }
+    pub fn search_page(&self,needle:&str,offset:usize,limit:usize)->Vec<Entry>{
         let q=needle.trim().to_lowercase();
         self.items.iter().filter(|e|q.is_empty()||
             e.url.to_lowercase().contains(&q)||e.title.to_lowercase().contains(&q))
-            .take(limit.min(100)).cloned().collect()
+            .skip(offset.min(MAX_ITEMS)).take(limit.min(100)).cloned().collect()
     }
     pub fn remove(&mut self,url:&str)->bool{
         let before=self.items.len();
@@ -97,6 +100,7 @@ mod tests{
         assert!(history.visit("https://example.com/a","First again"));
         assert_eq!(history.items.len(),2);
         assert_eq!(history.search("first",5)[0].url,"https://example.com/a");
+        assert_eq!(history.search_page("",1,1)[0].url,"https://example.com/b");
         assert!(history.remove("https://example.com/a"));
         assert_eq!(history.items.len(),1);
     }
