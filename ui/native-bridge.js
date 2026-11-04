@@ -25,6 +25,9 @@ if (window.__TAURI__ && !window.minternet) {
         const payload=name==='navigate'&&typeof value==='string'
           ? {address:value,searchEngine:window.minternetSearch?.getEngine?.()||'google'}
           : value===undefined?null:value;
+        // A native transparent chrome WebView remains over the live page while
+        // menus are open. Never blur, hide, or replace the underlying webpage.
+        if(name==='chrome-overlay')document.documentElement.classList.toggle('minternet-overlay-active',Boolean(payload));
         return await api.core.invoke('browser_action',{name,value:payload});
       }
       catch(err){ return {message:String(err)}; }
