@@ -718,6 +718,10 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                     .join(format!("minternet-inapp-{}.ok", std::process::id()));
                 let _ = std::fs::write(marker, "Example Domain loaded in Minternet WebView2");
             }
+            if let Some(badge)=for_title.get_webview(&format!("split-badge-{id}")){
+                let safe=serde_json::to_string(&title).unwrap_or_else(|_|"\"Split Tab\"".into());
+                let _=badge.eval(&format!("document.getElementById('title').textContent={safe};"));
+            }
             notify(&for_title);
         });
     let zoom=app.state::<ZoomState>().0.lock().map(|n|*n).unwrap_or(1.0);
