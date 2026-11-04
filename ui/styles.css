@@ -841,3 +841,14 @@ body.tab-dragging .tab-drag-source {opacity:.48;box-shadow:inset 0 0 0 1px #aab5
   background:color-mix(in srgb,var(--group-accent) 14%,#192239);
   pointer-events:none;
 }
+
+/* Compact group name with a discreet top-right tab count; no collapse arrow. */
+.tabs .group-chip{position:relative;padding:0 16px 0 7px;gap:0;}
+.tabs .group-chip-label{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
+.tabs .group-chip-count{
+  position:absolute;top:1px;right:3px;
+  font-size:5px;line-height:1;font-weight:500;
+  opacity:.5;color:inherit;pointer-events:none;
+  font-variant-numeric:tabular-nums;
+}
+.tabs .group-chip-symbol{display:none!important;}
