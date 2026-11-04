@@ -12,14 +12,17 @@ function harness() {
   const sub=bm.add(bookmarks,'folder',root.id,{name:'Projects',icon:'🪐'});
   bm.add(bookmarks,'link',sub.id,{name:'Example',url:'https://example.com'});
   const groups=gm.blank(),g=gm.create(groups,{name:'Research',color:'teal'});
-  const flags={folderEdits:0,groupVisibility:0,tabPins:0};
+  const flags={folderEdits:0,groupVisibility:0,tabPins:0,opened:[],deleted:[],edited:[]};
   const tabs=[{id:1,title:'Example',url:'https://example.com/',pinned:false}];
   const window={
     MinternetBookmarks:bm,
     MinternetGroupModel:gm,
     minternetBookmarks:{
       getState:()=>bookmarks,
-      edit:()=>{flags.folderEdits++}, newFolder:()=>{},savePage:()=>{},
+      edit:id=>{flags.folderEdits++;flags.edited.push(id);},
+      deleteBookmark:id=>{flags.deleted.push(id);return true;},
+      openInNewTab:id=>{flags.opened.push(id);return true;},
+      newFolder:()=>{},savePage:()=>{},
       openLink:()=>{}, manager:()=>{}, toggleBookmark:()=>{},toggleBar:()=>{}
     },
     minternetGroups:{
@@ -45,17 +48,11 @@ test('bookmarks popup contains native-style cascading submenus from folder',()=>
  assert.ok(items.some(x=>x.text?.includes('New Subfolder')));
  assert.ok(items.some(x=>x.text?.includes('Folder Properties')));
 });
-test('Bookmark Bar context has Tab Groups eyes on the right',()=>{
+test('Bookmark Bar context never includes Tab Groups',()=>{
  const h=harness();
  const bar=h.window.minternetMenus.inspectBar();
- const tabGroups=bar.find(x=>x.text?.includes('Tab Groups'));
- assert.ok(tabGroups && Array.isArray(tabGroups.items));
- const entry=tabGroups.items.find(x=>x.text?.includes('Research'));
- assert.ok(entry);
- assert.match(entry.text,/👁$/u);
- entry.action();
- assert.equal(h.flags.groupVisibility,1);
- assert.equal(h.window.minternetMenus.inspectBar().find(x=>x.text?.includes('Tab Groups')).items.find(x=>x.text?.includes('Research')).text.includes('👁̸'),true);
+ assert.ok(!bar.some(x=>x.text?.includes('Tab Groups')));
+ assert.ok(bar.some(x=>x.text?.includes('New Folder')));
 });
 test('folder menu actions target the correct folder, without executable URLs',()=>{
  const h=harness();
@@ -81,8 +78,7 @@ test('folder and subfolder context menus do not offer Bookmark This Page',()=>{
   assert.equal(entries.some(x=>x.text?.includes('Bookmark This Page')),false);
  }
  const folderContext=h.window.minternetMenus.inspectBar();
- const group=folderContext.find(x=>x.text?.includes('Tab Groups'));
- assert.ok(group);
+ assert.equal(folderContext.some(x=>x.text?.includes('Tab Groups')),false);
 });
 
 test('blank tab strip creates a standalone group, without borrowing an active tab',()=>{
@@ -105,4 +101,25 @@ test('right-clicking an actual tab directly offers a new group containing it',()
   assert.ok(create,'New Group With This Tab should be a direct action');
   create.action();
   assert.deepEqual(args,[null,1]);
+});
+
+test('right-clicked bookmark gets background tab, rename, and delete actions without groups',()=>{
+ const h=harness();
+ const leaf=h.bookmarks.items[0].children[0].children[0];
+ const menu=h.window.minternetMenus.inspectBookmark(leaf.id);
+ assert.ok(!menu.some(x=>x.text?.includes('Tab Groups')));
+ const action=text=>menu.find(x=>x.text?.includes(text))?.action();
+ action('Open in New Tab');action('Edit Name');action('Delete Bookmark');
+ assert.equal(h.flags.opened[0],leaf.id);
+ assert.equal(h.flags.edited[0],leaf.id);
+ assert.equal(h.flags.deleted[0],leaf.id);
+});
+test('right-clicked folder supports editing its name and deletion',()=>{
+ const h=harness();
+ const menu=h.window.minternetMenus.inspectBookmark(h.root.id);
+ menu.find(x=>x.text?.includes('Edit Name')).action();
+ menu.find(x=>x.text?.includes('Delete Folder')).action();
+ assert.equal(h.flags.edited[0],h.root.id);
+ assert.equal(h.flags.deleted[0],h.root.id);
+ assert.ok(!menu.some(x=>x.text?.includes('Tab Groups')));
 });
