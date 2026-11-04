@@ -971,7 +971,7 @@ fn browser_snapshot(app: tauri::AppHandle) -> Result<Snapshot,String> { snapshot
 async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Result<Value, String> {
     if name=="undo" {
         let result=undo_last(&app)?;
-        return Ok(json!({"undone":result.is_some(),"ui":result.flatten()}));
+        return Ok(json!({"undone":result.is_some(),"ui":result.clone().unwrap_or(Value::Null)}));
     }
     if name=="undo-ui-checkpoint" {
         let kind=value.get("kind").and_then(Value::as_str).ok_or("Undo state kind required")?;
