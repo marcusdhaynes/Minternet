@@ -1199,3 +1199,16 @@ html.minternet-overlay-active .group-editor-backdrop {
   border-radius:5px;background:#3e334f;color:#e9dff5;
   font-size:10px;cursor:pointer;}
 .payment-cancel:hover{background:#5c456f;}
+
+/* Payment cards are selected explicitly in browser chrome, never silently
+   pushed to arbitrary websites. Keep this quick-access button as compact as
+   the neighboring history/downloads controls. */
+.toolbar-actions #paymentToolbarButton{
+  display:grid;place-items:center;flex:0 0 23px;width:23px;min-width:23px;
+  height:23px;padding:0;border:0;border-radius:4px;margin:0;
+  color:#c9badf;background:transparent;
+}
+.toolbar-actions #paymentToolbarButton:hover,
+.toolbar-actions #paymentToolbarButton[aria-expanded="true"]{
+  background:#67568460;color:#fff;
+}
