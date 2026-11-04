@@ -16,6 +16,7 @@
   <script src="./chrome-native-menu.js" defer></script>
   <script src="./password-ui.js" defer></script>
   <script src="./chrome-tools.js" defer></script>
+  <script src="./downloads-ui.js" defer></script>
 </head>
 <body>
   <header class="chrome">
@@ -64,6 +65,10 @@
             <path d="M12 3.5c3.3 3.4 6.7 5.9 6.7 10a6.7 6.7 0 0 1-13.4 0c0-4.1 3.4-6.6 6.7-10Z"></path>
             <path d="M12 6v12m-4.5-8.5c2.5 2.2 6.5 2.2 9 0m-9.9 5c2.9-1.9 7.9-1.9 10.8 0"></path>
           </svg>
+        </button>
+        <button id="downloadsButton" class="icon-btn downloads-btn" type="button" title="Recent Downloads" aria-label="Recent Downloads" aria-expanded="false" aria-controls="downloadsPopup">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4"/><path d="M4 17v4h16v-4"/></svg>
+          <span id="downloadsBadge" class="downloads-badge" hidden></span>
         </button>
         <button id="settings" class="icon-btn settings-btn" title="Settings" aria-label="Settings" aria-expanded="false">⚙</button>
       </div>
