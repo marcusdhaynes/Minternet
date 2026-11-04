@@ -34,6 +34,11 @@
     if(!button)return;
     const chatgpt=current==='chatgpt'||current==='chatgpt-private';
     button.innerHTML=chatgpt?chatgptIcon:googleIcon;
+    const address=document.getElementById('address');
+    if(address)address.placeholder=current==='chatgpt-private'
+      ?'Ask ChatGPT (Temporary) or enter a website'
+      :chatgpt?'Ask ChatGPT or enter a website'
+      :'Search Google or enter a website';
     button.classList.toggle('provider-chatgpt',chatgpt);
     button.classList.toggle('provider-temporary',current==='chatgpt-private');
     button.title=label(current)+(chatgpt?' · Hold to toggle Temporary Chat':'')+' · Click to change';
