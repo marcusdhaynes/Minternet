@@ -1319,6 +1319,62 @@ fn fill_saved_credential(app:&tauri::AppHandle,id:u32,manual:bool,username:Optio
 
 // Prepare one lightweight WebView2 controller only after the user focuses a
 // blank tab's address input. This does not connect to sites or leak typed URLs.
+fn fill_payment_card(app:&tauri::AppHandle,id:&str)->Result<bool,String>{
+    let (label,url)={
+        let state=app.state::<Mutex<Browser>>();
+        let browser=state.lock().map_err(|e|e.to_string())?;
+        let tab=browser.active().ok_or("No active tab")?;
+        let label=tab.view.clone().ok_or("No active webpage")?;
+        (label,tab.url.clone())
+    };
+    let origin=password_vault::origin(&url)?;
+    let mut card={
+        let state=app.state::<Mutex<password_vault::Vault>>();
+        state.lock().map_err(|e|e.to_string())?.card(id)
+            .ok_or("Unlock the vault and choose a saved card")?
+    };
+    let webview=app.get_webview(&label).ok_or("No active webpage")?;
+    let actual=webview.url().map_err(|e|e.to_string())?;
+    if password_vault::origin(actual.as_str())?!=origin{
+        return Err("Website changed; choose the card again".into());
+    }
+    // The PAN travels directly from the encrypted native vault to the one
+    // user-selected HTTPS page. It never travels through chrome IPC or UI lists.
+    // CVV is never stored or filled.
+    let payload=json!({
+        "name":card.name,"number":card.number,"month":card.month,
+        "year":card.year,"postal":card.postal
+    });
+    let script=format!(r#"(function(){{
+      'use strict';
+      const card={payload};
+      const inputs=[...document.querySelectorAll('input')].filter(el=>{{
+        if(el.disabled||el.readOnly||el.type==='hidden'||el.type==='password')return false;
+        const rect=el.getBoundingClientRect();
+        return rect.width>0&&rect.height>0;
+      }});
+      const set=(el,value)=>{{
+        if(!el||el.value)return;
+        const nativeSet=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')?.set;
+        if(nativeSet)nativeSet.call(el,String(value));else el.value=String(value);
+        el.dispatchEvent(new Event('input',{{bubbles:true}}));
+        el.dispatchEvent(new Event('change',{{bubbles:true}}));
+      }};
+      const byAuto=(name)=>inputs.find(el=>el.autocomplete.toLowerCase().split(/\s+/).includes(name));
+      const byName=(regex)=>inputs.find(el=>regex.test((el.name||'')+' '+(el.id||''))&&
+        !/cvv|cvc|security.?code|verification/.test((el.name||'')+' '+(el.id||'')));
+      set(byAuto('cc-name')||byName(/card.?holder|name.?on.?card/i),card.name);
+      set(byAuto('cc-number')||byName(/cc.?number|card.?number|credit.?card/i),card.number);
+      set(byAuto('cc-exp-month'),String(card.month).padStart(2,'0'));
+      set(byAuto('cc-exp-year'),String(card.year));
+      set(byAuto('cc-exp')||byName(/card.?expir|cc.?exp(?!-month|-year)/i),
+        String(card.month).padStart(2,'0')+'/'+String(card.year).slice(-2));
+      set(byAuto('cc-postal-code'),card.postal);
+    }})()"#);
+    card.number.zeroize();
+    webview.eval(&script).map_err(|e|e.to_string())?;
+    Ok(true)
+}
 fn prepare_active(app: &tauri::AppHandle) -> Result<(), String> {
     let (id, original_private) = {
         let store = app.state::<Mutex<Browser>>();
@@ -1570,6 +1626,35 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         "vault-lock" => {
             app.state::<Mutex<password_vault::Vault>>().lock().map_err(|e|e.to_string())?.lock();
             return Ok(json!({"ok":true}));
+        }
+        "vault-card-list" => {
+            let state=app.state::<Mutex<password_vault::Vault>>();
+            return state.lock().map_err(|e|e.to_string())?.list_cards();
+        }
+        "vault-card-put" => {
+            let label=value.get("label").and_then(Value::as_str).unwrap_or("").to_string();
+            let holder=value.get("name").and_then(Value::as_str).ok_or("Cardholder name required")?.to_string();
+            let number=value.get("number").and_then(Value::as_str).ok_or("Card number required")?.to_string();
+            let month=value.get("month").and_then(Value::as_u64).ok_or("Expiry month required")? as u8;
+            let year=value.get("year").and_then(Value::as_u64).ok_or("Expiry year required")? as u16;
+            let postal=value.get("postal").and_then(Value::as_str).unwrap_or("").to_string();
+            let state=app.state::<Mutex<password_vault::Vault>>();
+            let mut vault=state.lock().map_err(|e|e.to_string())?;
+            let id=vault.put_card(label,holder,number,month,year,postal)?;
+            vault.save(&password_vault::file(&app)?)?;
+            return Ok(json!({"ok":true,"id":id}));
+        }
+        "vault-card-remove" => {
+            let id=value.as_str().ok_or("Missing card identifier")?;
+            let state=app.state::<Mutex<password_vault::Vault>>();
+            let mut vault=state.lock().map_err(|e|e.to_string())?;
+            vault.remove_card(id)?;
+            vault.save(&password_vault::file(&app)?)?;
+            return Ok(json!({"ok":true}));
+        }
+        "vault-card-fill" => {
+            let id=value.as_str().ok_or("Choose a saved card")?;
+            return Ok(json!({"filled":fill_payment_card(&app,id)?}));
         }
         "vault-list" => {
             let state=app.state::<Mutex<password_vault::Vault>>();
