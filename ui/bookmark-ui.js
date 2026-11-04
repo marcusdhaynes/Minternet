@@ -10,6 +10,32 @@
   try { data = model.hydrate(localStorage.getItem(STORE)); }
   catch { data = model.blank(); }
   let currentUrl = '', currentTitle = '', mode = null, folderId = null, draft = null, customIcon = '';
+  let lastUndoJson=JSON.stringify(data);
+  // Store only changed string spans, not a complete bookmark tree on every
+  // edit. Renaming one item costs roughly that item's old name in history.
+  function makeUndoPatch(before,after){
+    let start=0;
+    while(start<before.length&&start<after.length&&before[start]===after[start])start++;
+    let suffix=0;
+    while(suffix<before.length-start&&suffix<after.length-start&&
+      before[before.length-1-suffix]===after[after.length-1-suffix])suffix++;
+    return {start,remove:after.length-start-suffix,
+      insert:before.slice(start,before.length-suffix)};
+  }
+  function restoreUndoBookmark(patch){
+    try{
+      if(!patch||!Number.isSafeInteger(patch.start)||!Number.isSafeInteger(patch.remove)||
+         patch.start<0||patch.remove<0||typeof patch.insert!=='string')return false;
+      const now=JSON.stringify(data);
+      if(patch.start+patch.remove>now.length||patch.insert.length>950000)return false;
+      const before=now.slice(0,patch.start)+patch.insert+now.slice(patch.start+patch.remove);
+      const parsed=model.hydrate(before);
+      data=parsed;
+      applyVisibility();
+      persist(true);
+      return true;
+    }catch{return false;}
+  }
   const toast = message => {
     const el = $('toast');
     el.textContent = message;
@@ -17,9 +43,16 @@
     clearTimeout(toast.hideTimer);
     toast.hideTimer = setTimeout(() => el.classList.remove('visible'), 2700);
   };
-  function persist() {
+  function persist(skipUndo=false) {
+    const json=JSON.stringify(data);
+    if(!skipUndo && json!==lastUndoJson && window.__TAURI__){
+      const patch=makeUndoPatch(lastUndoJson,json);
+      if(patch.insert.length<240000){
+        void api.command('undo-ui-checkpoint',{kind:'bookmarks',patch});
+      }
+    }
+    lastUndoJson=json;
     try {
-      const json = JSON.stringify(data);
       if (json.length > 950000) throw new Error('Bookmark storage is full');
       localStorage.setItem(STORE, json);
     } catch {
@@ -408,7 +441,7 @@
     },
     openLink, toggleBookmark, manager:()=>{renderManager();setMode('manager');},
     toggleBar:()=>changeVisibility(!data.visible),
-    closeOverlay
+    closeOverlay,restoreUndoBookmark
   };
   api.onState(state => {
     const tab = state.tabs.find(t => t.id === state.activeId);
