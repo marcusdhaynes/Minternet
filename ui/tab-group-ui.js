@@ -9,7 +9,7 @@
   let latest={tabs:[],activeId:null};
   let lastRenderKey='', editing=null, assignTarget=null, fallbackPending=false;
   let draggingTabId=null;
-  let gesture=null, ghost=null, suppressedClick=null;
+  let gesture=null, ghost=null, splitPreview=null, dragOverlay=false, suppressedClick=null;
   const ungroupTarget=$('tabUngroupDrop');
   const tabStrip=$('tabs');
   const palette={
@@ -98,6 +98,12 @@
     draggingTabId=null;
     ghost?.remove();
     ghost=null;
+    splitPreview?.remove();
+    splitPreview=null;
+    if(dragOverlay){
+      dragOverlay=false;
+      if(window.__TAURI__)void api.command('chrome-overlay',false);
+    }
     document.body.classList.remove('tab-dragging');
     tabStrip.classList.remove('drag-ungroup-over');
     ungroupTarget?.classList.remove('drag-target');
@@ -313,6 +319,10 @@
       gesture.active=true;
       draggingTabId=gesture.id;
       createGhost(gesture.id);
+      if(window.__TAURI__){
+        dragOverlay=true;
+        void api.command('chrome-overlay',true);
+      }
       document.body.classList.add('tab-dragging');
       tabStrip.querySelectorAll('.tab[data-tab-id]').forEach(el=>{
         el.classList.toggle('tab-drag-source',Number(el.dataset.tabId)===draggingTabId);
@@ -324,7 +334,26 @@
       ghost.style.left=Math.round(event.clientX+11)+'px';ghost.style.top=Math.round(event.clientY+9)+'px';
       const beyondChrome=event.clientY>document.querySelector('.chrome').getBoundingClientRect().bottom+6;
       ghost.classList.toggle('split-drag-preview',beyondChrome);
-      if(beyondChrome)ghost.textContent='◫  Snap into Split View';
+      if(beyondChrome){
+        ghost.textContent='◫  Snap into Split View';
+        if(!splitPreview){
+          splitPreview=document.createElement('div');
+          splitPreview.className='split-drag-zones';
+          splitPreview.setAttribute('aria-hidden','true');
+          for(let i=0;i<4;i++){
+            const zone=document.createElement('div');zone.className='split-drag-zone';
+            splitPreview.append(zone);
+          }
+          document.body.append(splitPreview);
+        }
+        const top=document.querySelector('.chrome').getBoundingClientRect().bottom;
+        splitPreview.style.top=Math.round(top)+'px';
+        const cell=(event.clientY-top)<(innerHeight-top)/2?0:2;
+        const index=cell+(event.clientX<innerWidth/2?0:1);
+        [...splitPreview.children].forEach((zone,i)=>zone.classList.toggle('active',i===index));
+      }else{
+        splitPreview?.remove();splitPreview=null;
+      }
     }
     updateHover(event.clientX,event.clientY);
   }
@@ -340,7 +369,10 @@
     const tab=hit?.closest('.tab[data-tab-id]');
     const groupId=chip?.dataset.groupId;
     if(event.clientY>document.querySelector('.chrome').getBoundingClientRect().bottom+6){
-      void api.command('split-add',finished.id);
+      const top=document.querySelector('.chrome').getBoundingClientRect().bottom;
+      const x=Math.max(0,Math.min(1,event.clientX/Math.max(innerWidth,1)));
+      const y=Math.max(0,Math.min(1,(event.clientY-top)/Math.max(innerHeight-top,1)));
+      void api.command('split-add',{id:finished.id,x,y});
     }else if(groupId)dropIntoGroup(event,groupId);
     else if(tab&&Number(tab.dataset.tabId)!==finished.id)
       dropNextTo(event,Number(tab.dataset.tabId),tab);
