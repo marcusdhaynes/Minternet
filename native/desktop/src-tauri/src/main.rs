@@ -484,7 +484,9 @@ fn display_active(app: &tauri::AppHandle) {
         cache.lock().map(|s| s.overlay_open).unwrap_or(false)
     };
     let mut targets=HashSet::new();
-    if !overlay {
+    {
+        // Keep all site views visible and at identical positions while trusted
+        // chrome menus open. The chrome overlay is transparent outside panels.
         let split=visible_split(app);
         let browser=app.state::<Mutex<Browser>>();
         let Ok(b)=browser.lock() else{return};
@@ -1557,6 +1559,7 @@ fn main() {
             let pin_reopen_smoke = std::env::args().any(|a| a == "--minternet-pin-reopen-smoke");
             window.add_child(
                 WebviewBuilder::new("chrome",WebviewUrl::App("index.html".into()))
+                    .transparent(true)
                     .on_page_load(move |view, event| {
                         if matches!(event.event(), PageLoadEvent::Finished) {
                             if smoke {
