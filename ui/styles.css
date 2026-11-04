@@ -873,3 +873,14 @@ body.tab-dragging .tab-drag-source {opacity:.48;box-shadow:inset 0 0 0 1px #aab5
 .tab-context-quick-icon{display:grid;place-items:center;min-height:30px;background:#39314f;border:1px solid #79658c;box-shadow:inset 0 1px #ffffff14;color:#eee5ff;border-radius:5px;padding:2px;cursor:pointer;}
 .tab-context-quick-icon:hover{background:#665282;border-color:#c9adf4;}
 .tab-context-quick-icon svg{width:17px;height:17px;display:block;}
+
+/* Native audio indicator occupies the left edge of a sounding tab. */
+.tab-audio{
+  width:14px;height:16px;flex:0 0 14px;align-self:center;
+  display:grid;place-items:center;margin-left:1px;padding:0;
+  background:transparent;border:0;border-radius:4px;
+  color:#bfc8ff;font-size:14px;cursor:pointer;line-height:1;
+}
+.tab-audio:hover{background:#645e9499;color:#fff;}
+.tab.pinned-tab .tab-audio{margin:0;flex-basis:14px;width:14px;}
+.tab.pinned-tab:has(.tab-audio) .tab-symbol{display:none;}
