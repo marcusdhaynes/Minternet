@@ -128,21 +128,34 @@
       {title:tab.pinned?'Unpin Tab':'Pin Tab',glyph:'pin',action:()=>groups()?.pin(id,!tab.pinned)}
     ];
   }
-  function barMenu(folderId=null){
+  function bookmarkMenu(bookmarkId){
     const b=ctrl();
-    const menus=[
-      sub('▣  Tab Groups',barGroupItems()),
+    const node=window.MinternetBookmarks?.find(state(),bookmarkId);
+    if(!node)return [disabled('Bookmark not found')];
+    if(node.kind==='folder'){
+      return [
+        sub('📁  Folder Contents',folderItems(bookmarkId)),
+        sep(),
+        item('✎  Edit Name…',()=>b?.edit(bookmarkId)),
+        item('×  Delete Folder…',()=>b?.deleteBookmark(bookmarkId))
+      ];
+    }
+    return [
+      item('↗  Open in New Tab',()=>b?.openInNewTab(bookmarkId)),
       sep(),
-      item('📁  New Folder…',()=>b?.newFolder(folderId)),
-      ...(!folderId?[item('☆  Bookmark This Page',()=>b?.toggleBookmark())]:[]),
+      item('✎  Edit Name…',()=>b?.edit(bookmarkId)),
+      item('×  Delete Bookmark',()=>b?.deleteBookmark(bookmarkId))
+    ];
+  }
+  function barMenu(){
+    const b=ctrl();
+    return [
+      item('📁  New Folder…',()=>b?.newFolder(null)),
+      item('☆  Bookmark This Page',()=>b?.toggleBookmark()),
       item('⚙  Manage Bookmarks…',()=>b?.manager()),
       sep(),
       item((state()?.visible?'✓  ':'')+'Show Bookmark Bar',()=>b?.toggleBar())
     ];
-    if(folderId){
-      menus.unshift(sub('📁  Folder Contents',folderItems(folderId)),item('✎  Edit This Folder…',()=>b?.edit(folderId)),sep());
-    }
-    return menus;
   }
 
   // For the GitHub Pages UI-only demo, use a small DOM popup and cascading
@@ -370,7 +383,7 @@
   }
   const handlers={
     folder:(id,button)=>popup(folderItems(id),fromElement(button),window.__minternetMenuSmoke?{}:{custom:true,heading:'FOLDER'}),
-    bookmark:(id,event)=>popup(barMenu(id),{x:event.clientX,y:event.clientY},{custom:true,heading:'BOOKMARK FOLDER'}),
+    bookmark:(id,event)=>popup(bookmarkMenu(id),{x:event.clientX,y:event.clientY},{custom:true,compactTab:true,heading:'BOOKMARK'}),
     bar:event=>popup(barMenu(),{x:event.clientX,y:event.clientY},{custom:true,heading:'BOOKMARKS'}),
     groups:point=>groupsOverview(point),
     group:(id,point)=>groupInspector(id,point),
@@ -386,6 +399,7 @@
     inspectEmptyTabBar:emptyTabBarMenu,
     inspectTabQuick:id=>tabQuickActions(id),
     inspectBar:()=>barMenu(),
+    inspectBookmark:id=>bookmarkMenu(id),
     inspectFolder:id=>folderItems(id),
     nativePopupCount:()=>nativePopupCount
   };
@@ -410,7 +424,7 @@
     event.stopImmediatePropagation();
     const button=event.target.closest('.bookmark-item');
     const id=button?.dataset.bookmarkId;
-    if(id&&window.MinternetBookmarks.find(state(),id)?.kind==='folder')handlers.bookmark(id,event);
+    if(id&&window.MinternetBookmarks?.find(state(),id))handlers.bookmark(id,event);
     else handlers.bar(event);
   },true);
 })();
