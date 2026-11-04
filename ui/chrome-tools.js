@@ -40,15 +40,12 @@
   });
   window.addEventListener('keydown',event=>{
     if(!(event.ctrlKey||event.metaKey)||event.altKey)return;
-    const editable=event.target?.closest?.('input,textarea,[contenteditable="true"],select');
     if(event.key==='+'||event.key==='='||event.code==='NumpadAdd'){
       event.preventDefault();step(1);
     }else if(event.key==='-'||event.key==='_'||event.code==='NumpadSubtract'){
       event.preventDefault();step(-1);
     }else if(event.key==='0'){
       event.preventDefault();void setZoom(100);
-    }else if(!editable&&event.key.toLowerCase()==='z'&&!event.shiftKey){
-      event.preventDefault();undo?.click();
     }
   },true);
   // WebView2 supplies the audio state; no page JavaScript injection.
