@@ -67,12 +67,12 @@ test('folder menu actions target the correct folder, without executable URLs',()
 
 test('context tab menu pins and unpins a real tab without closing it',()=>{
   const h=harness();
-  const menu=h.window.minternetMenus.inspectTab(1);
-  const pin=menu.find(i=>i.text?.includes('Pin Tab'));
+  const menu=h.window.minternetMenus.inspectTabQuick(1);
+  const pin=menu.find(i=>i.title?.includes('Pin Tab'));
   assert.ok(pin);
   pin.action();
   assert.equal(h.flags.tabPins,1);
-  assert.ok(h.window.minternetMenus.inspectTab(1).some(i=>i.text?.includes('Unpin Tab')));
+  assert.ok(h.window.minternetMenus.inspectTabQuick(1).some(i=>i.title?.includes('Unpin Tab')));
 });
 test('folder and subfolder context menus do not offer Bookmark This Page',()=>{
  const h=harness();
