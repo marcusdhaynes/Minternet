@@ -30,6 +30,13 @@
     const result=await api.command('undo');
     if(result?.undone===false)window.minternetToast?.('Nothing to undo.');
     else if(result?.message)window.minternetToast?.(result.message);
+    else if(result?.ui?.kind==='groups'){
+      if(!window.minternetGroups?.restoreUndoGroup?.(result.ui.before))
+        window.minternetToast?.('Could not restore that group change.');
+    }else if(result?.ui?.kind==='bookmarks'){
+      if(!window.minternetBookmarks?.restoreUndoBookmark?.(result.ui.patch))
+        window.minternetToast?.('Could not restore that bookmark change.');
+    }
   });
   window.addEventListener('keydown',event=>{
     if(!(event.ctrlKey||event.metaKey)||event.altKey)return;
