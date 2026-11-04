@@ -29,18 +29,21 @@
       "output": "release"
     },
     "win": {
+      "icon": "ui/minternet-brand.png",
       "target": [
         "nsis",
         "portable"
       ]
     },
     "mac": {
+      "icon": "native/desktop/src-tauri/icons/icon.icns",
       "target": [
         "dmg",
         "zip"
       ]
     },
     "linux": {
+      "icon": "ui/minternet-brand.png",
       "target": [
         "AppImage"
       ],

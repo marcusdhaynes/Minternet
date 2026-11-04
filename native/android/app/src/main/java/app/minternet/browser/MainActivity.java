@@ -124,6 +124,12 @@ public class MainActivity extends Activity {
         controls.setOrientation(LinearLayout.HORIZONTAL);
         controls.setGravity(android.view.Gravity.CENTER_VERTICAL);
         controls.setPadding(dp(3),0,dp(3),dp(3));
+        android.widget.ImageView brand=new android.widget.ImageView(this);
+        brand.setImageResource(R.mipmap.ic_launcher);
+        brand.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
+        brand.setContentDescription("Minternet");
+        brand.setPadding(dp(2),dp(2),dp(2),dp(2));
+        controls.addView(brand,new LinearLayout.LayoutParams(dp(29),dp(29)));
         back=button("‹","Back");
         forward=button("›","Forward");
         reload=button("↻","Reload");

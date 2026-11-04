@@ -4,6 +4,8 @@ on:
     branches: [main]
     paths:
       - 'native/ios/**'
+      - 'ui/minternet-brand.webp'
+      - 'native/desktop/scripts/generate_icons.py'
       - '.github/workflows/native-ios.yml'
   workflow_dispatch:
 permissions:
@@ -14,6 +16,13 @@ jobs:
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Generate iOS Jade Rabbit App Icon
+        run: |
+          python -m pip install --disable-pip-version-check --quiet pillow
+          python native/desktop/scripts/generate_icons.py
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate native iOS project

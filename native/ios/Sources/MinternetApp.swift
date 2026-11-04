@@ -172,6 +172,9 @@ struct ContentView: View {
         VStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 3) {
+                    Image("Brand")
+                        .resizable().scaledToFit().frame(width: 24, height: 24)
+                        .accessibilityLabel("Minternet")
                     ForEach(state.tabs) { tab in
                         HStack(spacing: 3) {
                             Button(action: { state.select(tab.id) }) {

@@ -137,7 +137,7 @@ if (!window.minternet) {
     const panel=document.createElement('section');panel.id='preview-content';panel.className='preview-content';panel.hidden=true;
     panel.innerHTML='<div class="preview-top"><span class="preview-legend">WEB VIEW</span><span id="preview-host"></span><a id="preview-open-top" target="_blank" rel="noopener noreferrer">Open Website ↗</a></div>'+
       '<div id="preview-frame-wrap" class="preview-frame-wrap"><iframe id="preview-frame" title="Embedded website" sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer"></iframe><div class="preview-note">Some websites prevent embedding. If the page is blank or blocked, choose Open Website.</div></div>'+
-      '<div id="preview-launch" class="preview-launch" hidden><div class="preview-mark">M</div><div class="preview-caption">OPEN REAL WEBSITE</div><h2 id="preview-target"></h2><p>This website blocks embedded browsing. Open the real site in your existing browser.</p><a id="preview-open" target="_blank" rel="noopener noreferrer">Open Website ↗</a></div>';
+      '<div id="preview-launch" class="preview-launch" hidden><div class="preview-mark"><img src="./minternet-brand.webp" alt="Minternet"></div><div class="preview-caption">OPEN REAL WEBSITE</div><h2 id="preview-target"></h2><p>This website blocks embedded browsing. Open the real site in your existing browser.</p><a id="preview-open" target="_blank" rel="noopener noreferrer">Open Website ↗</a></div>';
     document.body.append(panel);
     const link=document.createElement('a');link.className='preview-build-link';
     link.href='https://github.com/marcusdhaynes/Minternet/actions/workflows/native-windows.yml';

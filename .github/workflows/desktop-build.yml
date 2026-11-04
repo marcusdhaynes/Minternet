@@ -23,6 +23,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Generate Jade Rabbit Native Icons
+        run: |
+          python -m pip install --disable-pip-version-check --quiet pillow
+          python native/desktop/scripts/generate_icons.py
       - run: npm install --no-fund --no-audit
       - run: npm run check
       - run: npm test

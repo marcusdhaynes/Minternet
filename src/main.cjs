@@ -416,6 +416,7 @@ app.whenReady().then(async () => {
   mainWindow = new BrowserWindow({
     width: 1380, height: 880, minWidth: 700, minHeight: 520, show: false,
     frame: false, titleBarStyle: 'hidden', backgroundColor: '#0b101c',
+    icon: path.join(__dirname, '../ui/minternet-brand.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       sandbox: true,

@@ -1,47 +1,78 @@
-"""Generate Minternet native application icons. Build-time only, not runtime.
-The raster icon matches ui/minternet-logo.svg and uses antialiased Pillow drawing.
-Run: python native/desktop/scripts/generate_icons.py
-"""
-from pathlib import Path
-from PIL import Image, ImageDraw
+"""Generate consistent Minternet jade-rabbit icons for all supported platforms.
 
-ROOT = Path(__file__).resolve().parents[1]
-ICONS = ROOT / "src-tauri" / "icons"
-ICONS.mkdir(parents=True, exist_ok=True)
-S = 1024
-scale = S / 256
-image = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-background = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-draw_bg = ImageDraw.Draw(background)
-for y in range(S):
-    t = y / (S - 1)
-    # Soft purple gradient: readable even at 16x16 taskbar size.
-    start, end = (125, 111, 237), (60, 54, 143)
-    tone = tuple(round(a * (1 - t) + b * t) for a, b in zip(start, end))
-    draw_bg.line((0, y, S, y), fill=(*tone, 255))
-mask = Image.new("L", (S, S), 0)
-ImageDraw.Draw(mask).rounded_rectangle(
-    (int(3*scale), int(3*scale), int(253*scale), int(253*scale)),
-    radius=int(57*scale), fill=255
+The transparent artwork in ui/minternet-brand.webp is the single source of
+truth. Run before native packaging to generate each platform's required files.
+
+Run from repository root: python native/desktop/scripts/generate_icons.py
+"""
+import json
+from pathlib import Path
+from PIL import Image
+
+PROJECT = Path(__file__).resolve().parents[3]
+SOURCE = PROJECT / "ui" / "minternet-brand.webp"
+DESKTOP = PROJECT / "native" / "desktop" / "src-tauri" / "icons"
+ANDROID_RES = PROJECT / "native" / "android" / "app" / "src" / "main" / "res"
+IOS_ASSETS = PROJECT / "native" / "ios" / "Assets.xcassets"
+
+if not SOURCE.is_file():
+    raise SystemExit(f"Missing Minternet brand artwork: {SOURCE}")
+with Image.open(SOURCE) as file:
+    artwork = file.convert("RGBA")
+
+if artwork.width != artwork.height or artwork.width < 512:
+    raise SystemExit("Brand artwork must be square and at least 512 pixels.")
+resample = Image.Resampling.LANCZOS
+
+def icon(size):
+    return artwork.resize((size, size), resample)
+
+def png(target, size, opaque=False):
+    target.parent.mkdir(parents=True, exist_ok=True)
+    image = icon(size)
+    if opaque:
+        # App Store icons cannot have alpha; Apple adds the rounded system mask.
+        backdrop = Image.new("RGBA", image.size, (9, 13, 25, 255))
+        backdrop.alpha_composite(image)
+        image = backdrop.convert("RGB")
+    image.save(target, format="PNG", optimize=True)
+
+# Native Windows executable / taskbar, macOS dock, and Linux launcher.
+DESKTOP.mkdir(parents=True, exist_ok=True)
+png(DESKTOP / "icon.png", 1024)
+icon(512).save(
+    DESKTOP / "icon.ico", format="ICO",
+    sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64),
+           (128, 128), (256, 256)],
 )
-background.putalpha(mask)
-image.alpha_composite(background)
-draw = ImageDraw.Draw(image)
-# Geometric M matches the official vector brand: white, high contrast.
-m_points = [(35,210),(35,63),(46,51),(58,55),(128,133),
-            (198,55),(210,51),(221,63),(221,210),(188,210),
-            (188,107),(134,169),(128,175),(121,169),
-            (68,107),(68,210)]
-draw.polygon([(round(x*scale), round(y*scale)) for x,y in m_points],
-             fill=(246, 246, 255, 255))
-# Tiny gold star accent identifies the brand without visual clutter.
-star = [(207,36),(210.5,46.5),(221,50),(210.5,53.5),
-        (207,64),(203.5,53.5),(193,50),(203.5,46.5)]
-draw.polygon([(round(x*scale),round(y*scale)) for x,y in star],
-             fill=(255,214,170,255))
-master = image.resize((256,256), Image.Resampling.LANCZOS)
-master.save(ICONS / "icon.png", format="PNG", optimize=True)
-master.save(ICONS / "icon.ico", format="ICO",
-            sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),
-                   (128,128),(256,256)])
-print("Generated branded icon.png and icon.ico in", ICONS)
+icon(1024).save(DESKTOP / "icon.icns", format="ICNS")
+
+# Android launcher densities; same branding also appears in the native UI.
+for density, size in [
+    ("mdpi", 48), ("hdpi", 72), ("xhdpi", 96),
+    ("xxhdpi", 144), ("xxxhdpi", 192)
+]:
+    folder = ANDROID_RES / ("mipmap-" + density)
+    png(folder / "ic_launcher.png", size)
+    png(folder / "ic_launcher_round.png", size)
+
+# iOS 16+ asset catalog. Apple requires an opaque App Store / home icon.
+appicon = IOS_ASSETS / "AppIcon.appiconset"
+png(appicon / "AppIcon-1024.png", 1024, opaque=True)
+appicon.joinpath("Contents.json").write_text(
+    json.dumps({
+        "images": [{"filename": "AppIcon-1024.png",
+                    "idiom": "universal", "platform": "ios",
+                    "size": "1024x1024"}],
+        "info": {"author": "xcode", "version": 1},
+    }, indent=2) + "\n", encoding="utf-8"
+)
+brand = IOS_ASSETS / "Brand.imageset"
+png(brand / "brand.png", 256)
+brand.joinpath("Contents.json").write_text(
+    json.dumps({
+        "images": [{"filename": "brand.png", "idiom": "universal"}],
+        "info": {"author": "xcode", "version": 1},
+    }, indent=2) + "\n", encoding="utf-8"
+)
+print("Generated Minternet jade-rabbit desktop, Android and iOS icons.")

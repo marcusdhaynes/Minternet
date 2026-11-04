@@ -26,6 +26,7 @@ jobs:
       - name: Assemble static UI preview
         run: |
           mkdir -p site
+          cp ui/minternet-brand.webp ui/minternet-brand.png site/
           cp ui/index.html ui/styles.css ui/app.js ui/native-bridge.js ui/bookmark-model.js ui/bookmark-ui.js ui/tab-group-model.js ui/tab-group-ui.js ui/chrome-native-menu.js ui/search-settings.js site/
           cp docs/preview-bridge.js site/preview-bridge.js
           cp docs/preview.css site/preview.css
