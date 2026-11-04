@@ -6,7 +6,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{
     Emitter, Manager, WebviewUrl, LogicalPosition, LogicalSize,
-    webview::{WebviewBuilder, NewWindowResponse, PermissionResponse, PageLoadEvent},
+    webview::{WebviewBuilder, NewWindowResponse, PermissionResponse, PageLoadEvent, DownloadEvent},
     window::WindowBuilder,
 };
 
@@ -62,6 +62,73 @@ struct Browser {
     warming: HashSet<u32>,
 }
 
+#[derive(Clone,Serialize)]
+#[serde(rename_all="camelCase")]
+struct RecentDownload {
+    id:u64,
+    name:String,
+    source:String,
+    path:String,
+    status:String,
+    private:bool,
+}
+#[derive(Default)]
+struct DownloadsState(Mutex<VecDeque<RecentDownload>>);
+
+fn download_name(url:&tauri::Url)->String{
+    let segment=url.path_segments().and_then(|mut segments|segments.next_back()).unwrap_or("download");
+    let cleaned=segment.chars().map(|c|{
+        if c.is_ascii_alphanumeric() || matches!(c,'.'|'-'|'_'|'('|')'|' ') {c} else {'_'}
+    }).collect::<String>();
+    let name=cleaned.trim_matches(|c:char|c=='.'||c==' ').chars().take(120).collect::<String>();
+    if name.is_empty() {"download".into()}else{name}
+}
+fn download_path(app:&tauri::AppHandle,url:&tauri::Url)->Result<PathBuf,String>{
+    let dir=app.path().download_dir().map_err(|_|"Downloads directory is unavailable".to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e|e.to_string())?;
+    let original=download_name(url);
+    let candidate=std::path::Path::new(&original);
+    let stem=candidate.file_stem().and_then(|n|n.to_str()).unwrap_or("download");
+    let extension=candidate.extension().and_then(|n|n.to_str()).unwrap_or("");
+    let state=app.state::<DownloadsState>();
+    let history=state.0.lock().map_err(|e|e.to_string())?;
+    for i in 0..1000 {
+        let name=if i==0{original.clone()}
+                 else if extension.is_empty(){format!("{stem} ({i})")}
+                 else{format!("{stem} ({i}).{extension}")};
+        let path=dir.join(name);
+        if !path.exists()&&!history.iter().any(|d|d.path==path.to_string_lossy()) {
+            return Ok(path);
+        }
+    }
+    Err("Too many files with this name in Downloads".into())
+}
+fn download_update(app:&tauri::AppHandle,url:&tauri::Url,path:Option<&std::path::Path>,
+                   private:bool,success:Option<bool>){
+    let state=app.state::<DownloadsState>();
+    let Ok(mut history)=state.0.lock() else{return};
+    let source=url.as_str().to_string();
+    if let Some(done)=success {
+        // Match only an unfinished download from the same source, oldest first.
+        if let Some(entry)=history.iter_mut().rev().find(|d|
+            d.source==source&&d.status=="downloading"&&d.private==private
+            &&path.map(|p|p.to_string_lossy()==d.path).unwrap_or(true)){
+            entry.status=if done{"completed"}else{"failed"}.into();
+        }
+    }else if let Some(file)=path{
+        let next=history.back().map(|d|d.id+1).unwrap_or(1);
+        history.push_back(RecentDownload{
+            id:next,name:file.file_name().and_then(|n|n.to_str()).unwrap_or("Download").to_string(),
+            source,path:file.to_string_lossy().to_string(),status:"downloading".into(),private
+        });
+        while history.len()>50 {history.pop_front();}
+    }
+    let summary=history.iter().rev().map(|d|json!({
+        "id":d.id,"name":d.name,"status":d.status,"private":d.private
+    })).collect::<Vec<_>>();
+    drop(history);
+    let _=app.emit_to("chrome","minternet:downloads",summary);
+}
 struct PopupDeduper(Mutex<HashMap<(u32,String),Instant>>);
 struct ZoomState(Mutex<f64>);
 #[derive(Default)]
@@ -802,6 +869,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     let for_load = app.clone();
     let for_title = app.clone();
     let for_popup = app.clone();
+    let for_download=app.clone();
     let builder = WebviewBuilder::new(label.clone(), url)
         .incognito(private)
         // Honor Ctrl/Cmd + plus/minus and Ctrl + mouse-wheel when focus is
@@ -809,7 +877,26 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
         .zoom_hotkeys_enabled(true)
         .on_navigation(|url| url.scheme() == "https")
         .on_permission_request(|_view, _kind| PermissionResponse::Deny)
-        .on_download(|_view, _event| false)
+        .on_download(move |_view,event|{
+            match event {
+                DownloadEvent::Requested{url,destination}=>{
+                    if url.scheme()!="https" {return false;}
+                    match download_path(&for_download,&url){
+                        Ok(path)=>{
+                            *destination=path.clone();
+                            download_update(&for_download,&url,Some(&path),private,None);
+                            true
+                        },
+                        Err(_)=>false
+                    }
+                },
+                DownloadEvent::Finished{url,path,success}=>{
+                    download_update(&for_download,&url,path.as_deref(),private,Some(success));
+                    true
+                },
+                _=>true
+            }
+        })
         .on_new_window(move |url, _features| {
             if url.scheme() == "https" {
                 // WebView2 may emit both window.open and modifier-click callbacks
@@ -1130,6 +1217,36 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         remember_undo(&app,None);
     }
     match name.as_str() {
+        "downloads-list" => {
+            let state=app.state::<DownloadsState>();
+            let history=state.0.lock().map_err(|e|e.to_string())?;
+            return Ok(json!(history.iter().rev().map(|d|json!({
+                "id":d.id,"name":d.name,"status":d.status,"private":d.private
+            })).collect::<Vec<_>>()));
+        }
+        "downloads-clear" => {
+            let state=app.state::<DownloadsState>();
+            state.0.lock().map_err(|e|e.to_string())?.clear();
+            return Ok(json!({"ok":true}));
+        }
+        "downloads-reveal" => {
+            let id=value.as_u64().ok_or("Invalid download ID")?;
+            let path={
+                let state=app.state::<DownloadsState>();
+                let downloads=state.0.lock().map_err(|e|e.to_string())?;
+                let item=downloads.iter().find(|d|d.id==id&&d.status=="completed")
+                    .ok_or("Completed download not found")?;
+                PathBuf::from(&item.path)
+            };
+            if !path.is_file(){return Err("Downloaded file no longer exists".into());}
+            #[cfg(windows)]
+            std::process::Command::new("explorer.exe")
+                .arg(format!("/select,{}",path.to_string_lossy()))
+                .spawn().map_err(|e|e.to_string())?;
+            #[cfg(not(windows))]
+            {let _=path;return Err("Reveal in folder is currently supported on Windows".into());}
+            return Ok(json!({"ok":true}));
+        }
         "vault-status" => {
             let exists=password_vault::file(&app)?.exists();
             let unlocked=app.state::<Mutex<password_vault::Vault>>().lock().map_err(|e|e.to_string())?.unlocked();
@@ -1832,6 +1949,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
 fn main() {
     tauri::Builder::default()
         .manage(PopupDeduper(Mutex::new(HashMap::new())))
+        .manage(DownloadsState::default())
         .manage(ZoomState(Mutex::new(1.0)))
         .manage(SplitState::default())
         .manage(SplitRatios(Mutex::new((0.5,0.5))))
