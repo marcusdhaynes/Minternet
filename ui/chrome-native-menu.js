@@ -369,6 +369,7 @@
       return popup(tabMenu(chosen),point,{custom:true,heading:'TAB',quickActions:tabQuickActions(chosen)});
     },
     inspectTab:id=>tabMenu(id),
+    inspectTabQuick:id=>tabQuickActions(id),
     inspectBar:()=>barMenu(),
     inspectFolder:id=>folderItems(id),
     nativePopupCount:()=>nativePopupCount
