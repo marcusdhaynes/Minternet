@@ -468,9 +468,11 @@ fn parse_address_with_engine(text: &str, engine: &str) -> Result<Option<tauri::U
             "brave" => ("https://search.brave.com/search?q=", ""),
             "startpage" => ("https://www.startpage.com/sp/search?query=", ""),
             "ecosia" => ("https://www.ecosia.org/search?q=", ""),
+            "chatgpt" => ("https://chatgpt.com/?q=", "&hints=search"),
+            "chatgpt-private" => ("https://chatgpt.com/?temporary-chat=true&q=", "&hints=search"),
             _ => ("https://www.google.com/search?q=", ""),
         };
-        format!("{base}{query_param}{}", percent_encode_search(s))
+        format!("{base}{}{query_param}", percent_encode_search(s))
     };
     let url = tauri::Url::parse(&candidate).map_err(|e| e.to_string())?;
     if url.scheme() != "https" || url.host_str().is_none() ||
