@@ -65,16 +65,46 @@
     if (mode === 'manager') renderManager();
     if (mode === 'folder') renderFolder();
   }
+  // Only load the bookmarked site's own HTTPS favicon, never a third-party
+  // favicon proxy. No icon bytes are copied into bookmark storage; the
+  // website URL alone controls the icon and custom icons always win.
+  const missingFavicons=new Set();
+  function siteFavicon(url) {
+    const safe=model.url(url);
+    if(!safe)return null;
+    try{
+      const parsed=new URL(safe);
+      if(!parsed.hostname || parsed.protocol!=='https:')return null;
+      return parsed.origin+'/favicon.ico';
+    }catch{return null;}
+  }
   function iconNode(item, isFolder = item?.kind === 'folder') {
-    const slot = document.createElement('span');
-    slot.className = 'bookmark-emoji';
-    const value = model.icon(item?.icon);
+    const slot=document.createElement('span');
+    slot.className='bookmark-emoji';
+    const value=model.icon(item?.icon);
     if (/^data:image\/(?:png|jpeg|webp);base64,/i.test(value)) {
-      const img = document.createElement('img');
-      img.src = value;
-      img.alt = '';
+      const img=document.createElement('img');
+      img.src=value;
+      img.alt='';
       slot.append(img);
-    } else slot.textContent = value || (isFolder ? '📁' : '🔖');
+    }else if(value){
+      slot.textContent=value;
+    }else if(!isFolder){
+      const favicon=siteFavicon(item?.url);
+      if(favicon && !missingFavicons.has(favicon)){
+        const img=document.createElement('img');
+        img.alt='';
+        img.src=favicon;
+        img.decoding='async';
+        img.referrerPolicy='no-referrer';
+        img.addEventListener('error',()=>{
+          missingFavicons.add(favicon);
+          img.remove();
+          slot.textContent='🔖';
+        },{once:true});
+        slot.append(img);
+      }else slot.textContent='🔖';
+    }else slot.textContent='📁';
     return slot;
   }
   function textFor(node) {
@@ -346,7 +376,10 @@
   function renderIconPreview() {
     const el = $('bookmarkIconPreview');
     el.replaceChildren();
-    el.append(iconNode({icon:customIcon,kind:draft?.kind || 'folder'}, draft?.kind === 'folder'));
+    el.append(iconNode({
+      icon:customIcon,kind:draft?.kind || 'folder',
+      url:draft?.kind==='link'?$('bookmarkUrl').value:''
+    }, draft?.kind === 'folder'));
   }
   function saveEditor(event) {
     event.preventDefault();
@@ -429,6 +462,9 @@
   $('bookmarkFolderEdit').addEventListener('click', () => edit(folderId));
   $('bookmarkEditForm').addEventListener('submit', saveEditor);
   $('bookmarkRemove').addEventListener('click', deleteEditor);
+  $('bookmarkUrl').addEventListener('input',()=>{
+    if(draft?.kind==='link'&&!customIcon)renderIconPreview();
+  });
   $('bookmarkIcon').addEventListener('input', event => {
     customIcon = event.target.value;
     renderIconPreview();
