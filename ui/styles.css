@@ -1193,3 +1193,9 @@ html.minternet-overlay-active .group-editor-backdrop {
   color:#e8dffc;font-size:10px;cursor:pointer;}
 .history-popup .history-more:hover{background:#6b528d;}
 .history-popup .history-more[hidden]{display:none;}
+
+.payment-field[hidden],.payment-cancel[hidden]{display:none!important;}
+.payment-cancel{width:100%;padding:5px;border:1px solid #79608f;
+  border-radius:5px;background:#3e334f;color:#e9dff5;
+  font-size:10px;cursor:pointer;}
+.payment-cancel:hover{background:#5c456f;}
