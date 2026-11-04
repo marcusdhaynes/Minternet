@@ -65,37 +65,97 @@
     if (mode === 'manager') renderManager();
     if (mode === 'folder') renderFolder();
   }
-  // Only load the bookmarked site's own HTTPS favicon, never a third-party
-  // favicon proxy. No icon bytes are copied into bookmark storage; the
-  // website URL alone controls the icon and custom icons always win.
-  const missingFavicons=new Set();
-  function iconNode(item, isFolder = item?.kind === 'folder') {
+  // A website may declare /Project/favicon.svg or an image with a cache-
+  // busting query. Read its <link rel="icon"> declarations through the native
+  // browser, rather than assuming every site has /favicon.ico at its root.
+  // Cache requests for identical bookmarks; never touch manually chosen icons.
+  const faviconCandidates=new Map();
+  const faviconGood=new Map();
+  const faviconBad=new Set();
+  const iconJobs=[];
+  let iconsRunning=0;
+  function runIconJobs(){
+    while(iconsRunning<3 && iconJobs.length){
+      const task=iconJobs.shift();
+      iconsRunning++;
+      Promise.resolve().then(task.run).then(task.resolve,()=>task.resolve([]))
+        .finally(()=>{iconsRunning--;runIconJobs();});
+    }
+  }
+  function fallbackIcons(address){
+    const safe=model.url(address);
+    if(!safe)return [];
+    const root=model.favicon(safe);
+    try{
+      const page=new URL(safe);
+      return [
+        new URL('./favicon.svg',page).href,
+        new URL('./favicon.png',page).href,
+        new URL('./favicon.ico',page).href,
+        new URL('./apple-touch-icon.png',page).href,
+        root
+      ].filter((candidate,index,all)=>candidate&&all.indexOf(candidate)===index);
+    }catch{return root?[root]:[];}
+  }
+  function iconSources(address){
+    const safe=model.url(address);
+    if(!safe)return Promise.resolve([]);
+    if(faviconGood.has(safe))return Promise.resolve([faviconGood.get(safe)]);
+    if(faviconCandidates.has(safe))return faviconCandidates.get(safe);
+    const promise=new Promise(resolve=>{
+      iconJobs.push({resolve,run:async()=>{
+        let declared=[];
+        if(window.__TAURI__){
+          const results=await api.command('bookmark-site-icons',safe);
+          if(Array.isArray(results))declared=results.filter(src=>{
+            try{
+              const icon=new URL(src);
+              return icon.protocol==='https:'&&!icon.username&&!icon.password;
+            }catch{return false;}
+          }).slice(0,16);
+        }
+        return [...new Set([...declared,...fallbackIcons(safe)])];
+      }});
+      runIconJobs();
+    });
+    faviconCandidates.set(safe,promise);
+    return promise;
+  }
+  function tryIcon(slot,address,candidates,index=0){
+    if(index>=candidates.length){slot.textContent='🔖';return;}
+    const candidate=candidates[index];
+    if(faviconBad.has(candidate)){tryIcon(slot,address,candidates,index+1);return;}
+    const img=document.createElement('img');
+    img.alt='';
+    img.decoding='async';
+    img.referrerPolicy='no-referrer';
+    img.addEventListener('load',()=>{
+      faviconGood.set(address,candidate);
+      slot.replaceChildren(img);
+    },{once:true});
+    img.addEventListener('error',()=>{
+      faviconBad.add(candidate);
+      tryIcon(slot,address,candidates,index+1);
+    },{once:true});
+    img.src=candidate;
+  }
+  function iconNode(item,isFolder=item?.kind==='folder'){
     const slot=document.createElement('span');
     slot.className='bookmark-emoji';
     const value=model.icon(item?.icon);
-    if (/^data:image\/(?:png|jpeg|webp);base64,/i.test(value)) {
+    if(/^data:image\/(?:png|jpeg|webp);base64,/i.test(value)){
       const img=document.createElement('img');
-      img.src=value;
-      img.alt='';
+      img.src=value;img.alt='';
       slot.append(img);
     }else if(value){
       slot.textContent=value;
-    }else if(!isFolder){
-      const favicon=model.favicon(item?.url);
-      if(favicon && !missingFavicons.has(favicon)){
-        const img=document.createElement('img');
-        img.alt='';
-        img.src=favicon;
-        img.decoding='async';
-        img.referrerPolicy='no-referrer';
-        img.addEventListener('error',()=>{
-          missingFavicons.add(favicon);
-          img.remove();
-          slot.textContent='🔖';
-        },{once:true});
-        slot.append(img);
-      }else slot.textContent='🔖';
-    }else slot.textContent='📁';
+    }else if(!isFolder && model.url(item?.url)){
+      slot.textContent='🔖';
+      const safe=model.url(item.url);
+      void iconSources(safe).then(candidates=>tryIcon(slot,safe,candidates));
+    }else{
+      slot.textContent=isFolder?'📁':'🔖';
+    }
     return slot;
   }
   function textFor(node) {
