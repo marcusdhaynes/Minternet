@@ -58,9 +58,9 @@ struct Browser {
     warming: HashSet<u32>,
 }
 
-#[derive(Default)]
 struct PopupDeduper(Mutex<HashMap<(u32,String),Instant>>);
 
+#[derive(Default)]
 struct LayoutCache {
     size_and_home: Option<(u32, u32, bool, bool, bool)>,
     shown: Option<String>,
