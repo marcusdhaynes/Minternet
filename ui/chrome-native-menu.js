@@ -71,25 +71,55 @@
     if(g.getState().groups.length===0)list.push(disabled('No groups yet'));
     return list;
   }
+  function tabIdsInVisualOrder(){
+    const visible=[...document.querySelectorAll('#tabs .tab[data-tab-id]')]
+      .map(el=>Number(el.dataset.tabId)).filter(Number.isSafeInteger);
+    const remaining=groups()?.getLatest().tabs.map(t=>t.id).filter(id=>!visible.includes(id))||[];
+    return [...visible,...remaining];
+  }
+  function closeRelative(tabId,scope){
+    const ids=tabIdsInVisualOrder(),index=ids.indexOf(tabId);
+    if(index<0)return;
+    const selected=scope==='left'?ids.slice(0,index):
+      scope==='right'?ids.slice(index+1):ids.filter(id=>id!==tabId);
+    if(selected.length)void window.minternet?.command('close-many',selected);
+  }
   function tabMenu(tabId){
     const g=groups(), b=ctrl();
     if(!g)return [disabled('Unavailable')];
     const tab=g.getLatest().tabs.find(t=>t.id===tabId);
     if(!tab)return [disabled('Tab no longer exists')];
     const belonging=window.MinternetGroupModel.findTab(g.getState(),tabId);
-    const assignOptions=[item('＋  New Group With Tab…',()=>{g.openEditor(null,tabId);})];
-    for(const group of g.getState().groups) {
+    const assignOptions=[item('＋  New Group With Tab…',()=>g.openEditor(null,tabId))];
+    for(const group of g.getState().groups)
       assignOptions.push(item((belonging?.id===group.id?'✓  ':'●  ')+g.displayName(group),()=>g.assign(tabId,group.id)));
-    }
     return [
-      item(tab.pinned?'◇  Unpin Tab':'◆  Pin Tab',()=>g.pin(tabId,!tab.pinned)),
       sub('▣  Move To Tab Group',assignOptions),
       ...(belonging?[item('↙  Remove From '+g.displayName(belonging),()=>g.ungroup(tabId))]:[]),
-      sep(),
-      item('⧉  Duplicate Tab',()=>window.minternet?.command('duplicate',tabId)),
       ...(tab.url?.startsWith('https://')?[item('☆  Bookmark Page',()=>window.minternet?.command('activate',tabId).then(()=>b?.toggleBookmark()))]:[]),
       sep(),
-      item('×  Close Tab',()=>window.minternet?.command('close',tabId))
+      sub('×  Close…',[
+        item('Close Tab',()=>window.minternet?.command('close',tabId)),
+        item('All To Left',()=>closeRelative(tabId,'left')),
+        item('All To Right',()=>closeRelative(tabId,'right')),
+        item('All Others',()=>closeRelative(tabId,'others'))
+      ])
+    ];
+  }
+  const quickIcons={
+    reload:'<path d="M20 11a8 8 0 1 0-2.5 6"/><path d="M20 4v7h-7"/>',
+    unload:'<path d="M5 8V5h14v3M4 12h16M8 16h8M10 19h4"/>',
+    duplicate:'<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>',
+    pin:'<path d="M9 3h6l-1 6 4 4v2H6v-2l4-4-1-6ZM12 15v6"/>'
+  };
+  function tabQuickActions(id){
+    const tab=groups()?.getLatest().tabs.find(t=>t.id===id);
+    if(!tab)return null;
+    return [
+      {title:'Reload Tab',glyph:'reload',action:()=>window.minternet?.command('reload-tab',id)},
+      {title:'Unload Tab',glyph:'unload',action:()=>window.minternet?.command('unload-tab',id)},
+      {title:'Duplicate Tab',glyph:'duplicate',action:()=>window.minternet?.command('duplicate',id)},
+      {title:tab.pinned?'Unpin Tab':'Pin Tab',glyph:'pin',action:()=>groups()?.pin(id,!tab.pinned)}
     ];
   }
   function barMenu(folderId=null){
@@ -176,6 +206,18 @@
       host.append(header);
       customOpen=true;
       if(window.__TAURI__)void window.minternet?.command('chrome-overlay',true);
+    }
+    if(options.quickActions){
+      const toolbar=document.createElement('div');toolbar.className='tab-context-quick';
+      for(const action of options.quickActions){
+        const button=document.createElement('button');button.type='button';
+        button.className='tab-context-quick-icon';
+        button.title=action.title;button.setAttribute('aria-label',action.title);
+        button.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">'+quickIcons[action.glyph]+'</svg>';
+        button.addEventListener('click',()=>{closeFallback();action.action();});
+        toolbar.append(button);
+      }
+      host.append(toolbar);
     }
     const contents=domMenu(items);host.append(contents);
     document.body.append(host);fallback=host;
@@ -316,13 +358,22 @@
     bar:event=>popup(barMenu(),{x:event.clientX,y:event.clientY},{custom:true,heading:'BOOKMARKS'}),
     groups:point=>groupsOverview(point),
     group:(id,point)=>groupInspector(id,point),
-    tab:(id,point)=>popup(tabMenu(id),point,{custom:true,heading:'TAB OPTIONS'}),
+    tab:(id,point)=>{
+      const chosen=id??groups()?.getLatest().activeId;
+      if(!chosen)return popup([disabled('No active tab')],point,{custom:true,heading:'TABS'});
+      return popup(tabMenu(chosen),point,{custom:true,heading:'TAB',quickActions:tabQuickActions(chosen)});
+    },
     inspectTab:id=>tabMenu(id),
     inspectBar:()=>barMenu(),
     inspectFolder:id=>folderItems(id),
     nativePopupCount:()=>nativePopupCount
   };
   window.minternetMenus=handlers;
+  $('tabs')?.addEventListener('contextmenu',event=>{
+    if(event.defaultPrevented)return;
+    event.preventDefault();
+    handlers.tab(null,{x:event.clientX,y:event.clientY});
+  });
   const bar=$('bookmarkBar');
   // Capturing phase ensures right-click on a folder receives the browser-style
   // context menu instead of immediately opening the old edit form.
