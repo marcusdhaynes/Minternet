@@ -4,7 +4,7 @@ on:
     branches: [main]
     paths:
       - 'native/ios/**'
-      - 'ui/minternet-brand.webp'
+      - 'ui/minternet-brand.png'
       - 'native/desktop/scripts/generate_icons.py'
       - '.github/workflows/native-ios.yml'
   workflow_dispatch:

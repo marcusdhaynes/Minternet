@@ -1,6 +1,6 @@
 """Generate consistent Minternet jade-rabbit icons for all supported platforms.
 
-The transparent artwork in ui/minternet-brand.webp is the single source of
+The transparent artwork in ui/minternet-brand.png is the single source of
 truth. Run before native packaging to generate each platform's required files.
 
 Run from repository root: python native/desktop/scripts/generate_icons.py
@@ -10,7 +10,7 @@ from pathlib import Path
 from PIL import Image
 
 PROJECT = Path(__file__).resolve().parents[3]
-SOURCE = PROJECT / "ui" / "minternet-brand.webp"
+SOURCE = PROJECT / "ui" / "minternet-brand.png"
 DESKTOP = PROJECT / "native" / "desktop" / "src-tauri" / "icons"
 ANDROID_RES = PROJECT / "native" / "android" / "app" / "src" / "main" / "res"
 IOS_ASSETS = PROJECT / "native" / "ios" / "Assets.xcassets"
