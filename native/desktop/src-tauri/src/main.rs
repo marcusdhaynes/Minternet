@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod password_vault;
+mod browsing_history;
 
 use std::{sync::Mutex, collections::{HashSet, HashMap, VecDeque}, path::PathBuf, time::{Instant, Duration}};
 use serde::{Serialize,Deserialize};
@@ -1094,6 +1095,26 @@ fn update_from_site(app: &tauri::AppHandle, id: u32, url: &str) {
     notify(app);
 }
 
+fn record_page_history(app:&tauri::AppHandle,id:u32,url:&str,title_hint:Option<&str>){
+    let details={
+        let state=app.state::<Mutex<Browser>>();
+        let Ok(b)=state.lock() else{return};
+        let Some(tab)=b.tabs.iter().find(|t|t.id==id) else{return};
+        if tab.private{return;}
+        (tab.title.clone(),tab.url.clone())
+    };
+    if details.1!=url{return;}
+    let history=app.state::<Mutex<browsing_history::History>>();
+    let Ok(mut saved)=history.lock() else{return};
+    let changed=if let Some(title)=title_hint {
+        if !saved.retitle(url,title){saved.visit(url,title)}else{true}
+    }else{saved.visit(url,&details.0)};
+    if changed{
+        let _=saved.save(app);
+        let _=app.emit_to("chrome","minternet:history-changed",());
+    }
+}
+
 fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: bool) -> Result<(), String> {
     let Some(window) = app.get_window("main") else { return Err("Missing window".into()) };
     let label = format!("tab-{id}");
@@ -1145,7 +1166,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                     }else{recent.insert(key,now);true}
                 }else{false};
                 if should_open{
-                    let _=for_popup.emit_to("chrome","minternet:open-tab",url.to_string());
+                    let _=for_popup.emit_to("chrome","minternet:open-tab",json!({"url":url.to_string(),"private":private}));
                 }
             }
             NewWindowResponse::Deny
@@ -1154,6 +1175,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
             if matches!(event.event(), PageLoadEvent::Started | PageLoadEvent::Finished) {
                 update_from_site(&for_load, id, event.url().as_str());
                 if matches!(event.event(), PageLoadEvent::Finished) {
+                    record_page_history(&for_load,id,event.url().as_str(),None);
                     let _=fill_saved_credential(&for_load,id,false,None);
                 }
             }
@@ -1180,6 +1202,11 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                 let safe=serde_json::to_string(&title).unwrap_or_else(|_|"\"Split Tab\"".into());
                 let _=badge.eval(&format!("document.getElementById('title').textContent={safe};"));
             }
+            // The title callback may arrive after the first page-load event.
+            // Update the matching non-private history entry only.
+            let current=for_title.state::<Mutex<Browser>>().lock().ok()
+                .and_then(|b|b.tabs.iter().find(|t|t.id==id).map(|t|t.url.clone()));
+            if let Some(url)=current {record_page_history(&for_title,id,&url,Some(&title));}
             notify(&for_title);
         });
     let zoom=app.state::<ZoomState>().0.lock().map(|n|*n).unwrap_or(1.0);
@@ -1436,6 +1463,38 @@ fn browser_snapshot(app: tauri::AppHandle) -> Result<Snapshot,String> { snapshot
 
 #[tauri::command]
 async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Result<Value, String> {
+    if name.starts_with("history-"){
+        // Private browsing intentionally does not consult saved history,
+        // including for address-bar suggestions.
+        let private=app.state::<Mutex<Browser>>().lock().map_err(|e|e.to_string())?
+            .active().map(|t|t.private).unwrap_or(false);
+        let history=app.state::<Mutex<browsing_history::History>>();
+        let mut store=history.lock().map_err(|e|e.to_string())?;
+        match name.as_str(){
+            "history-search"=>{
+                if private{return Ok(json!([]));}
+                let query=value.as_str().unwrap_or("");
+                if query.len()>240{return Ok(json!([]));}
+                return Ok(json!(store.search(query,25)));
+            },
+            "history-list"=>{
+                if private{return Ok(json!([]));}
+                return Ok(json!(store.search("",100)));
+            },
+            "history-remove"=>{
+                let url=value.as_str().ok_or("History address missing")?;
+                let changed=store.remove(url);
+                if changed{store.save(&app)?;let _=app.emit_to("chrome","minternet:history-changed",());}
+                return Ok(json!({"ok":true,"changed":changed}));
+            },
+            "history-clear"=>{
+                let changed=store.clear();
+                if changed{store.save(&app)?;let _=app.emit_to("chrome","minternet:history-changed",());}
+                return Ok(json!({"ok":true,"changed":changed}));
+            },
+            _=>return Err("Unknown history command".into())
+        }
+    }
     if name=="bookmark-site-icons" {
         let url=value.as_str().ok_or("Expected bookmarked HTTPS URL")?;
         if url.len()>4096 {return Err("Bookmark URL too long".into());}
@@ -1458,7 +1517,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         return Ok(json!({"ok":true}));
     }
     if matches!(name.as_str(),
-        "new"|"new-private"|"new-url"|"new-background-url"|"pin"|"unpin"|"toggle-pin"|
+        "new"|"new-private"|"new-url"|"new-background-url"|"new-private-background-url"|"pin"|"unpin"|"toggle-pin"|
         "duplicate"|"close"|"close-many"|"navigate"|"home"|"privacy"|
         "back"|"forward"|"split-add"|"split-remove"|"split-clear") {
         remember_undo(&app,None);
@@ -1905,11 +1964,11 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             return Ok(json!({"zoom":zoom}));
         }
         "prepare-tab" => { prepare_active(&app)?; }
-        "new" | "new-private" | "new-url" | "new-background-url" => {
-            let private = name == "new-private";
+        "new" | "new-private" | "new-url" | "new-background-url" | "new-private-background-url" => {
+            let private = name == "new-private" || name == "new-private-background-url";
             // A Ctrl-click creates a new tab and starts loading its page, but
             // never changes the active tab or steals keyboard focus.
-            let background = name == "new-background-url";
+            let background = name == "new-background-url" || name == "new-private-background-url";
             let address = if name == "new-url" || background {
                 let raw = value.as_str().ok_or("Missing URL")?;
                 Some(tauri::Url::parse(raw).map_err(|_|"Invalid URL".to_string())?)
@@ -2201,6 +2260,7 @@ fn main() {
     tauri::Builder::default()
         .manage(PopupDeduper(Mutex::new(HashMap::new())))
         .manage(DownloadsState::default())
+        .manage(Mutex::new(browsing_history::History::default()))
         .manage(ZoomState(Mutex::new(1.0)))
         .manage(SplitState::default())
         .manage(SplitRatios(Mutex::new((0.5,0.5))))
@@ -2210,6 +2270,9 @@ fn main() {
         .manage(Mutex::new(LayoutCache::default()))
         .invoke_handler(tauri::generate_handler![browser_action, browser_snapshot])
         .setup(|app| {
+            if let Ok(mut h)=app.state::<Mutex<browsing_history::History>>().lock(){
+                *h=browsing_history::History::load(app.handle());
+            }
             restore_recent_downloads(app.handle());
             // Automated tests use a deterministic fresh session. Real users
             // restore their pinned pages or start with a tabless home.
