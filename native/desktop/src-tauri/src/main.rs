@@ -665,6 +665,9 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     let for_popup = app.clone();
     let builder = WebviewBuilder::new(label.clone(), url)
         .incognito(private)
+        // Honor Ctrl/Cmd + plus/minus and Ctrl + mouse-wheel when focus is
+        // inside the actual website WebView, not just the browser toolbar.
+        .zoom_hotkeys_enabled(true)
         .on_navigation(|url| url.scheme() == "https")
         .on_permission_request(|_view, _kind| PermissionResponse::Deny)
         .on_download(|_view, _event| false)
