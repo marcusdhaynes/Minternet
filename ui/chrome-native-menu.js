@@ -203,6 +203,7 @@
     name.value=group.name;name.maxLength=42;name.title='Rename group';
     name.setAttribute('aria-label','Group name');
     name.addEventListener('input',()=>groups()?.updateGroup(id,{name:name.value}));
+    name.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();groups()?.updateGroup(id,{name:name.value.trim()});closeFallback();}});
     const eye=document.createElement('button');
     eye.className='group-inspector-icon';
     eye.setAttribute('aria-label','Toggle group visibility');
