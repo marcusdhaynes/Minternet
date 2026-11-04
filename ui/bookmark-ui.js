@@ -109,11 +109,19 @@
       el.dataset.bookmarkId = item.id;
       el.title = item.kind === 'folder' ? textFor(item) : (item.name || item.url);
       el.setAttribute('aria-label', item.kind === 'folder' ? 'Open Folder: ' + textFor(item) : 'Open Bookmark: ' + textFor(item));
-      el.addEventListener('click', () => {
+      el.addEventListener('click', event => {
         if(item.kind === 'folder') {
           if(window.minternetMenus?.folder) window.minternetMenus.folder(item.id,el);
           else openFolder(item.id);
+        } else if(event.ctrlKey || event.metaKey || event.button===1) {
+          openInNewTab(item.id);
         } else openLink(item.url);
+      });
+      el.addEventListener('auxclick', event => {
+        if(event.button===1 && item.kind==='link'){
+          event.preventDefault();
+          openInNewTab(item.id);
+        }
       });
       el.addEventListener('contextmenu', event => {
         event.preventDefault();
@@ -150,6 +158,26 @@
     closeOverlay();
     if (!model.url(url)) return toast('Unsafe bookmark URL');
     void act('navigate', url);
+  }
+  function openInNewTab(id) {
+    const node=model.find(data,id);
+    if(!node || node.kind!=='link')return false;
+    const target=model.url(node.url);
+    if(!target)return false;
+    // Keep the current tab selected, just like Ctrl+click on a website link.
+    void act('new-background-url',target);
+    return true;
+  }
+  function deleteBookmark(id) {
+    const node=model.find(data,id);
+    if(!node)return false;
+    if(node.kind==='folder' && node.children.length &&
+      !window.confirm('Delete this folder and everything inside it?'))return false;
+    if(!model.remove(data,id))return false;
+    persist();
+    if(mode==='folder' && folderId===id)closeOverlay();
+    toast('Bookmark removed');
+    return true;
   }
   function nativeOverlay(open) {
     if (window.__TAURI__) void act('chrome-overlay', open);
@@ -432,7 +460,7 @@
   // website WebView2 pages have neither this JS context nor native menu IPC.
   window.minternetBookmarks = {
     getState: () => data,
-    edit, newFolder: parent => openEditor('folder',null,parent||null),
+    edit, deleteBookmark, openInNewTab, newFolder: parent => openEditor('folder',null,parent||null),
     savePage: parent => {
       const target=model.url(currentUrl);
       if(!target)return toast('Open an HTTPS page to bookmark it.');
