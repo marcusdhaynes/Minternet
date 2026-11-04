@@ -423,7 +423,7 @@ fn return_split_pane(app:&tauri::AppHandle,id:u32){
         let state=app.state::<Mutex<Browser>>();
         if let Ok(mut browser)=state.lock(){
             if browser.active_id==id {browser.active_id=remaining[0];}
-        }
+        };
     }
     invalidate_layout(app);
     display_active(app);
