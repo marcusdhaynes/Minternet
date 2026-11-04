@@ -201,7 +201,7 @@
     eligibleFallback();
     const signature=JSON.stringify([
       data.activeId,
-      data.tabs.map(t=>[t.id,t.title,t.url,t.private,t.pinned,t.loading,t.suspended]),
+      data.tabs.map(t=>[t.id,t.title,t.url,t.private,t.pinned,t.loading,t.suspended,t.audioPlaying,t.audioMuted]),
       state.order,
       state.groups.map(g=>[g.id,g.name,g.color,g.visible,g.collapsed]),
       Object.entries(state.assignments).sort()
@@ -272,7 +272,7 @@
   }
   function beginPointer(event){
     if(event.button!==0||event.isPrimary===false||gesture)return;
-    if(event.target.closest('.tab-close'))return;
+    if(event.target.closest('.tab-close,.tab-audio'))return;
     const tab=event.target.closest('.tab[data-tab-id]');
     const id=Number(tab?.dataset.tabId);
     if(!tab||!Number.isSafeInteger(id)||!latest.tabs.some(t=>t.id===id))return;
