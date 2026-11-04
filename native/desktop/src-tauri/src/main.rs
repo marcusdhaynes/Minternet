@@ -77,7 +77,8 @@ fn remember_undo(app:&tauri::AppHandle) {
     };
     let split_ids=app.state::<SplitState>().0.lock().map(|s|s.clone()).unwrap_or_default();
     let snapshot=UndoState{tabs,active_id,split_ids};
-    if let Ok(mut list)=app.state::<UndoHistory>().0.lock(){
+    let history=app.state::<UndoHistory>();
+    if let Ok(mut list)=history.0.lock(){
         if list.len()>=100{list.pop_front();}
         list.push_back(snapshot);
     }
@@ -410,14 +411,16 @@ fn split_rect(index:usize,count:usize,width:f64,height:f64,top:f64)->(f64,f64,f6
     }
 }
 fn invalidate_layout(app:&tauri::AppHandle){
-    if let Ok(mut cache)=app.state::<Mutex<LayoutCache>>().lock(){
+    let state=app.state::<Mutex<LayoutCache>>();
+    if let Ok(mut cache)=state.lock(){
         cache.size_and_home=None;
     }
 }
 fn prune_splits(app:&tauri::AppHandle){
     let ids={
         let state=app.state::<Mutex<Browser>>();
-        state.lock().map(|b|b.tabs.iter().map(|t|t.id).collect::<HashSet<_>>()).unwrap_or_default()
+        let result=state.lock().map(|b|b.tabs.iter().map(|t|t.id).collect::<HashSet<_>>()).unwrap_or_default();
+        result
     };
     let state=app.state::<SplitState>();
     if let Ok(mut split)=state.0.lock(){
