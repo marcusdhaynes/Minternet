@@ -900,3 +900,12 @@ html.minternet-overlay-active .group-editor-backdrop {
   backdrop-filter:none!important;
   filter:none!important;
 }
+
+/* Only shown while dragging a tab over the live page: native-style snap
+   quadrants are translucent targets, not full-page backdrops. */
+.split-drag-zones{position:fixed;z-index:295;left:0;right:0;bottom:0;display:grid;
+  grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;pointer-events:none;
+  gap:6px;padding:6px;}
+.split-drag-zone{border:1px solid #a9a0df55;border-radius:7px;background:#8491c30e;
+  transition:background 80ms ease,border-color 80ms ease;}
+.split-drag-zone.active{background:#ae9af05c;border:2px solid #d2c1ff99;}
