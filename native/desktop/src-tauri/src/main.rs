@@ -588,7 +588,7 @@ fn refresh_layout(app: &tauri::AppHandle) {
         let _ = view.set_position(LogicalPosition::new(x,y));
         let _ = view.set_size(LogicalSize::new(w.max(1.0),h.max(1.0)));
     }
-    update_split_badges(app,&window,if split_count>1 {&positions} else {&[]},width,available,top);
+    update_split_badges(app,&window,if split_count>1 {positions.as_slice()} else {&[]},width,available,top);
 }
 fn display_active(app: &tauri::AppHandle) {
     let mut targets=HashSet::new();
