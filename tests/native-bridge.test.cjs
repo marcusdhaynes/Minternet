@@ -29,5 +29,5 @@ test('one native new-tab event creates exactly one tab despite many state subscr
   assert.equal(handlers.get('minternet:open-tab').length,1);
   handlers.get('minternet:open-tab')[0]({payload:'https://example.com/login'});
   await Promise.resolve();
-  assert.equal(invocations.filter(x=>x.args?.name==='new-url').length,1);
+  assert.equal(invocations.filter(x=>x.args?.name==='new-background-url').length,1);
 });
