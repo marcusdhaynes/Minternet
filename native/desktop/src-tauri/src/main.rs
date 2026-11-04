@@ -2248,6 +2248,10 @@ fn main() {
             let pin_reopen_smoke = std::env::args().any(|a| a == "--minternet-pin-reopen-smoke");
             window.add_child(
                 WebviewBuilder::new("chrome",WebviewUrl::App("index.html".into()))
+                    // Tauri's native file-drop handler supersedes HTML5
+                    // DataTransfer on Windows. Browser/bookmark drags need
+                    // actual text/html, uri-list, and File objects in chrome.
+                    .disable_drag_drop_handler()
                     .transparent(true)
                     .on_page_load(move |view, event| {
                         if matches!(event.event(), PageLoadEvent::Finished) {
