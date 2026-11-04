@@ -649,6 +649,18 @@ fn lookup_site_icons(url:&str)->Vec<String>{
             },
             Err(_)=>break,
         };
+        // GitHub Pages redirects /Project to /Project/. Preserve the
+        // redirected page as the base for ./favicon.svg and similar links.
+        if (300..400).contains(&response.status()) {
+            let Some(location)=response.header("Location") else{break};
+            let Ok(next)=page.join(location) else{break};
+            if next.scheme()!="https" || next.host_str().is_none() ||
+                !next.username().is_empty() || next.password().is_some(){break;}
+            let host=next.host_str().unwrap_or_default().to_ascii_lowercase();
+            if host=="localhost" || host.ends_with(".localhost") ||
+                host.ends_with(".local") || host.parse::<std::net::IpAddr>().is_ok(){break;}
+            page=next;continue;
+        }
         let mime=response.header("Content-Type").unwrap_or("");
         if !mime.to_ascii_lowercase().contains("text/html"){break;}
         let mut data=Vec::new();
