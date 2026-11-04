@@ -482,6 +482,33 @@ fn parse_address_with_engine(text: &str, engine: &str) -> Result<Option<tauri::U
     Ok(Some(url))
 }
 
+#[cfg(test)]
+mod search_provider_tests {
+    use super::parse_address_with_engine;
+    #[test]
+    fn google_is_default_and_remains_https() {
+        let url=parse_address_with_engine("where to eat", "google").unwrap().unwrap();
+        assert_eq!(url.as_str(),"https://www.google.com/search?q=where%20to%20eat");
+        assert_eq!(parse_address_with_engine("hello", "invalid").unwrap().unwrap().host_str(),Some("www.google.com"));
+    }
+    #[test]
+    fn chatgpt_routes_prompts_with_search_hint() {
+        let url=parse_address_with_engine("science & history", "chatgpt").unwrap().unwrap();
+        assert_eq!(url.as_str(),"https://chatgpt.com/?q=science%20%26%20history&hints=search");
+    }
+    #[test]
+    fn private_chatgpt_adds_temporary_flag_and_escapes_input() {
+        let url=parse_address_with_engine("cats & dogs", "chatgpt-private").unwrap().unwrap();
+        assert_eq!(url.as_str(),"https://chatgpt.com/?temporary-chat=true&q=cats%20%26%20dogs&hints=search");
+    }
+    #[test]
+    fn explicit_secure_urls_ignore_engine_preference() {
+        for engine in ["google","chatgpt","chatgpt-private"]{
+            assert_eq!(parse_address_with_engine("https://example.com/docs",engine).unwrap().unwrap().as_str(),"https://example.com/docs");
+            assert!(parse_address_with_engine("javascript:alert(1)",engine).is_err());
+        }
+    }
+}
 fn percent_encode_search(text: &str) -> String {
     let mut output = String::new();
     for byte in text.as_bytes() {
