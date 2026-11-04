@@ -418,6 +418,38 @@ fn split_rect(index:usize,count:usize,width:f64,height:f64,top:f64,
         _=>(0.0,top,width,height)
     }
 }
+
+#[cfg(test)]
+mod split_layout_tests {
+    use super::split_rect;
+    #[test]
+    fn two_way_split_fills_entire_page() {
+        assert_eq!(split_rect(0,2,1000.0,800.0,52.0,0.5,0.5),
+                   (0.0,52.0,500.0,800.0));
+        assert_eq!(split_rect(1,2,1000.0,800.0,52.0,0.5,0.5),
+                   (500.0,52.0,500.0,800.0));
+    }
+    #[test]
+    fn four_quadrants_fit_without_overlap_and_respect_resize() {
+        let expected=[
+            (0.0,52.0,600.0,280.0),
+            (600.0,52.0,400.0,280.0),
+            (0.0,332.0,600.0,520.0),
+            (600.0,332.0,400.0,520.0)
+        ];
+        for i in 0..4 {
+            assert_eq!(split_rect(i,4,1000.0,800.0,52.0,0.6,0.35),expected[i]);
+        }
+    }
+    #[test]
+    fn three_panes_put_one_full_height_on_left() {
+        assert_eq!(split_rect(0,3,1000.0,800.0,52.0,0.5,0.5),
+                   (0.0,52.0,500.0,800.0));
+        assert_eq!(split_rect(2,3,1000.0,800.0,52.0,0.5,0.5),
+                   (500.0,452.0,500.0,400.0));
+    }
+}
+
 fn return_split_pane(app:&tauri::AppHandle,id:u32){
     let remaining={
         let state=app.state::<SplitState>();
