@@ -361,8 +361,9 @@
   document.addEventListener('dragover',event=>{
     if(!externalTransfer(event.dataTransfer))return;
     const parent=dropTarget(event);
-    if(parent===null){clearDrop();return;}
+    // Browser-chrome must never navigate to dropped external files or URLs.
     event.preventDefault();
+    if(parent===null){clearDrop();return;}
     event.dataTransfer.dropEffect='copy';
     clearDrop();
     hoverTarget=event.target.closest('.bookmark-item,.bookmark-tree-line,.bookmark-folder-row')
@@ -372,8 +373,9 @@
   },true);
   document.addEventListener('drop',event=>{
     const parent=dropTarget(event);
-    if(parent===null||!externalTransfer(event.dataTransfer))return;
+    if(!externalTransfer(event.dataTransfer))return;
     event.preventDefault();event.stopPropagation();
+    if(parent===null){clearDrop();return;}
     // Capture text formats synchronously: browser DataTransfer is cleared after
     // the drop event finishes, even while files are read asynchronously.
     const dt=event.dataTransfer;
