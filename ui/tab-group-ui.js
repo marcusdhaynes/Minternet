@@ -12,10 +12,43 @@
   let gesture=null, ghost=null, splitPreview=null, dragOverlay=false, suppressedClick=null;
   const ungroupTarget=$('tabUngroupDrop');
   const tabStrip=$('tabs');
+  const groupUndoJson=()=>JSON.stringify({
+    groups:state.groups,assignments:state.assignments,order:state.order
+  });
+  let lastGroupUndoJson=groupUndoJson();
+  let colorUndoActive=false,colorUndoRecorded=false;
+  function beginColorUndo(){colorUndoActive=true;colorUndoRecorded=false;}
+  function endColorUndo(){colorUndoActive=false;colorUndoRecorded=false;}
+  function restoreUndoGroup(previous){
+    try {
+      if(typeof previous!=='string'||previous.length>120000)return false;
+      const raw=JSON.parse(previous);
+      const hydrated=model.hydrate({groups:raw.groups});
+      const allowed=new Set(hydrated.groups.map(g=>g.id));
+      const ids=new Set(latest.tabs.map(t=>t.id));
+      const assignments=Object.create(null);
+      for(const [rawId,gid] of Object.entries(raw.assignments||{})){
+        const id=Number(rawId);
+        if(ids.has(id)&&allowed.has(gid))assignments[String(id)]=gid;
+      }
+      state.groups=hydrated.groups;
+      state.assignments=assignments;
+      state.order=Array.isArray(raw.order)?raw.order.filter(id=>ids.has(id)):[];
+      model.prune(state,latest.tabs.map(tab=>tab.id));
+      persist(true);
+      return true;
+    }catch{return false;}
+  }
   const palette={
     red:'#ea5967',orange:'#f39b52',yellow:'#f1ce59',green:'#65c98a',blue:'#6b9ff0',purple:'#ad8df6',pink:'#e889c9',white:'#f2f0f8',black:'#202235',violet:'#ad9cf9',teal:'#69d4c9',amber:'#e8c16d',slate:'#a1adbf'
   };
-  function persist() {
+  function persist(skipUndo=false) {
+    const current=groupUndoJson();
+    if(!skipUndo&&current!==lastGroupUndoJson&&(!colorUndoActive||!colorUndoRecorded)){
+      if(window.__TAURI__)void api.command('undo-ui-checkpoint',{kind:'groups',before:lastGroupUndoJson});
+      if(colorUndoActive)colorUndoRecorded=true;
+    }
+    lastGroupUndoJson=current;
     try {const stored=JSON.parse(model.serialize(state));stored.slots=latest.tabs.filter(t=>!t.private).map(t=>state.assignments[String(t.id)]||null);stored.visualOrder=state.order.map(id=>latest.tabs.filter(t=>!t.private).findIndex(t=>t.id===id)).filter(i=>i>=0);localStorage.setItem(KEY,JSON.stringify(stored));}
     catch { window.minternetToast?.('Cannot save tab groups locally.');}
     repaint();
@@ -257,6 +290,9 @@
       items.push(item);
     }
     host.replaceChildren(...items);
+    // Native tab restoration/closing may prune stale group memberships;
+    // synchronize the baseline without recording a phantom user action.
+    lastGroupUndoJson=groupUndoJson();
   }
   function attachTabMenu(element,tabId){
     // HTML5 drag/drop on Windows WebView2 shows a forbidden cursor because the
@@ -443,6 +479,7 @@
     getState:()=>state, getLatest:()=>latest, get:model.get.bind(null,state),
     displayName, groupColor, createGroup, updateGroup, toggleVisible, toggleCollapsed,
     assign, ungroup, pin, removeGroup, openEditor, closeEditor, renderTabs, repaint,
-    isVisibleTab:id=>model.isVisibleTab(state,id)
+    isVisibleTab:id=>model.isVisibleTab(state,id),
+    restoreUndoGroup,beginColorUndo,endColorUndo
   };
 })();
