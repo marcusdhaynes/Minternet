@@ -71,8 +71,12 @@
      }
      return null;
    }
-   const roots=Array.isArray(raw)?raw:Array.isArray(raw?.children)?raw.children
-     :raw?.roots?Object.values(raw.roots):raw?.items?raw.items:[raw];
+   // A dragged Firefox container IS the folder. A generic export wrapper
+   // is not: its children are the actual import roots.
+   const isFolder=raw?.type==='text/x-moz-place-container'||raw?.type==='folder';
+   const roots=Array.isArray(raw)?raw:raw?.roots?Object.values(raw.roots)
+     :Array.isArray(raw?.items)?raw.items
+     :Array.isArray(raw?.children)&&!isFolder?raw.children:[raw];
    return roots.flatMap(item=>{
      if(Array.isArray(item))return item.map(x=>convert(x)).filter(Boolean);
      const result=convert(item);
