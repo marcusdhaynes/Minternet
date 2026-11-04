@@ -260,6 +260,156 @@
     toast('Bookmark removed');
     return true;
   }
+  // External browser drags arrive as HTML links, URI lists, Firefox
+  // bookmark-place objects, or file/directory entries depending on the source.
+  // Import into a detached validated tree and save once: one Undo operation.
+  const imported=window.MinternetBookmarkImport;
+  function appendImported(items,parentId=null){
+    if(!imported||!Array.isArray(items)||!items.length)return 0;
+    const draftState=model.hydrate(JSON.stringify(data));
+    let added=0;
+    const limit=2000;
+    function insert(node,parent,depth){
+      if(!node||depth>11||added>=limit)return;
+      if(node.kind==='folder'){
+        const created=model.add(draftState,'folder',parent,{name:node.name||'Imported Folder'});
+        if(!created)return;
+        added++;
+        for(const child of node.children||[])insert(child,created.id,depth+1);
+      }else if(node.kind==='link'){
+        if(!model.url(node.url))return;
+        const created=model.add(draftState,'link',parent,{name:node.name,url:node.url});
+        if(created)added++;
+      }
+    }
+    for(const item of items)insert(item,parentId,0);
+    if(!added)return 0;
+    data=draftState;
+    persist();
+    return added;
+  }
+  async function readImportedFile(file){
+    if(!file||file.size>2_000_000)return [];
+    const text=await file.text();
+    return imported?.parseFile(file.name,text)||[];
+  }
+  function readDirectory(entry,depth=0){
+    if(depth>9)return Promise.resolve([]);
+    if(entry.isFile)return new Promise(resolve=>entry.file(async file=>{
+      try {resolve(await readImportedFile(file));}
+      catch{resolve([]);}
+    },()=>resolve([])));
+    if(!entry.isDirectory)return Promise.resolve([]);
+    const reader=entry.createReader(),children=[];
+    return new Promise(resolve=>{
+      const read=()=>{
+        reader.readEntries(async entries=>{
+          if(!entries.length){resolve([{
+            kind:'folder',name:entry.name,children
+          }]);return;}
+          for(const child of entries.slice(0,300)){
+            children.push(...await readDirectory(child,depth+1));
+          }
+          if(children.length>=1000){resolve([{kind:'folder',name:entry.name,children}]);return;}
+          read();
+        },()=>resolve([]));
+      };
+      read();
+    });
+  }
+  async function importedFromTransfer(dt){
+    const files=Array.from(dt.files||[]);
+    const entries=Array.from(dt.items||[]).map(item=>
+      item.webkitGetAsEntry?.()).filter(Boolean);
+    if(entries.some(entry=>entry.isDirectory)){
+      const all=[];
+      for(const entry of entries.slice(0,50))all.push(...await readDirectory(entry));
+      return all;
+    }
+    if(files.length){
+      const all=[];
+      for(const file of files.slice(0,100))all.push(...await readImportedFile(file));
+      if(all.length)return all;
+    }
+    return imported?.parseTransfer(dt)||[];
+  }
+  function dropTarget(event){
+    const target=event.target;
+    if(!target?.closest)return null;
+    const bookmark=target.closest('.bookmark-item, .bookmark-tree-line, .bookmark-folder-row');
+    if(bookmark){
+      const id=bookmark.dataset.bookmarkId;
+      const node=id&&model.find(data,id);
+      if(node?.kind==='folder')return id;
+    }
+    if(target.closest('#bookmarkFolderMenu')&&mode==='folder')return folderId;
+    if(target.closest('#bookmarkBar,#bookmarkManager,#bookmarkTree,#bookmarkItems'))return '';
+    return null;
+  }
+  function externalTransfer(dt){
+    const types=Array.from(dt?.types||[]);
+    return types.some(type=>['Files','text/uri-list','text/html','text/plain',
+      'text/x-moz-url','text/x-moz-place','application/x-moz-place-container',
+      'text/x-moz-place-container'].includes(type));
+  }
+  let hoverTarget=null;
+  function clearDrop(){
+    hoverTarget?.classList.remove('bookmark-drop-target');
+    hoverTarget=null;
+    document.documentElement.classList.remove('bookmark-drag-over');
+  }
+  document.addEventListener('dragover',event=>{
+    if(!externalTransfer(event.dataTransfer))return;
+    const parent=dropTarget(event);
+    if(parent===null){clearDrop();return;}
+    event.preventDefault();
+    event.dataTransfer.dropEffect='copy';
+    clearDrop();
+    hoverTarget=event.target.closest('.bookmark-item,.bookmark-tree-line,.bookmark-folder-row')
+      || event.target.closest('#bookmarkManager,#bookmarkBar,#bookmarkFolderMenu');
+    hoverTarget?.classList.add('bookmark-drop-target');
+    document.documentElement.classList.add('bookmark-drag-over');
+  },true);
+  document.addEventListener('drop',event=>{
+    const parent=dropTarget(event);
+    if(parent===null||!externalTransfer(event.dataTransfer))return;
+    event.preventDefault();event.stopPropagation();
+    // Capture text formats synchronously: browser DataTransfer is cleared after
+    // the drop event finishes, even while files are read asynchronously.
+    const dt=event.dataTransfer;
+    const plain=imported?.parseTransfer(dt)||[];
+    const files=Array.from(dt.files||[]);
+    const entries=Array.from(dt.items||[]).map(item=>item.webkitGetAsEntry?.()).filter(Boolean);
+    clearDrop();
+    void (async()=>{
+      let items=plain;
+      if(entries.some(entry=>entry.isDirectory)){
+        items=[];
+        for(const entry of entries.slice(0,50))items.push(...await readDirectory(entry));
+      }else if(files.length){
+        items=[];
+        for(const file of files.slice(0,100))items.push(...await readImportedFile(file));
+        if(!items.length)items=plain;
+      }
+      const added=appendImported(items,parent||null);
+      toast(added?'Imported '+added+' bookmark'+(added===1?'':'s')+' / folders':
+        'No transferable bookmarks found. Export bookmarks as HTML and drop that file here.');
+    })();
+  },true);
+  document.addEventListener('dragend',clearDrop,true);
+  document.addEventListener('dragleave',event=>{
+    if(!event.relatedTarget)clearDrop();
+  },true);
+  $('bookmarkImportFile')?.addEventListener('click',()=>$('bookmarkImportInput')?.click());
+  $('bookmarkImportInput')?.addEventListener('change',async event=>{
+    let items=[];
+    for(const file of Array.from(event.target.files||[]).slice(0,100)){
+      items.push(...await readImportedFile(file));
+    }
+    const added=appendImported(items,mode==='folder'?folderId:null);
+    toast(added?'Imported '+added+' items':'No supported bookmarks found in selected files');
+    event.target.value='';
+  });
   function nativeOverlay(open) {
     if (window.__TAURI__) void act('chrome-overlay', open);
   }
@@ -300,6 +450,7 @@
   function entryForMenu(item) {
     const row = document.createElement('div');
     row.className = 'bookmark-folder-row';
+    row.dataset.bookmarkId=item.id;
     const open = document.createElement('button');
     open.className = 'bookmark-folder-entry';
     open.type = 'button';
@@ -350,6 +501,7 @@
       for (const item of items) {
         const row = document.createElement('div');
         row.className = 'bookmark-tree-line';
+        row.dataset.bookmarkId=item.id;
         row.style.paddingLeft = Math.min(160, depth * 13 + 4) + 'px';
         const icon = iconNode(item);
         const label = document.createElement('button');
