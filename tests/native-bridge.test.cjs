@@ -31,3 +31,22 @@ test('one native new-tab event creates exactly one tab despite many state subscr
   await Promise.resolve();
   assert.equal(invocations.filter(x=>x.args?.name==='new-background-url').length,1);
 });
+
+test('links opened from a private tab stay private in the background',async()=>{
+  let listener;const commands=[];
+  const window={__TAURI__:{
+    event:{listen:async(name,callback)=>{if(name==='minternet:open-tab')listener=callback;return ()=>{};}},
+    core:{invoke:async(name,args)=>{
+      if(name==='browser_action')commands.push(args);
+      return {tabs:[],activeId:null};
+    }}
+  }};
+  vm.runInNewContext(bridge,{window,document:{documentElement:{classList:{toggle(){}}}}});
+  await Promise.resolve();await Promise.resolve();
+  listener({payload:{url:'https://example.com/',private:true}});
+  await Promise.resolve();
+  assert.equal(commands[0].name,'new-private-background-url');
+  listener({payload:{url:'https://example.org/',private:false}});
+  await Promise.resolve();
+  assert.equal(commands[1].name,'new-background-url');
+});
