@@ -175,11 +175,9 @@
     node.setAttribute('aria-label',(g.collapsed?'Expand':'Collapse')+' Tab Group: '+displayName(g));
     node.setAttribute('aria-expanded',String(!g.collapsed));
     node.title=displayName(g)+' · '+tabs.length+' tabs · Click to '+(g.collapsed?'expand':'collapse');
-    const dot=document.createElement('span');
-    dot.className='group-chip-symbol';dot.setAttribute('aria-hidden','true');dot.textContent=g.collapsed?'▸':'▾';
     const name=document.createElement('span');name.className='group-chip-label';name.textContent=g.name;
     const count=document.createElement('span');count.className='group-chip-count';count.textContent=String(tabs.length);
-    node.append(dot,name,count);
+    node.append(name,count);
     node.addEventListener('click',()=>toggleCollapsed(g.id));
     node.addEventListener('contextmenu',event=>{
       event.preventDefault();
