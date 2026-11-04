@@ -54,7 +54,7 @@
         <button id="reload" class="icon-btn" title="Reload" aria-label="Reload">↻</button>
       </div>
       <form id="addressForm" class="address-wrap" autocomplete="off">
-        <span id="connectionIcon" class="connection-icon" title="HTTPS-only navigation">◇</span>
+        <button id="connectionIcon" class="connection-icon search-provider-button" type="button" aria-label="Search Engine: Google" aria-haspopup="menu" aria-expanded="false" title="Google · Click to choose search engine"></button>
         <input id="address" autocomplete="off" autocapitalize="none" spellcheck="false" type="text" placeholder="Search privately or enter a secure address" aria-label="Search or enter address">
         <span id="addressState" class="address-state"></span>
         <button type="button" id="bookmarkThisPage" class="address-star" title="Bookmark This Page (Ctrl+D)" aria-label="Bookmark This Page">☆</button>
@@ -87,11 +87,8 @@
         <span><strong>Default Search Engine</strong><small>Plain text in the address bar searches here</small></span>
         <select id="defaultSearchEngine" aria-label="Default Search Engine">
           <option value="google">Google</option>
-          <option value="duckduckgo">DuckDuckGo</option>
-          <option value="bing">Bing</option>
-          <option value="brave">Brave Search</option>
-          <option value="startpage">Startpage</option>
-          <option value="ecosia">Ecosia</option>
+          <option value="chatgpt">ChatGPT</option>
+          <option value="chatgpt-private">ChatGPT (Temporary Chat)</option>
         </select>
       </label>
       <div class="zoom-setting-row" aria-label="Page Zoom">
