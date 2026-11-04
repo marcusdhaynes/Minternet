@@ -1211,6 +1211,31 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 }
             }
         }
+        "reload-tab" | "unload-tab" => {
+            let id=value.as_u64().ok_or("Invalid tab ID")? as u32;
+            let (label,is_active,url)={
+                let state=app.state::<Mutex<Browser>>();
+                let mut b=state.lock().map_err(|e|e.to_string())?;
+                let is_active=b.active_id==id;
+                if name=="unload-tab" && is_active {
+                    return Err("Select another tab before unloading this one".into());
+                }
+                let tab=b.tabs.iter_mut().find(|t|t.id==id).ok_or("Tab not found")?;
+                let label=if name=="unload-tab"{tab.view.take()}else{tab.view.clone()};
+                (label,is_active,tab.url.clone())
+            };
+            if let Some(label)=label{
+                if let Some(view)=app.get_webview(&label){
+                    if name=="unload-tab"{view.close().map_err(|e|e.to_string())?;}
+                    else{view.reload().map_err(|e|e.to_string())?;}
+                }
+            }else if name=="reload-tab" && is_active && url!=HOME{
+                let dest=tauri::Url::parse(&url).map_err(|e|e.to_string())?;
+                navigate_tab(&app,id,Some(dest),false)?;
+            }
+            notify(&app);
+            return Ok(json!({"ok":true}));
+        }
         "reload" => {
             let label = {
                 let state=app.state::<Mutex<Browser>>();
