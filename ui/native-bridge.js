@@ -12,7 +12,7 @@ if (window.__TAURI__ && !window.minternet) {
     api.event.listen('minternet:open-tab',event=>{
       const url=event.payload;
       if(typeof url==='string'&&url.startsWith('https://')){
-        void api.core.invoke('browser_action',{name:'new-url',value:url}).catch(()=>{});
+        void api.core.invoke('browser_action',{name:'new-background-url',value:url}).catch(()=>{});
       }
     }).catch(()=>{popupListenerStarted=false;});
   }
