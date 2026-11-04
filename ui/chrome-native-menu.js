@@ -97,6 +97,11 @@
       sub('▣  Move To Tab Group',assignOptions),
       ...(belonging?[item('↙  Remove From '+g.displayName(belonging),()=>g.ungroup(tabId))]:[]),
       ...(tab.url?.startsWith('https://')?[item('☆  Bookmark Page',()=>window.minternet?.command('activate',tabId).then(()=>b?.toggleBookmark()))]:[]),
+      sub('▣  Split View',[
+        item('Snap This Tab Into Split',()=>window.minternet?.command('split-add',tabId)),
+        item('Return This Tab To Single View',()=>window.minternet?.command('split-remove',tabId)),
+        item('Exit Split View',()=>window.minternet?.command('split-clear'))
+      ]),
       sep(),
       sub('×  Close…',[
         item('Close Tab',()=>window.minternet?.command('close',tabId)),
