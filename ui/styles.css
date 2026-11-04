@@ -884,3 +884,19 @@ body.tab-dragging .tab-drag-source {opacity:.48;box-shadow:inset 0 0 0 1px #aab5
 .tab-audio:hover{background:#645e9499;color:#fff;}
 .tab.pinned-tab .tab-audio{margin:0;flex-basis:14px;width:14px;}
 .tab.pinned-tab:has(.tab-audio) .tab-symbol{display:none;}
+
+/* Overlay mode is transparent all the way down to the live child WebView.
+   Never darken, blur, repaint, or resize the website just to show a menu. */
+html.minternet-overlay-active,
+html.minternet-overlay-active body {
+  background:transparent!important;
+  backdrop-filter:none!important;
+}
+html.minternet-overlay-active .bookmark-backdrop,
+html.minternet-overlay-active .vault-backdrop,
+html.minternet-overlay-active .group-editor-backdrop {
+  background:transparent!important;
+  opacity:1!important;
+  backdrop-filter:none!important;
+  filter:none!important;
+}
