@@ -44,5 +44,11 @@
       event.preventDefault();undo?.click();
     }
   },true);
+  // WebView2 supplies the audio state; no page JavaScript injection.
+  if(window.__TAURI__){
+    const poll=()=>{if(!document.hidden)void api.command('audio-poll');};
+    setInterval(poll,2500);
+    poll();
+  }
   window.minternetZoom={get:()=>zoom,set:setZoom};
 })();
