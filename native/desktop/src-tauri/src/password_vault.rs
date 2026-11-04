@@ -16,6 +16,40 @@ pub struct Entry {
     pub autofill: bool,
 }
 fn default_autofill() -> bool { true }
+#[derive(Clone, Serialize, Deserialize)]
+pub struct PaymentCard {
+    pub id:String,
+    pub label:String,
+    pub name:String,
+    pub number:String,
+    pub month:u8,
+    pub year:u16,
+    pub postal:String,
+}
+impl Drop for PaymentCard {
+    fn drop(&mut self){self.number.zeroize();self.name.zeroize();self.postal.zeroize();}
+}
+#[derive(Serialize,Deserialize)]
+#[serde(untagged)]
+enum VaultPayload {
+    Legacy(Vec<Entry>),
+    Current{logins:Vec<Entry>,cards:Vec<PaymentCard>}
+}
+fn valid_pan(input:&str)->Option<String>{
+    if input.len()>40{return None;}
+    if !input.chars().all(|c|c.is_ascii_digit()||c==' '||c=='-'){return None;}
+    let digits=input.chars().filter(|c|c.is_ascii_digit()).collect::<String>();
+    if !(12..=19).contains(&digits.len()) {return None;}
+    let mut sum=0u32;
+    for (i,byte) in digits.bytes().rev().enumerate(){
+        let mut n=(byte-b'0') as u32;
+        if i%2==1{n*=2;if n>9{n-=9;}}
+        sum+=n;
+    }
+    if sum%10!=0{return None;}
+    Some(digits)
+}
+
 #[derive(Serialize, Deserialize)]
 struct FileData {
     version: u8,
@@ -28,6 +62,7 @@ pub struct Vault {
     key: Option<[u8; 32]>,
     salt: Option<[u8; 16]>,
     entries: Vec<Entry>,
+    cards: Vec<PaymentCard>,
 }
 impl Drop for Vault {
     fn drop(&mut self) { self.lock(); }
@@ -38,6 +73,7 @@ impl Vault {
         if let Some(mut key)=self.key.take(){key.zeroize();}
         for entry in &mut self.entries {entry.password.zeroize();entry.username.zeroize();}
         self.entries.clear();
+        self.cards.clear();
         self.salt=None;
     }
     pub fn list(&self) -> Result<serde_json::Value,String> {
@@ -76,17 +112,22 @@ impl Vault {
         let mut plaintext=match cipher.decrypt(Nonce::from_slice(&disk.nonce),disk.ciphertext.as_ref()){
             Ok(v)=>v,Err(_)=>{key.zeroize();return Err("Incorrect master password or vault authentication failed".into());}
         };
-        let parsed=serde_json::from_slice::<Vec<Entry>>(&plaintext);
+        let parsed=serde_json::from_slice::<VaultPayload>(&plaintext);
         plaintext.zeroize();
-        let entries=parsed.map_err(|_|"Invalid vault entries".to_string())?;
-        if entries.len()>MAX_ENTRIES{return Err("Too many vault entries".into());}
-        self.key=Some(key);self.salt=Some(disk.salt);self.entries=entries;
+        let (entries,cards)=match parsed.map_err(|_|"Invalid vault entries".to_string())?{
+            VaultPayload::Legacy(entries)=>(entries,Vec::new()),
+            VaultPayload::Current{logins,cards}=>(logins,cards)
+        };
+        if entries.len()>MAX_ENTRIES||cards.len()>50{return Err("Vault capacity exceeded".into());}
+        self.key=Some(key);self.salt=Some(disk.salt);self.entries=entries;self.cards=cards;
         Ok(())
     }
     pub fn save(&self,path:&PathBuf)->Result<(),String>{
         let key=self.key.as_ref().ok_or("Vault locked")?;
         let salt=self.salt.ok_or("Missing vault salt")?;
-        let mut plaintext=serde_json::to_vec(&self.entries).map_err(|e|e.to_string())?;
+        let mut plaintext=serde_json::to_vec(&VaultPayload::Current{
+            logins:self.entries.clone(),cards:self.cards.clone()
+        }).map_err(|e|e.to_string())?;
         let mut nonce=[0u8;12];OsRng.fill_bytes(&mut nonce);
         let cipher=ChaCha20Poly1305::new_from_slice(key).map_err(|_|"Crypto initialization failed")?;
         let encrypted=cipher.encrypt(Nonce::from_slice(&nonce),plaintext.as_ref())
@@ -114,6 +155,37 @@ impl Vault {
         }
         Ok(())
     }
+    pub fn list_cards(&self)->Result<serde_json::Value,String>{
+        if !self.unlocked(){return Err("Unlock the encrypted vault first".into());}
+        Ok(serde_json::json!(self.cards.iter().map(|card|serde_json::json!({
+            "id":card.id,"label":card.label,"name":card.name,
+            "last4":card.number.chars().rev().take(4).collect::<String>().chars().rev().collect::<String>(),
+            "month":card.month,"year":card.year,"postal":card.postal
+        })).collect::<Vec<_>>()))
+    }
+    pub fn put_card(&mut self,label:String,name:String,number:String,
+                    month:u8,year:u16,postal:String)->Result<String,String>{
+        if !self.unlocked(){return Err("Unlock the encrypted vault first".into());}
+        if self.cards.len()>=50{return Err("Maximum 50 payment methods".into());}
+        if label.len()>80||name.trim().is_empty()||name.len()>120||
+           postal.len()>40||!(1..=12).contains(&month)||
+           !(2020..=2100).contains(&year) {return Err("Invalid card details".into());}
+        let number=valid_pan(&number).ok_or("Invalid card number (Luhn check)")?;
+        let mut bytes=[0u8;12];OsRng.fill_bytes(&mut bytes);
+        let id=bytes.iter().map(|b|format!("{b:02x}")).collect::<String>();
+        self.cards.push(PaymentCard{id:id.clone(),label,name,number,month,year,postal});
+        Ok(id)
+    }
+    pub fn remove_card(&mut self,id:&str)->Result<(),String>{
+        if !self.unlocked(){return Err("Unlock the encrypted vault first".into());}
+        let i=self.cards.iter().position(|c|c.id==id).ok_or("Card not found")?;
+        self.cards.remove(i);
+        Ok(())
+    }
+    pub fn card(&self,id:&str)->Option<PaymentCard>{
+        if !self.unlocked(){return None;}
+        self.cards.iter().find(|c|c.id==id).cloned()
+    }
     pub fn remove(&mut self,origin:&str,username:&str)->Result<(),String>{
         if !self.unlocked(){return Err("Vault locked".into());}
         let i=self.entries.iter().position(|e|e.origin==origin&&e.username==username)
@@ -134,6 +206,37 @@ pub fn origin(address:&str)->Result<String,String>{
     Ok(url.origin().ascii_serialization())
 }
 
+#[cfg(test)]
+mod card_tests{
+    use super::*;
+    #[test]
+    fn validate_luhn_and_reject_card_secrets(){
+        assert_eq!(valid_pan("4111 1111 1111 1111"),Some("4111111111111111".into()));
+        assert!(valid_pan("4111 1111 1111 1112").is_none());
+        assert!(valid_pan("4111<script>alert(1)</script>").is_none());
+    }
+    #[test]
+    fn payment_methods_are_encrypted_and_never_list_pan(){
+        let mut salt=[0u8;6];OsRng.fill_bytes(&mut salt);
+        let name=format!("card-vault-test-{}",salt.iter().map(|b|format!("{b:02x}")).collect::<String>());
+        let path=std::env::temp_dir().join(name);
+        let mut vault=Vault::default();
+        vault.unlock(&path,"correct horse battery staple",true).unwrap();
+        let id=vault.put_card("Personal".into(),"Example User".into(),
+            "4111111111111111".into(),12,2030,"90210".into()).unwrap();
+        let cards=vault.list_cards().unwrap().to_string();
+        assert!(cards.contains("1111"));
+        assert!(!cards.contains("4111111111111111"));
+        vault.save(&path).unwrap();
+        let raw=fs::read(&path).unwrap();
+        assert!(!String::from_utf8_lossy(&raw).contains("4111111111111111"));
+        vault.lock();
+        assert!(vault.list_cards().is_err());
+        vault.unlock(&path,"correct horse battery staple",false).unwrap();
+        assert_eq!(vault.card(&id).unwrap().number,"4111111111111111");
+        let _=fs::remove_file(path);
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
