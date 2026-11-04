@@ -361,6 +361,13 @@
     const bounds=button.getBoundingClientRect();
     return {x:bounds.left,y:bounds.bottom};
   }
+  function emptyTabBarMenu(){
+    return [
+      item('＋  New Group',()=>groups()?.openEditor(null,false)),
+      item('＋  New Tab',()=>window.minternet?.command('new')),
+      sub('▣  Tab Groups',barGroupItems())
+    ];
+  }
   const handlers={
     folder:(id,button)=>popup(folderItems(id),fromElement(button),window.__minternetMenuSmoke?{}:{custom:true,heading:'FOLDER'}),
     bookmark:(id,event)=>popup(barMenu(id),{x:event.clientX,y:event.clientY},{custom:true,heading:'BOOKMARK FOLDER'}),
@@ -369,17 +376,14 @@
     group:(id,point)=>groupInspector(id,point),
     tab:(id,point)=>{
       // Blank bar space must not accidentally act on the currently active tab.
-      if(id==null)return popup([
-        item('＋  New Group',()=>groups()?.openEditor(null,false)),
-        item('＋  New Tab',()=>window.minternet?.command('new')),
-        sub('▣  Tab Groups',barGroupItems())
-      ],point,{custom:true,compactTab:true,heading:'TAB BAR'});
+      if(id==null)return popup(emptyTabBarMenu(),point,{custom:true,compactTab:true,heading:'TAB BAR'});
       const chosen=id;
       if(!groups()?.getLatest().tabs.some(tab=>tab.id===chosen))
         return popup([disabled('Tab no longer exists')],point,{custom:true,compactTab:true,heading:'TAB'});
       return popup(tabMenu(chosen),point,{custom:true,compactTab:true,heading:'TAB',quickActions:tabQuickActions(chosen)});
     },
     inspectTab:id=>tabMenu(id),
+    inspectEmptyTabBar:emptyTabBarMenu,
     inspectTabQuick:id=>tabQuickActions(id),
     inspectBar:()=>barMenu(),
     inspectFolder:id=>folderItems(id),
