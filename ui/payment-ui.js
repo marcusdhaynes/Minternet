@@ -5,6 +5,7 @@
 (() => {
   const $=id=>document.getElementById(id);
   const trigger=$('paymentManagerOpen');
+  const toolbar=$('paymentToolbarButton');
   if(!trigger||!window.minternet)return;
   const invoke=async(name,value)=>{
     try{
@@ -25,6 +26,7 @@
   function report(text){if(status)status.textContent=String(text||'');}
   function close(){
     if(!screen)return;
+    toolbar?.setAttribute('aria-expanded','false');
     screen.remove();screen=null;panel=null;auth=null;form=null;list=null;status=null;master=null;
     editingId=null;editFields=null;
     if(window.__TAURI__)void window.minternet.command('chrome-overlay',false);
@@ -110,6 +112,7 @@
     window.minternetHistory?.close?.();
     window.minternetBookmarks?.closeOverlay();
     screen=create('section','payment-screen');
+    toolbar?.setAttribute('aria-expanded','true');
     screen.setAttribute('aria-label','Encrypted Payment Methods');
     const backdrop=create('div','payment-backdrop');
     backdrop.addEventListener('click',close);
@@ -200,6 +203,7 @@
     (locked?master:name.input).focus();
   }
   trigger.addEventListener('click',()=>void open());
+  toolbar?.addEventListener('click',()=>void open());
   window.addEventListener('keydown',event=>{
     if(event.key==='Escape'&&screen){event.preventDefault();close();}
   });
