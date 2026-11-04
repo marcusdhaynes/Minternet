@@ -646,6 +646,45 @@ fn visible_split(app:&tauri::AppHandle)->Vec<u32>{
     if !list.contains(&b.active_id){return Vec::new();}
     list.into_iter().filter(|id|b.tabs.iter().any(|t|t.id==*id && t.url!=HOME)).take(4).collect()
 }
+// Child WebView2 windows have their own OS z-order. CSS z-index alone cannot
+// paint above a later-created website WebView. On Windows WRY creates each
+// top-level child controller with the WRY_WEBVIEW class; the browser chrome
+// is the only one positioned at the top-left of the host client area.
+// Raise that child only (not the application above other applications) when
+// a trusted popup is open, leaving the live website visible underneath.
+#[cfg(windows)]
+fn raise_chrome_above_site(app:&tauri::AppHandle) {
+    use windows::Win32::Foundation::{RECT,HWND};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        FindWindowExW,GetWindowRect,SetWindowPos,HWND_TOP,
+        SWP_NOACTIVATE,SWP_NOMOVE,SWP_NOSIZE,
+    };
+    use windows::core::{w,PCWSTR};
+    let Some(window)=app.get_window("main") else {return};
+    let Ok(parent)=window.hwnd() else {return};
+    let Ok(origin)=window.inner_position() else {return};
+    let mut previous:Option<HWND>=None;
+    // Bounded to avoid infinite scanning if a third-party extension introduces
+    // unexpected child windows. No site HWND is ever resized or hidden.
+    for _ in 0..64 {
+        let Ok(child)=(unsafe {
+            FindWindowExW(Some(parent),previous,w!("WRY_WEBVIEW"),PCWSTR::null())
+        }) else {break};
+        previous=Some(child);
+        let mut bounds=RECT::default();
+        if unsafe {GetWindowRect(child,&mut bounds)}.is_err(){continue;}
+        if (bounds.left-origin.x).abs()<=3 && (bounds.top-origin.y).abs()<=3 {
+            let _=unsafe {
+                SetWindowPos(child,Some(HWND_TOP),0,0,0,0,
+                    SWP_NOACTIVATE|SWP_NOMOVE|SWP_NOSIZE)
+            };
+            break;
+        }
+    }
+}
+#[cfg(not(windows))]
+fn raise_chrome_above_site(_app:&tauri::AppHandle){}
+
 fn refresh_layout(app: &tauri::AppHandle) {
     let Some(window) = app.get_window("main") else { return };
     let Ok(physical) = window.inner_size() else { return };
@@ -688,6 +727,7 @@ fn refresh_layout(app: &tauri::AppHandle) {
         let _ = view.set_size(LogicalSize::new(w.max(1.0),h.max(1.0)));
     }
     update_split_badges(app,&window,if split_count>1 {positions.as_slice()} else {&[]},width,available,top);
+    if overlay_open {raise_chrome_above_site(app);}
 }
 fn display_active(app: &tauri::AppHandle) {
     let mut targets=HashSet::new();
