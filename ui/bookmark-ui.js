@@ -245,8 +245,10 @@
     if(!node || node.kind!=='link')return false;
     const target=model.url(node.url);
     if(!target)return false;
-    // Keep the current tab selected, just like Ctrl+click on a website link.
-    void act('new-background-url',target);
+    // A private tab's Ctrl-click must stay private, and remain in the background.
+    const browser=window.minternetGroups?.getLatest();
+    const privateTab=Boolean(browser?.tabs?.find(tab=>tab.id===browser.activeId)?.private);
+    void act(privateTab?'new-private-background-url':'new-background-url',target);
     return true;
   }
   function deleteBookmark(id) {
