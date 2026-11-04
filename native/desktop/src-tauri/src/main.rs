@@ -634,7 +634,7 @@ fn update_audio_state(app:&tauri::AppHandle,id:u32,playing:bool,muted:bool){
                 tab.audio_playing=playing;
                 tab.audio_muted=muted;
             }
-        }
+        };
     }
     if changed{notify(app);}
 }
@@ -645,9 +645,13 @@ fn native_audio_poll(app:&tauri::AppHandle,id:u32,label:&str)->Result<(),String>
     view.with_webview(move |native| {
         use windows::core::Interface;
         use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_8;
-        if let Ok(audio)=native.inner().cast::<ICoreWebView2_8>(){
-            let playing=unsafe{audio.IsDocumentPlayingAudio().map(|value|value.as_bool()).unwrap_or(false)};
-            let muted=unsafe{audio.IsMuted().map(|value|value.as_bool()).unwrap_or(false)};
+        if let Ok(audio)=(unsafe{native.controller().CoreWebView2()}).and_then(|webview|webview.cast::<ICoreWebView2_8>()){
+            let mut playing=windows::core::BOOL::default();
+            let mut muted=windows::core::BOOL::default();
+            let _=unsafe{audio.IsDocumentPlayingAudio(&mut playing)};
+            let _=unsafe{audio.IsMuted(&mut muted)};
+            let playing=playing.as_bool();
+            let muted=muted.as_bool();
             update_audio_state(&handle,id,playing,muted);
         }
     }).map_err(|e|e.to_string())?;
@@ -1200,8 +1204,9 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                     use windows::core::Interface;
                     use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_8;
                     if let Ok(audio)=native.inner().cast::<ICoreWebView2_8>(){
-                        let current=unsafe{audio.IsMuted().map(|v|v.as_bool()).unwrap_or(false)};
-                        let _=unsafe{audio.SetIsMuted(windows::Win32::Foundation::BOOL((!current) as i32))};
+                        let mut current=windows::core::BOOL::default();
+                        let _=unsafe{audio.IsMuted(&mut current)};
+                        let _=unsafe{audio.SetIsMuted(!current.as_bool())};
                     }
                 }).map_err(|e|e.to_string())?;
                 native_audio_poll(&app,id,&label)?;
