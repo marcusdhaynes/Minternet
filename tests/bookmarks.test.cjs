@@ -40,3 +40,22 @@ test('normalizes corrupt JSON and strips unsafe imported data',()=>{
  assert.equal(state.visible,false);
  assert.equal(state.items.length,1);
 });
+
+test('bookmark favicon uses only its own secure website origin',()=>{
+ assert.equal(b.favicon('https://example.com/folder/page?token=private#hash'),
+   'https://example.com/favicon.ico');
+ assert.equal(b.favicon('https://sub.example.com:8443/path'),
+   'https://sub.example.com:8443/favicon.ico');
+ assert.equal(b.favicon('http://example.com'),null);
+ assert.equal(b.favicon('https://name:secret@example.com/path'),null);
+ assert.equal(b.favicon('javascript:alert(1)'),null);
+});
+test('existing bookmarks without custom icons retain URL for automatic favicon display',()=>{
+ const s=b.hydrate({visible:true,items:[
+   {id:'old',kind:'link',name:'Home',url:'https://example.org/home'}
+ ]});
+ assert.equal(s.items[0].icon,'');
+ assert.equal(b.favicon(s.items[0].url),'https://example.org/favicon.ico');
+ const custom=b.add(s,'link',null,{url:'https://example.com',icon:'🌟'});
+ assert.equal(custom.icon,'🌟');
+});
