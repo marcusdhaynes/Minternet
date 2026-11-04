@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod password_vault;
 
-use std::{sync::Mutex, collections::HashSet, path::PathBuf};
+use std::{sync::Mutex, collections::{HashSet, HashMap}, path::PathBuf, time::{Instant, Duration}};
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{
@@ -59,6 +59,8 @@ struct Browser {
 }
 
 #[derive(Default)]
+struct PopupDeduper(Mutex<HashMap<(u32,String),Instant>>);
+
 struct LayoutCache {
     size_and_home: Option<(u32, u32, bool, bool, bool)>,
     shown: Option<String>,
@@ -431,7 +433,21 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
         .on_download(|_view, _event| false)
         .on_new_window(move |url, _features| {
             if url.scheme() == "https" {
-                let _ = for_popup.emit_to("chrome", "minternet:open-tab", url.to_string());
+                // WebView2 may emit both window.open and modifier-click callbacks
+                // for the same gesture. Coalesce only the identical source/URL
+                // pair within one short event burst, without blocking other URLs.
+                let key=(id,url.to_string());
+                let state=for_popup.state::<PopupDeduper>();
+                let should_open=if let Ok(mut recent)=state.0.lock(){
+                    let now=Instant::now();
+                    recent.retain(|_,t|now.duration_since(*t)<Duration::from_millis(900));
+                    if recent.get(&key).map(|t|now.duration_since(*t)<Duration::from_millis(250)).unwrap_or(false){
+                        false
+                    }else{recent.insert(key,now);true}
+                }else{false};
+                if should_open{
+                    let _=for_popup.emit_to("chrome","minternet:open-tab",url.to_string());
+                }
             }
             NewWindowResponse::Deny
         })
@@ -1165,6 +1181,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
 
 fn main() {
     tauri::Builder::default()
+        .manage(PopupDeduper(Mutex::new(HashMap::new())))
         .manage(Mutex::new(Browser::new()))
         .manage(Mutex::new(password_vault::Vault::default()))
         .manage(Mutex::new(LayoutCache::default()))
