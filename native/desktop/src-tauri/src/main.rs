@@ -479,10 +479,6 @@ fn refresh_layout(app: &tauri::AppHandle) {
     }
 }
 fn display_active(app: &tauri::AppHandle) {
-    let overlay = {
-        let cache = app.state::<Mutex<LayoutCache>>();
-        cache.lock().map(|s| s.overlay_open).unwrap_or(false)
-    };
     let mut targets=HashSet::new();
     {
         // Keep all site views visible and at identical positions while trusted
@@ -1161,7 +1157,8 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                         _=>if ny<0.5{if nx<0.5{0}else{1}}
                            else if nx<0.5{2}else{3}
                     };
-                    split.insert(target.min(split.len()),id);
+                    let insert_at=target.min(split.len());
+                    split.insert(insert_at,id);
                 }else if split.len()>1{
                     let old=split.iter().position(|x|*x==id).unwrap_or(0);
                     split.remove(old);
@@ -1172,7 +1169,8 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                         _=>if ny<0.5{if nx<0.5{0}else{1}}
                            else if nx<0.5{2}else{3}
                     };
-                    split.insert(target.min(split.len()),id);
+                    let insert_at=target.min(split.len());
+                    split.insert(insert_at,id);
                 }
             }
             let ids=app.state::<SplitState>().0.lock().map_err(|e|e.to_string())?.clone();
