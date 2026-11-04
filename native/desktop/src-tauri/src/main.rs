@@ -472,6 +472,63 @@ fn start_split_badge_drag(app:tauri::AppHandle,id:u32){
 #[cfg(not(windows))]
 fn start_split_badge_drag(_app:tauri::AppHandle,_id:u32){}
 
+
+#[cfg(windows)]
+fn start_split_badge_resize(app:tauri::AppHandle,id:u32){
+    std::thread::spawn(move||{
+        use windows::Win32::Foundation::POINT;
+        use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+        use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState,VK_LBUTTON};
+        let Some(window)=app.get_window("main") else{return};
+        let Ok(origin)=window.outer_position() else{return};
+        let Ok(scale)=window.scale_factor() else{return};
+        let Ok((width,height))=dimensions(&window) else{return};
+        let top=chrome_top(&app);
+        let available=(height-top).max(1.0);
+        let (count,index)={
+            let state=app.state::<SplitState>();
+            let Ok(split)=state.0.lock() else{return};
+            (split.len(),split.iter().position(|pane|*pane==id).unwrap_or(0))
+        };
+        if count<2{return;}
+        let mut first=POINT::default();
+        if unsafe{GetCursorPos(&mut first)}.is_err(){return;}
+        let mut recorded=false;
+        let mut previous=(0.0f64,0.0f64);
+        let until=Instant::now()+Duration::from_secs(15);
+        loop{
+            std::thread::sleep(Duration::from_millis(34));
+            if Instant::now()>=until{return;}
+            if unsafe{GetAsyncKeyState(VK_LBUTTON.0 as i32)}>=0{return;}
+            let mut pos=POINT::default();
+            if unsafe{GetCursorPos(&mut pos)}.is_err(){return;}
+            let dx=(pos.x-first.x).abs();
+            let dy=(pos.y-first.y).abs();
+            if dx+dy<5{continue;}
+            let horizontal=(((pos.x-origin.x) as f64/scale)/width).clamp(0.2,0.8);
+            let vertical=((((pos.y-origin.y) as f64/scale)-top)/available).clamp(0.2,0.8);
+            if (previous.0-horizontal).abs()<0.01 &&
+               (previous.1-vertical).abs()<0.01 {continue;}
+            previous=(horizontal,vertical);
+            let should_record=!recorded;
+            recorded=true;
+            let handle=app.clone();
+            let _=app.run_on_main_thread(move||{
+                if should_record{remember_undo(&handle,None);}
+                let ratios=handle.state::<SplitRatios>();
+                if let Ok(mut value)=ratios.0.lock(){
+                    value.0=horizontal;
+                    if count>3 || (count==3&&index>0){value.1=vertical;}
+                };
+                invalidate_layout(&handle);
+                refresh_layout(&handle);
+            });
+        }
+    });
+}
+#[cfg(not(windows))]
+fn start_split_badge_resize(_app:tauri::AppHandle,_id:u32){}
+
 fn update_split_badges(app:&tauri::AppHandle,window:&tauri::Window,
                        ids:&[u32],width:f64,height:f64,top:f64){
     let ratios=app.state::<SplitRatios>().0.lock().map(|r|*r).unwrap_or((0.5,0.5));
@@ -512,6 +569,7 @@ fn update_split_badges(app:&tauri::AppHandle,window:&tauri::Window,
                             let _=callback_app.run_on_main_thread(move||return_split_pane(&handle,badge_id));
                         },
                         "/drag"=>start_split_badge_drag(callback_app.clone(),badge_id),
+                        "/resize"=>start_split_badge_resize(callback_app.clone(),badge_id),
                         _=>{}
                     }
                     return false;
