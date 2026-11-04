@@ -4,6 +4,7 @@ const api = window.minternet;
 let snapshot = { tabs: [], activeId: null, extensionsCount: 0 };
 let lastUrl = 'about:blank';
 let addressFocused = false;
+const PRIVATE_EYE='<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 12s3.7-5.7 9.5-5.7 9.5 5.7 9.5 5.7-3.7 5.7-9.5 5.7S2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.7"/></svg>';
 
 const command = async (name, value) => {
   try {
@@ -39,8 +40,9 @@ function buildTab(tab, active) {
     try {monogram=new URL(tab.url).hostname.replace(/^www\./,'').charAt(0).toUpperCase()||'◆';}
     catch {}
   }
-  symbol.textContent = tab.pinned ? monogram :
-    tab.private ? '◈' : (tab.suspended ? '◌' : tab.loading ? '◌' : '◉');
+  if(tab.private){symbol.classList.add('private-eye');symbol.innerHTML=PRIVATE_EYE;}
+  else symbol.textContent = tab.pinned ? monogram :
+    (tab.suspended ? '◌' : tab.loading ? '◌' : '◉');
   const text = document.createElement('span');
   text.className = 'tab-text';
   text.textContent = tab.title || 'New Tab';
@@ -73,6 +75,9 @@ window.minternetRenderTabs = () => {
     window.minternetGroups.renderTabs(snapshot,byId('tabs'),buildTab);
 };
 function render(data) {
+  const previouslyKnown=new Set(snapshot.tabs.map(tab=>tab.id));
+  const isNewTab=data.activeId && !previouslyKnown.has(data.activeId) &&
+    data.tabs.some(tab=>tab.id===data.activeId&&tab.url==='about:blank');
   snapshot = data;
   const tabs = byId('tabs');
   const active = data.tabs.find(t => t.id === data.activeId);
@@ -93,13 +98,26 @@ function render(data) {
         (tab.private ? ' private-tab' : '')+(tab.pinned ? ' pinned-tab' : '');
       el.setAttribute('aria-selected', String(activeTab));
       el.title = tab.suspended ? 'Inactive tab (reloads on selection) · ' + tab.url : tab.url;
-      el.querySelector('.tab-symbol').textContent = tab.pinned ?
-        (tab.url?.startsWith('https://')?new URL(tab.url).hostname.replace(/^www\./,'').charAt(0).toUpperCase():'◆') :
-        tab.private ? '◈' : tab.suspended || tab.loading ? '◌' : '◉';
+      const symbol=el.querySelector('.tab-symbol');
+      if(tab.private){symbol.classList.add('private-eye');symbol.innerHTML=PRIVATE_EYE;}
+      else{
+        symbol.classList.remove('private-eye');
+        symbol.textContent = tab.pinned ?
+          (tab.url?.startsWith('https://')?new URL(tab.url).hostname.replace(/^www\./,'').charAt(0).toUpperCase():'◆') :
+          tab.suspended || tab.loading ? '◌' : '◉';
+      }
       el.querySelector('.tab-text').textContent = tab.title || 'New Tab';
     }
   }
-  byId('back').disabled = !active?.canBack;
+  document.documentElement.classList.toggle('private-active',Boolean(active?.private));
+  if(isNewTab){
+    requestAnimationFrame(()=>{
+      const address=byId('address');
+      address?.focus();
+      address?.select();
+    });
+  }
+    byId('back').disabled = !active?.canBack;
   byId('forward').disabled = !active?.canForward;
   byId('reload').disabled = !active || active.url === 'about:blank';
   const isBlank = !active || active.url === 'about:blank';
