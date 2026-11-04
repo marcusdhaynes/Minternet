@@ -1,11 +1,17 @@
 'use strict';
 (() => {
-  const control=document.getElementById('return');
-  if(!control)return;
   const send=action=>{location.href='https://minternet.invalid/'+action;};
-  control.addEventListener('pointerdown',event=>{
+  const normal=document.getElementById('return');
+  const resize=document.getElementById('resize');
+  normal?.addEventListener('pointerdown',event=>{
     if(event.button===0&&event.isPrimary!==false)send('drag');
   });
-  control.addEventListener('click',()=>send('return'));
-  control.addEventListener('dragstart',event=>event.preventDefault());
+  normal?.addEventListener('click',()=>send('return'));
+  resize?.addEventListener('pointerdown',event=>{
+    if(event.button!==0||event.isPrimary===false)return;
+    event.preventDefault();event.stopPropagation();
+    send('resize');
+  });
+  for(const button of [normal,resize])
+    button?.addEventListener('dragstart',event=>event.preventDefault());
 })();
