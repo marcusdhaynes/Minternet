@@ -58,7 +58,6 @@
    let count=0;
    function convert(node,depth=0){
      if(count>=MAX_NODES||depth>=MAX_DEPTH||!node||typeof node!=='object')return null;
-     if(node.type==='text/x-moz-place'||node.type==='text/x-moz-place-container')return null;
      const address=node.url||node.uri;
      if(typeof address==='string'){
        const item=link(address,node.name||node.title);
