@@ -1063,3 +1063,15 @@ html.minternet-overlay-active .group-editor-backdrop {
   border-top:1px solid #bfa6ff25;
   font-size:8px;line-height:1.35;color:#bcaed4;
 }
+
+/* External bookmark drag import. Small native-feeling target outline only:
+   no resizing, background tinting, or interruption to the webpage. */
+:root.bookmark-drag-over .bookmark-drop-target{
+  outline:1px dashed #cdb0ff!important;
+  outline-offset:-2px;
+  background:#7960aa35!important;
+  box-shadow:inset 0 0 0 1px #d6c4ff30;
+}
+.bookmark-bar.bookmark-drop-target,
+.bookmark-manager.bookmark-drop-target,
+.bookmark-folder-menu.bookmark-drop-target{border-color:#cdb0ff80;}
