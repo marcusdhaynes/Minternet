@@ -961,6 +961,11 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     if let Some(tab) = browser.tabs.iter_mut().find(|tab| tab.id == id) {
         tab.view = Some(label);
     }
+    let background=browser.active_id!=id;
+    drop(browser);
+    // An unselected new WebView must never cover the current page, even when
+    // display_active skips a no-op visibility refresh for the selected tab.
+    if background {let _=created.hide();}
     Ok(())
 }
 
