@@ -1520,12 +1520,15 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             let native = value.get("nativePopups").and_then(Value::as_u64).unwrap_or(0);
             let group_visible = value.get("groupVisible").and_then(Value::as_bool);
             let group_rows = value.get("groupMenuRows").and_then(Value::as_u64).unwrap_or(0);
-            if folders < 2 || native < 1 || group_visible != Some(false) || group_rows < 1 {
-                return Err("Native cascading folder menu / tab-group visibility check failed".into());
+            // Bookmark context menus intentionally do not contain Tab Groups.
+            // Verify the native folder submenu still opens and group state is
+            // unaffected by the bookmark menu.
+            if folders < 2 || native < 1 || group_visible != Some(false) || group_rows != 0 {
+                return Err("Native cascading folder menu or bookmark context isolation check failed".into());
             }
             let marker = std::env::temp_dir()
                 .join(format!("minternet-menus-{}.ok",std::process::id()));
-            std::fs::write(marker,"Native folder popup and hidden tab group verified")
+            std::fs::write(marker,"Native folder popup and no Tab Groups in bookmark context verified")
                 .map_err(|e| e.to_string())?;
             return Ok(json!({"ok":true}));
         }
