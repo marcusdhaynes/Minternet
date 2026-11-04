@@ -320,7 +320,12 @@
       try {tabStrip.setPointerCapture(event.pointerId);}catch{}
     }
     event.preventDefault();
-    if(ghost){ghost.style.left=Math.round(event.clientX+11)+'px';ghost.style.top=Math.round(event.clientY+9)+'px';}
+    if(ghost){
+      ghost.style.left=Math.round(event.clientX+11)+'px';ghost.style.top=Math.round(event.clientY+9)+'px';
+      const beyondChrome=event.clientY>document.querySelector('.chrome').getBoundingClientRect().bottom+6;
+      ghost.classList.toggle('split-drag-preview',beyondChrome);
+      if(beyondChrome)ghost.textContent='◫  Snap into Split View';
+    }
     updateHover(event.clientX,event.clientY);
   }
   function finishPointer(event){
@@ -334,7 +339,9 @@
     const chip=hit?.closest('.group-chip[data-group-id]');
     const tab=hit?.closest('.tab[data-tab-id]');
     const groupId=chip?.dataset.groupId;
-    if(groupId)dropIntoGroup(event,groupId);
+    if(event.clientY>document.querySelector('.chrome').getBoundingClientRect().bottom+6){
+      void api.command('split-add',finished.id);
+    }else if(groupId)dropIntoGroup(event,groupId);
     else if(tab&&Number(tab.dataset.tabId)!==finished.id)
       dropNextTo(event,Number(tab.dataset.tabId),tab);
     else if(hit?.closest('#tabUngroupDrop')||hit?.closest('#tabs'))
