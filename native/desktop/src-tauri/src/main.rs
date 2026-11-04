@@ -64,6 +64,8 @@ struct Browser {
 
 struct PopupDeduper(Mutex<HashMap<(u32,String),Instant>>);
 struct ZoomState(Mutex<f64>);
+#[derive(Default)]
+struct SplitState(Mutex<Vec<u32>>);
 struct UndoState { tabs: Vec<Tab>, active_id:u32 }
 struct UndoHistory(Mutex<VecDeque<UndoState>>);
 
@@ -119,7 +121,7 @@ fn undo_last(app:&tauri::AppHandle)->Result<bool,String> {
 #[derive(Default)]
 struct LayoutCache {
     size_and_home: Option<(u32, u32, bool, bool, bool)>,
-    shown: Option<String>,
+    shown: HashSet<String>,
     bookmark_bar_visible: bool,
     overlay_open: bool,
 }
@@ -385,6 +387,31 @@ fn chrome_top(app: &tauri::AppHandle) -> f64 {
     CHROME + if bar_visible { BOOKMARK_BAR } else { 0.0 }
 }
 
+fn split_rect(index:usize,count:usize,width:f64,height:f64,top:f64)->(f64,f64,f64,f64){
+    match count {
+        2 => {
+            let w=width/2.0;
+            (index as f64*w,top,w,height)
+        }
+        3 => {
+            let w=width/2.0;
+            if index==0{(0.0,top,w,height)}
+            else{(w,top+(index-1) as f64*height/2.0,w,height/2.0)}
+        }
+        4 => {
+            let w=width/2.0;let h=height/2.0;
+            (index%2 as f64*w,top+(index/2) as f64*h,w,h)
+        }
+        _ => (0.0,top,width,height)
+    }
+}
+fn visible_split(app:&tauri::AppHandle)->Vec<u32>{
+    let list=app.state::<SplitState>().0.lock().map(|s|s.clone()).unwrap_or_default();
+    let browser=app.state::<Mutex<Browser>>();
+    let Ok(b)=browser.lock() else{return Vec::new()};
+    if !list.contains(&b.active_id){return Vec::new();}
+    list.into_iter().filter(|id|b.tabs.iter().any(|t|t.id==*id && t.url!=HOME)).take(4).collect()
+}
 fn refresh_layout(app: &tauri::AppHandle) {
     let Some(window) = app.get_window("main") else { return };
     let Ok(physical) = window.inner_size() else { return };
@@ -405,52 +432,64 @@ fn refresh_layout(app: &tauri::AppHandle) {
         (state.bookmark_bar_visible, state.overlay_open)
     };
     let top = CHROME + if bar_visible { BOOKMARK_BAR } else { 0.0 };
-    // When a folder/settings popover opens, temporarily show the full local
-    // chrome surface; website views remain alive but hidden, never reloaded.
     if let Some(chrome) = app.get_webview("chrome") {
         let full = show_home || overlay_open;
         let height_for_chrome = if full { height } else { top.min(height) };
         let _ = chrome.set_size(LogicalSize::new(width, height_for_chrome));
     }
     let available = (height - top).max(1.0);
+    let positions=visible_split(app);
+    let split_count=if positions.len()>1{positions.len()}else{0};
     for view in window.webviews() {
         if view.label() == "chrome" { continue; }
-        let _ = view.set_position(LogicalPosition::new(0.0, top));
-        let _ = view.set_size(LogicalSize::new(width, available));
+        let index=if split_count>0 {
+            positions.iter().position(|id|view.label()==format!("tab-{id}"))
+        }else{None};
+        let (x,y,w,h)=if let Some(index)=index {
+            split_rect(index,split_count,width,available,top)
+        }else{(0.0,top,width,available)};
+        let _ = view.set_position(LogicalPosition::new(x,y));
+        let _ = view.set_size(LogicalSize::new(w.max(1.0),h.max(1.0)));
     }
 }
-
 fn display_active(app: &tauri::AppHandle) {
     let overlay = {
         let cache = app.state::<Mutex<LayoutCache>>();
         cache.lock().map(|s| s.overlay_open).unwrap_or(false)
     };
-    let target = if overlay { None } else {
-        let store = app.state::<Mutex<Browser>>();
-        let Ok(b) = store.lock() else { return };
-        b.active().and_then(|tab| if tab.url == HOME { None } else { tab.view.clone() })
-    };
-    refresh_layout(app);
-    // Only change visibility of the old and new browser views.
-    let previous = {
-        let cache = app.state::<Mutex<LayoutCache>>();
-        let Ok(mut state) = cache.lock() else { return };
-        if state.shown == target {
-            notify(app);
-            return;
-        }
-        let old = state.shown.clone();
-        state.shown = target.clone();
-        old
-    };
-    if let Some(label) = previous {
-        if let Some(view) = app.get_webview(&label) { let _ = view.hide(); }
+    let mut targets=HashSet::new();
+    if !overlay {
+        let split=visible_split(app);
+        let browser=app.state::<Mutex<Browser>>();
+        let Ok(b)=browser.lock() else{return};
+        if split.len()>1{
+            for id in split {
+                if let Some(tab)=b.tabs.iter().find(|t|t.id==id){
+                    if let Some(label)=&tab.view{targets.insert(label.clone());}
+                }
+            }
+        }else if let Some(label)=b.active().and_then(|tab|{
+            if tab.url==HOME{None}else{tab.view.clone()}
+        }){targets.insert(label);}
     }
-    if let Some(label) = target {
-        if let Some(view) = app.get_webview(&label) {
+    refresh_layout(app);
+    let (to_hide,to_show)={
+        let cache=app.state::<Mutex<LayoutCache>>();
+        let Ok(mut state)=cache.lock() else{return};
+        if state.shown==targets {notify(app);return;}
+        let hidden=state.shown.difference(&targets).cloned().collect::<Vec<_>>();
+        let shown=targets.difference(&state.shown).cloned().collect::<Vec<_>>();
+        state.shown=targets.clone();
+        (hidden,shown)
+    };
+    for label in to_hide{
+        if let Some(view)=app.get_webview(&label){let _=view.hide();}
+    }
+    for label in to_show{
+        if let Some(view)=app.get_webview(&label){
             let zoom=app.state::<ZoomState>().0.lock().map(|n|*n).unwrap_or(1.0);
             let _=view.set_zoom(zoom);
-            let _ = view.show();
+            let _=view.show();
         }
     }
     notify(app);
@@ -1387,6 +1426,7 @@ fn main() {
     tauri::Builder::default()
         .manage(PopupDeduper(Mutex::new(HashMap::new())))
         .manage(ZoomState(Mutex::new(1.0)))
+        .manage(SplitState::default())
         .manage(UndoHistory(Mutex::new(VecDeque::new())))
         .manage(Mutex::new(Browser::new()))
         .manage(Mutex::new(password_vault::Vault::default()))
