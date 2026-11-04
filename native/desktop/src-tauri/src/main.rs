@@ -1644,6 +1644,19 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             vault.save(&password_vault::file(&app)?)?;
             return Ok(json!({"ok":true,"id":id}));
         }
+        "vault-card-update" => {
+            let id=value.get("id").and_then(Value::as_str).ok_or("Missing card identifier")?;
+            let label=value.get("label").and_then(Value::as_str).unwrap_or("").to_string();
+            let holder=value.get("name").and_then(Value::as_str).ok_or("Cardholder name required")?.to_string();
+            let month=value.get("month").and_then(Value::as_u64).ok_or("Expiry month required")? as u8;
+            let year=value.get("year").and_then(Value::as_u64).ok_or("Expiry year required")? as u16;
+            let postal=value.get("postal").and_then(Value::as_str).unwrap_or("").to_string();
+            let state=app.state::<Mutex<password_vault::Vault>>();
+            let mut vault=state.lock().map_err(|e|e.to_string())?;
+            vault.update_card(id,label,holder,month,year,postal)?;
+            vault.save(&password_vault::file(&app)?)?;
+            return Ok(json!({"ok":true}));
+        }
         "vault-card-remove" => {
             let id=value.as_str().ok_or("Missing card identifier")?;
             let state=app.state::<Mutex<password_vault::Vault>>();
