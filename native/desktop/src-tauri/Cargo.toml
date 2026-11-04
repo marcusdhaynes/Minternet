@@ -16,6 +16,7 @@ argon2 = "0.5"
 chacha20poly1305 = { version = "0.10", features = ["std"] }
 rand = "0.8"
 zeroize = "1"
+ureq = { version = "2.12", default-features = false, features = ["tls"] }
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.39"
