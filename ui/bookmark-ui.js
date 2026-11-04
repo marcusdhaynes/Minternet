@@ -69,15 +69,6 @@
   // favicon proxy. No icon bytes are copied into bookmark storage; the
   // website URL alone controls the icon and custom icons always win.
   const missingFavicons=new Set();
-  function siteFavicon(url) {
-    const safe=model.url(url);
-    if(!safe)return null;
-    try{
-      const parsed=new URL(safe);
-      if(!parsed.hostname || parsed.protocol!=='https:')return null;
-      return parsed.origin+'/favicon.ico';
-    }catch{return null;}
-  }
   function iconNode(item, isFolder = item?.kind === 'folder') {
     const slot=document.createElement('span');
     slot.className='bookmark-emoji';
@@ -90,7 +81,7 @@
     }else if(value){
       slot.textContent=value;
     }else if(!isFolder){
-      const favicon=siteFavicon(item?.url);
+      const favicon=model.favicon(item?.url);
       if(favicon && !missingFavicons.has(favicon)){
         const img=document.createElement('img');
         img.alt='';
