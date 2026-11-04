@@ -66,14 +66,15 @@ struct PopupDeduper(Mutex<HashMap<(u32,String),Instant>>);
 struct ZoomState(Mutex<f64>);
 #[derive(Default)]
 struct SplitState(Mutex<Vec<u32>>);
-struct UndoState { tabs: Vec<Tab>, active_id:u32 }
+struct UndoState { tabs: Vec<Tab>, active_id:u32, split_ids:Vec<u32> }
 struct UndoHistory(Mutex<VecDeque<UndoState>>);
 
 fn remember_undo(app:&tauri::AppHandle) {
     let snapshot={
         let state=app.state::<Mutex<Browser>>();
         let Ok(browser)=state.lock() else{return};
-        UndoState{tabs:browser.tabs.clone(),active_id:browser.active_id}
+        UndoState{tabs:browser.tabs.clone(),active_id:browser.active_id,
+            split_ids:app.state::<SplitState>().0.lock().map(|s|s.clone()).unwrap_or_default()}
     };
     if let Ok(mut list)=app.state::<UndoHistory>().0.lock(){
         if list.len()>=100{list.pop_front();}
@@ -112,6 +113,8 @@ fn undo_last(app:&tauri::AppHandle)->Result<bool,String> {
     for label in to_close{
         if let Some(view)=app.get_webview(&label){let _=view.close();}
     }
+    *app.state::<SplitState>().0.lock().map_err(|e|e.to_string())?=entry.split_ids;
+    invalidate_layout(app);
     save_pinned(app)?;
     activated(app)?;
     notify(app);
@@ -400,11 +403,29 @@ fn split_rect(index:usize,count:usize,width:f64,height:f64,top:f64)->(f64,f64,f6
         }
         4 => {
             let w=width/2.0;let h=height/2.0;
-            (index%2 as f64*w,top+(index/2) as f64*h,w,h)
+            (((index % 2) as f64)*w,top+((index / 2) as f64)*h,w,h)
         }
         _ => (0.0,top,width,height)
     }
 }
+fn invalidate_layout(app:&tauri::AppHandle){
+    if let Ok(mut cache)=app.state::<Mutex<LayoutCache>>().lock(){
+        cache.size_and_home=None;
+    }
+}
+fn prune_splits(app:&tauri::AppHandle){
+    let ids={
+        let state=app.state::<Mutex<Browser>>();
+        state.lock().map(|b|b.tabs.iter().map(|t|t.id).collect::<HashSet<_>>()).unwrap_or_default()
+    };
+    let state=app.state::<SplitState>();
+    if let Ok(mut split)=state.0.lock(){
+        split.retain(|id|ids.contains(id));
+        if split.len()<2{split.clear();}
+    }
+    invalidate_layout(app);
+}
+
 fn visible_split(app:&tauri::AppHandle)->Vec<u32>{
     let list=app.state::<SplitState>().0.lock().map(|s|s.clone()).unwrap_or_default();
     let browser=app.state::<Mutex<Browser>>();
@@ -1092,6 +1113,60 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             display_active(&app);
             return Ok(json!({"ok": true}));
         }
+        "split-status" => {
+            let ids=app.state::<SplitState>().0.lock().map_err(|e|e.to_string())?.clone();
+            return Ok(json!({"ids":ids}));
+        }
+        "split-add" => {
+            let id=value.as_u64().or_else(||value.get("id").and_then(Value::as_u64))
+                .ok_or("Expected tab id")? as u32;
+            let (previous,url,private,view_exists)={
+                let state=app.state::<Mutex<Browser>>();
+                let b=state.lock().map_err(|e|e.to_string())?;
+                let tab=b.tabs.iter().find(|t|t.id==id).ok_or("Unknown tab")?;
+                if tab.url==HOME{return Err("Open a webpage before splitting".into());}
+                (b.active_id,tab.url.clone(),tab.private,tab.view.is_some())
+            };
+            {
+                let state=app.state::<SplitState>();
+                let mut split=state.0.lock().map_err(|e|e.to_string())?;
+                if split.is_empty() && previous!=0 && previous!=id{split.push(previous);}
+                if !split.contains(&id){
+                    if split.len()>=4{return Err("Split view supports four tabs maximum".into());}
+                    split.push(id);
+                }
+            }
+            if !view_exists {
+                let address=tauri::Url::parse(&url).map_err(|e|e.to_string())?;
+                create_webview(&app,id,WebviewUrl::External(address),private)?;
+            }
+            {
+                let state=app.state::<Mutex<Browser>>();
+                let mut b=state.lock().map_err(|e|e.to_string())?;
+                b.active_id=id;
+            }
+            invalidate_layout(&app);
+            display_active(&app);
+            return Ok(json!({"ok":true}));
+        }
+        "split-remove" => {
+            let id=value.as_u64().ok_or("Expected tab ID")? as u32;
+            {
+                let state=app.state::<SplitState>();
+                let mut split=state.0.lock().map_err(|e|e.to_string())?;
+                split.retain(|x|*x!=id);
+                if split.len()<2{split.clear();}
+            }
+            invalidate_layout(&app);
+            display_active(&app);
+            return Ok(json!({"ok":true}));
+        }
+        "split-clear" => {
+            app.state::<SplitState>().0.lock().map_err(|e|e.to_string())?.clear();
+            invalidate_layout(&app);
+            display_active(&app);
+            return Ok(json!({"ok":true}));
+        }
         "audio-poll" => {
             #[cfg(windows)]
             {
@@ -1255,6 +1330,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 labels
             };
             for label in labels {if let Some(wv)=app.get_webview(&label){let _=wv.close();}}
+            prune_splits(&app);
             save_pinned(&app)?;
             activated(&app)?;
             return Ok(json!({"ok":true,"closed":wanted.len()}));
@@ -1277,6 +1353,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             if let Some(label)=label {
                 if let Some(wv)=app.get_webview(&label) { let _=wv.close(); }
             }
+            prune_splits(&app);
             save_pinned(&app)?;
             activated(&app)?;
         }
