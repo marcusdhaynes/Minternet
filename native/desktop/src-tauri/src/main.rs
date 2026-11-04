@@ -2,7 +2,7 @@
 mod password_vault;
 
 use std::{sync::Mutex, collections::{HashSet, HashMap, VecDeque}, path::PathBuf, time::{Instant, Duration}};
-use serde::Serialize;
+use serde::{Serialize,Deserialize};
 use serde_json::{json, Value};
 use tauri::{
     Emitter, Manager, WebviewUrl, LogicalPosition, LogicalSize,
@@ -62,7 +62,7 @@ struct Browser {
     warming: HashSet<u32>,
 }
 
-#[derive(Clone,Serialize)]
+#[derive(Clone,Serialize,Deserialize)]
 #[serde(rename_all="camelCase")]
 struct RecentDownload {
     id:u64,
@@ -75,6 +75,43 @@ struct RecentDownload {
 #[derive(Default)]
 struct DownloadsState(Mutex<VecDeque<RecentDownload>>);
 
+fn recent_downloads_file(app:&tauri::AppHandle)->Result<PathBuf,String>{
+    Ok(app.path().app_data_dir().map_err(|e|e.to_string())?
+        .join("recent-downloads.v1.json"))
+}
+fn save_recent_downloads(app:&tauri::AppHandle){
+    let state=app.state::<DownloadsState>();
+    let Ok(history)=state.0.lock() else{return};
+    let stored=history.iter().filter(|d|!d.private).cloned().collect::<Vec<_>>();
+    drop(history);
+    let Ok(path)=recent_downloads_file(app) else{return};
+    let Ok(data)=serde_json::to_vec(&stored) else{return};
+    if data.len()>200_000 {return;}
+    if let Some(parent)=path.parent(){if std::fs::create_dir_all(parent).is_err(){return;}}
+    let temp=path.with_extension("tmp");
+    if std::fs::write(&temp,data).is_err(){return;}
+    if std::fs::rename(&temp,&path).is_err(){
+        let _=std::fs::copy(&temp,&path);
+        let _=std::fs::remove_file(&temp);
+    }
+}
+fn restore_recent_downloads(app:&tauri::AppHandle){
+    let Ok(file)=recent_downloads_file(app) else{return};
+    let Ok(raw)=std::fs::read(file) else{return};
+    if raw.len()>200_000 {return;}
+    let Ok(entries)=serde_json::from_slice::<Vec<RecentDownload>>(&raw) else{return};
+    let Ok(dir)=app.path().download_dir() else{return};
+    let state=app.state::<DownloadsState>();
+    let Ok(mut history)=state.0.lock() else{return};
+    for mut entry in entries.into_iter().rev().take(50).collect::<Vec<_>>().into_iter().rev(){
+        if entry.private || entry.name.len()>160 || entry.source.len()>4096 {continue;}
+        let path=PathBuf::from(&entry.path);
+        if !path.starts_with(&dir) || path.file_name().and_then(|n|n.to_str())!=Some(entry.name.as_str()){continue;}
+        if entry.status=="downloading"{entry.status="interrupted".into();}
+        if !matches!(entry.status.as_str(),"completed"|"failed"|"interrupted"){continue;}
+        history.push_back(entry);
+    }
+}
 fn download_name(url:&tauri::Url)->String{
     let segment=url.path_segments().and_then(|mut segments|segments.next_back()).unwrap_or("download");
     let cleaned=segment.chars().map(|c|{
@@ -128,6 +165,7 @@ fn download_update(app:&tauri::AppHandle,url:&tauri::Url,path:Option<&std::path:
     })).collect::<Vec<_>>();
     drop(history);
     let _=app.emit_to("chrome","minternet:downloads",summary);
+    if !private {save_recent_downloads(app);}
 }
 struct PopupDeduper(Mutex<HashMap<(u32,String),Instant>>);
 struct ZoomState(Mutex<f64>);
@@ -1232,6 +1270,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         "downloads-clear" => {
             let state=app.state::<DownloadsState>();
             state.0.lock().map_err(|e|e.to_string())?.clear();
+            save_recent_downloads(&app);
             return Ok(json!({"ok":true}));
         }
         "downloads-reveal" => {
@@ -1964,6 +2003,7 @@ fn main() {
         .manage(Mutex::new(LayoutCache::default()))
         .invoke_handler(tauri::generate_handler![browser_action, browser_snapshot])
         .setup(|app| {
+            restore_recent_downloads(app.handle());
             // Automated tests use a deterministic fresh session. Real users
             // restore their pinned pages or start with a tabless home.
             let smoke=std::env::args().any(|a|a.starts_with("--minternet-")&&a.ends_with("-smoke"));
