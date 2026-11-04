@@ -8,6 +8,7 @@
   const api=window.minternet;
   const command=(name,value)=>api.command(name,value);
   let dropdown=null,manager=null,entries=[],selected=-1,revision=0,hidden=false;
+  let historyShown=0,historyRevision=0;
   const safe=url=>{try{const parsed=new URL(url);return parsed.protocol==='https:'&&!parsed.username&&!parsed.password;}catch{return false;}};
   const privateActive=()=>{
     const data=window.minternetGroups?.getLatest();
@@ -156,18 +157,29 @@
     });
     r.append(open,remove);return r;
   }
-  async function renderHistory(){
+  async function renderHistory(more=false){
     if(!manager)return;
+    const token=++historyRevision,host=manager;
     const list=manager.querySelector('.history-entries');
-    list.replaceChildren();
+    const load=manager.querySelector('.history-more');
+    if(!more){historyShown=0;list.replaceChildren();}
     if(privateActive()){
       list.textContent='Browsing history is not saved or suggested in private tabs.';
+      load.hidden=true;
       return;
     }
-    const entries=await command('history-list');
-    if(!manager)return;
-    if(!Array.isArray(entries)||!entries.length){list.textContent='No browsing history yet.';return;}
-    for(const entry of entries.slice(0,100))if(safe(entry.url))list.append(row(entry));
+    const query=manager.querySelector('.history-filter')?.value.trim()||'';
+    const recent=await command('history-list',{query,offset:historyShown,limit:75});
+    if(!manager||manager!==host||token!==historyRevision)return;
+    if(!Array.isArray(recent)||(!recent.length&&!historyShown)){
+      list.textContent='No matching browsing history.';
+      load.hidden=true;return;
+    }
+    for(const entry of recent){
+      if(safe(entry.url))list.append(row(entry));
+    }
+    historyShown+=recent.length;
+    load.hidden=recent.length<75;
   }
   async function openHistory(){
     if(manager){closeHistory();return;}
@@ -186,8 +198,16 @@
       const result=await command('history-clear');
       if(result?.ok)await renderHistory();
     });
+    const filter=document.createElement('input');
+    filter.type='search';filter.className='history-filter';
+    filter.autocomplete='off';filter.placeholder='Search browsing history';
+    filter.setAttribute('aria-label','Search browsing history');
+    filter.addEventListener('input',()=>void renderHistory());
     const list=document.createElement('div');list.className='history-entries';
-    head.append(title,clear);panel.append(head,list);
+    const load=document.createElement('button');load.type='button';
+    load.className='history-more';load.textContent='Show More';load.hidden=true;
+    load.addEventListener('click',()=>void renderHistory(true));
+    head.append(title,clear);panel.append(head,filter,list,load);
     document.body.append(panel);manager=panel;
     const rect=historyButton.getBoundingClientRect();
     panel.style.top=Math.max(4,Math.min(innerHeight-310,rect.bottom+5))+'px';
