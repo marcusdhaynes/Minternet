@@ -94,7 +94,8 @@
     for(const group of g.getState().groups)
       assignOptions.push(item((belonging?.id===group.id?'✓  ':'●  ')+g.displayName(group),()=>g.assign(tabId,group.id)));
     return [
-      sub('▣  Move To Tab Group',assignOptions),
+      item('＋  New Group With This Tab',()=>g.openEditor(null,tabId)),
+      sub('▣  Move To Group',assignOptions.slice(1)),
       ...(belonging?[item('↙  Remove From '+g.displayName(belonging),()=>g.ungroup(tabId))]:[]),
       ...(tab.url?.startsWith('https://')?[item('☆  Bookmark Page',()=>window.minternet?.command('activate',tabId).then(()=>b?.toggleBookmark()))]:[]),
       sub('▣  Split View',[
@@ -203,7 +204,7 @@
     }
     closeFallback();
     const host=document.createElement('div');
-    host.className='system-popup-root'+(options.custom?' minternet-context-menu':'');
+    host.className='system-popup-root'+(options.custom?' minternet-context-menu':'')+(options.compactTab?' compact-tab-menu':'');
     if(options.custom){
       const header=document.createElement('div');
       header.className='minternet-context-heading';
@@ -367,9 +368,16 @@
     groups:point=>groupsOverview(point),
     group:(id,point)=>groupInspector(id,point),
     tab:(id,point)=>{
-      const chosen=id??groups()?.getLatest().activeId;
-      if(!chosen)return popup([disabled('No active tab')],point,{custom:true,heading:'TABS'});
-      return popup(tabMenu(chosen),point,{custom:true,heading:'TAB',quickActions:tabQuickActions(chosen)});
+      // Blank bar space must not accidentally act on the currently active tab.
+      if(id==null)return popup([
+        item('＋  New Group',()=>groups()?.openEditor(null,false)),
+        item('＋  New Tab',()=>window.minternet?.command('new')),
+        sub('▣  Tab Groups',barGroupItems())
+      ],point,{custom:true,compactTab:true,heading:'TAB BAR'});
+      const chosen=id;
+      if(!groups()?.getLatest().tabs.some(tab=>tab.id===chosen))
+        return popup([disabled('Tab no longer exists')],point,{custom:true,compactTab:true,heading:'TAB'});
+      return popup(tabMenu(chosen),point,{custom:true,compactTab:true,heading:'TAB',quickActions:tabQuickActions(chosen)});
     },
     inspectTab:id=>tabMenu(id),
     inspectTabQuick:id=>tabQuickActions(id),
@@ -380,6 +388,13 @@
   window.minternetMenus=handlers;
   $('tabs')?.addEventListener('contextmenu',event=>{
     if(event.defaultPrevented)return;
+    event.preventDefault();
+    handlers.tab(null,{x:event.clientX,y:event.clientY});
+  });
+  // The blank portion of the title/tab bar is another tab-bar target.
+  // Never hijack native window buttons, the group button, or individual tabs.
+  document.querySelector('.tab-row')?.addEventListener('contextmenu',event=>{
+    if(event.defaultPrevented || event.target.closest('button,.group-chip,.tab,[role="tab"]'))return;
     event.preventDefault();
     handlers.tab(null,{x:event.clientX,y:event.clientY});
   });
