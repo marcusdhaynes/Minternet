@@ -25,6 +25,15 @@
       return parsed.href;
     } catch { return null; }
   }
+  // Default favicon always comes from the bookmark's HTTPS origin.
+  // There is no third-party icon service, and the URL never contains the
+  // bookmark's path, query, credentials or fragment.
+  function favicon(v) {
+    const target=url(v);
+    if(!target)return null;
+    try{return new URL(target).origin+'/favicon.ico';}
+    catch{return null;}
+  }
   function blank() { return { version: 1, visible: true, items: [] }; }
   function hydrate(raw) {
     let data;
@@ -122,5 +131,5 @@
     return true;
   }
   const byUrl = (state, target) => visit(state.items, node => node.kind === 'link' && node.url === url(target) ? node : undefined);
-  return { blank, hydrate, url, icon, find, location, folders, count, add, remove, update, move, byUrl, MAX_ITEMS };
+  return { blank, hydrate, url, icon, favicon, find, location, folders, count, add, remove, update, move, byUrl, MAX_ITEMS };
 });
