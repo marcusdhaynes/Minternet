@@ -1183,3 +1183,13 @@ html.minternet-overlay-active .group-editor-backdrop {
   border-color:#dbadff!important;
 }
 .tabs .tab.private-tab .private-eye{color:#efd0ff!important;}
+
+.history-popup .history-filter{display:block;width:calc(100% - 8px);
+  height:25px;margin:6px 4px 4px;padding:3px 7px;border:1px solid #917da859;
+  border-radius:5px;background:#171428;color:#eee8fd;font-size:10px;}
+.history-popup .history-filter:focus{outline:1px solid #a88ddc;}
+.history-popup .history-more{display:block;width:100%;margin:4px 0 0;
+  padding:5px;background:#4b3d69b8;border:0;border-radius:4px;
+  color:#e8dffc;font-size:10px;cursor:pointer;}
+.history-popup .history-more:hover{background:#6b528d;}
+.history-popup .history-more[hidden]{display:none;}
