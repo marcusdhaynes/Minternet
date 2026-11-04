@@ -59,6 +59,7 @@ struct Browser {
 }
 
 struct PopupDeduper(Mutex<HashMap<(u32,String),Instant>>);
+struct ZoomState(Mutex<f64>);
 
 #[derive(Default)]
 struct LayoutCache {
@@ -389,7 +390,11 @@ fn display_active(app: &tauri::AppHandle) {
         if let Some(view) = app.get_webview(&label) { let _ = view.hide(); }
     }
     if let Some(label) = target {
-        if let Some(view) = app.get_webview(&label) { let _ = view.show(); }
+        if let Some(view) = app.get_webview(&label) {
+            let zoom=app.state::<ZoomState>().0.lock().map(|n|*n).unwrap_or(1.0);
+            let _=view.set_zoom(zoom);
+            let _ = view.show();
+        }
     }
     notify(app);
 }
@@ -479,11 +484,13 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
             }
             notify(&for_title);
         });
-    window.add_child(
+    let zoom=app.state::<ZoomState>().0.lock().map(|n|*n).unwrap_or(1.0);
+    let created=window.add_child(
         builder,
         LogicalPosition::new(0.0, top),
         LogicalSize::new(width, (height - top).max(1.0)),
     ).map_err(|e| e.to_string())?;
+    let _=created.set_zoom(zoom);
     let state = app.state::<Mutex<Browser>>();
     let mut browser = state.lock().map_err(|e| e.to_string())?;
     if let Some(tab) = browser.tabs.iter_mut().find(|tab| tab.id == id) {
@@ -950,6 +957,21 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             display_active(&app);
             return Ok(json!({"ok": true}));
         }
+        "zoom" => {
+            let value=value.as_f64().ok_or("Zoom must be numeric")?;
+            if !value.is_finite()|| !(0.25..=5.0).contains(&value){return Err("Zoom out of range".into());}
+            *app.state::<ZoomState>().0.lock().map_err(|e|e.to_string())?=value;
+            let label=app.state::<Mutex<Browser>>().lock().map_err(|e|e.to_string())?
+                .active().and_then(|t|t.view.clone());
+            if let Some(label)=label {
+                if let Some(view)=app.get_webview(&label){view.set_zoom(value).map_err(|e|e.to_string())?;}
+            }
+            return Ok(json!({"ok":true,"zoom":value}));
+        }
+        "zoom-get" => {
+            let zoom=*app.state::<ZoomState>().0.lock().map_err(|e|e.to_string())?;
+            return Ok(json!({"zoom":zoom}));
+        }
         "prepare-tab" => { prepare_active(&app)?; }
         "new" | "new-private" | "new-url" => {
             let private = name == "new-private";
@@ -1182,6 +1204,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
 fn main() {
     tauri::Builder::default()
         .manage(PopupDeduper(Mutex::new(HashMap::new())))
+        .manage(ZoomState(Mutex::new(1.0)))
         .manage(Mutex::new(Browser::new()))
         .manage(Mutex::new(password_vault::Vault::default()))
         .manage(Mutex::new(LayoutCache::default()))
