@@ -10,9 +10,14 @@ if (window.__TAURI__ && !window.minternet) {
     if(popupListenerStarted)return;
     popupListenerStarted=true;
     api.event.listen('minternet:open-tab',event=>{
-      const url=event.payload;
+      const detail=event.payload;
+      const url=typeof detail==='string'?detail:detail?.url;
+      const privateTab=typeof detail==='object' && detail?.private===true;
       if(typeof url==='string'&&url.startsWith('https://')){
-        void api.core.invoke('browser_action',{name:'new-background-url',value:url}).catch(()=>{});
+        void api.core.invoke('browser_action',{
+          name:privateTab?'new-private-background-url':'new-background-url',
+          value:url
+        }).catch(()=>{});
       }
     }).catch(()=>{popupListenerStarted=false;});
   }
