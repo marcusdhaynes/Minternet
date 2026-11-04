@@ -861,7 +861,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
     if matches!(name.as_str(),
         "new"|"new-private"|"new-url"|"pin"|"unpin"|"toggle-pin"|
         "duplicate"|"close"|"close-many"|"navigate"|"home"|"privacy"|
-        "back"|"forward") {
+        "back"|"forward"|"split-add"|"split-remove"|"split-clear") {
         remember_undo(&app);
     }
     match name.as_str() {
@@ -1130,24 +1130,61 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         }
         "split-add" => {
             let id=value.as_u64().or_else(||value.get("id").and_then(Value::as_u64))
-                .ok_or("Expected tab id")? as u32;
-            let (previous,url,private,view_exists)={
+                .ok_or("Expected tab ID")? as u32;
+            let nx=value.get("x").and_then(Value::as_f64).unwrap_or(1.0).clamp(0.0,1.0);
+            let ny=value.get("y").and_then(Value::as_f64).unwrap_or(0.0).clamp(0.0,1.0);
+            let (previous,companion)={
                 let state=app.state::<Mutex<Browser>>();
                 let b=state.lock().map_err(|e|e.to_string())?;
                 let tab=b.tabs.iter().find(|t|t.id==id).ok_or("Unknown tab")?;
                 if tab.url==HOME{return Err("Open a webpage before splitting".into());}
-                (b.active_id,tab.url.clone(),tab.private,tab.view.is_some())
+                // When the dragged tab is already active, pair it with another
+                // existing page of the same privacy mode instead of displaying
+                // a nonfunctional single-pane split.
+                let companion=b.tabs.iter().find(|t|t.id!=id&&t.url!=HOME&&t.private==tab.private)
+                    .map(|t|t.id);
+                (b.active_id,companion)
             };
             {
                 let state=app.state::<SplitState>();
                 let mut split=state.0.lock().map_err(|e|e.to_string())?;
-                if split.is_empty() && previous!=0 && previous!=id{split.push(previous);}
+                if split.is_empty() {
+                    if previous!=0 && previous!=id {split.push(previous);}
+                    else if let Some(other)=companion {split.push(other);}
+                }
                 if !split.contains(&id){
                     if split.len()>=4{return Err("Split view supports four tabs maximum".into());}
-                    split.push(id);
+                    let size=split.len()+1;
+                    let target=match size {
+                        2=>if nx<0.5{0}else{1},
+                        3=>if nx<0.5{0}else if ny<0.5{1}else{2},
+                        _=>if ny<0.5{if nx<0.5{0}else{1}}
+                           else if nx<0.5{2}else{3}
+                    };
+                    split.insert(target.min(split.len()),id);
+                }else if split.len()>1{
+                    let old=split.iter().position(|x|*x==id).unwrap_or(0);
+                    split.remove(old);
+                    let size=split.len()+1;
+                    let target=match size {
+                        2=>if nx<0.5{0}else{1},
+                        3=>if nx<0.5{0}else if ny<0.5{1}else{2},
+                        _=>if ny<0.5{if nx<0.5{0}else{1}}
+                           else if nx<0.5{2}else{3}
+                    };
+                    split.insert(target.min(split.len()),id);
                 }
             }
-            if !view_exists {
+            let ids=app.state::<SplitState>().0.lock().map_err(|e|e.to_string())?.clone();
+            // Prepare only the participating panes, never load unrelated tabs.
+            let missing={
+                let state=app.state::<Mutex<Browser>>();
+                let b=state.lock().map_err(|e|e.to_string())?;
+                ids.iter().filter_map(|id|b.tabs.iter()
+                    .find(|t|t.id==*id && t.view.is_none() && t.url!=HOME)
+                    .map(|t|(t.id,t.url.clone(),t.private))).collect::<Vec<_>>()
+            };
+            for (id,url,private) in missing {
                 let address=tauri::Url::parse(&url).map_err(|e|e.to_string())?;
                 create_webview(&app,id,WebviewUrl::External(address),private)?;
             }
@@ -1158,7 +1195,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             }
             invalidate_layout(&app);
             display_active(&app);
-            return Ok(json!({"ok":true}));
+            return Ok(json!({"ok":true,"ids":ids}));
         }
         "split-remove" => {
             let id=value.as_u64().ok_or("Expected tab ID")? as u32;
