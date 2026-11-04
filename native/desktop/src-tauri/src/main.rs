@@ -101,12 +101,16 @@ fn restore_recent_downloads(app:&tauri::AppHandle){
     if raw.len()>200_000 {return;}
     let Ok(entries)=serde_json::from_slice::<Vec<RecentDownload>>(&raw) else{return};
     let Ok(dir)=app.path().download_dir() else{return};
+    let Ok(real_download_dir)=std::fs::canonicalize(&dir) else{return};
     let state=app.state::<DownloadsState>();
     let Ok(mut history)=state.0.lock() else{return};
     for mut entry in entries.into_iter().rev().take(50).collect::<Vec<_>>().into_iter().rev(){
         if entry.private || entry.name.len()>160 || entry.source.len()>4096 {continue;}
         let path=PathBuf::from(&entry.path);
-        if !path.starts_with(&dir) || path.file_name().and_then(|n|n.to_str())!=Some(entry.name.as_str()){continue;}
+        let Ok(real_file)=std::fs::canonicalize(&path) else{continue};
+        if !real_file.starts_with(&real_download_dir)
+            || path.file_name().and_then(|n|n.to_str())!=Some(entry.name.as_str())
+            || !real_file.is_file(){continue;}
         if entry.status=="downloading"{entry.status="interrupted".into();}
         if !matches!(entry.status.as_str(),"completed"|"failed"|"interrupted"){continue;}
         history.push_back(entry);
