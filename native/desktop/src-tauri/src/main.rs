@@ -4,6 +4,7 @@ mod browsing_history;
 
 use std::{sync::Mutex, collections::{HashSet, HashMap, VecDeque}, path::PathBuf, time::{Instant, Duration}};
 use serde::{Serialize,Deserialize};
+use zeroize::Zeroize;
 use serde_json::{json, Value};
 use tauri::{
     Emitter, Manager, WebviewUrl, LogicalPosition, LogicalSize,
