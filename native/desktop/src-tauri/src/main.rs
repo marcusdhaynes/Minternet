@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod password_vault;
 
-use std::{sync::Mutex, collections::{HashSet, HashMap}, path::PathBuf, time::{Instant, Duration}};
+use std::{sync::Mutex, collections::{HashSet, HashMap, VecDeque}, path::PathBuf, time::{Instant, Duration}};
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{
@@ -60,6 +60,57 @@ struct Browser {
 
 struct PopupDeduper(Mutex<HashMap<(u32,String),Instant>>);
 struct ZoomState(Mutex<f64>);
+struct UndoState { tabs: Vec<Tab>, active_id:u32 }
+struct UndoHistory(Mutex<VecDeque<UndoState>>);
+
+fn remember_undo(app:&tauri::AppHandle) {
+    let snapshot={
+        let state=app.state::<Mutex<Browser>>();
+        let Ok(browser)=state.lock() else{return};
+        UndoState{tabs:browser.tabs.clone(),active_id:browser.active_id}
+    };
+    if let Ok(mut list)=app.state::<UndoHistory>().0.lock(){
+        if list.len()>=100{list.pop_front();}
+        list.push_back(snapshot);
+    }
+}
+fn undo_last(app:&tauri::AppHandle)->Result<bool,String> {
+    let entry={
+        let state=app.state::<UndoHistory>();
+        let mut undo=state.0.lock().map_err(|e|e.to_string())?;
+        undo.pop_back()
+    };
+    let Some(mut entry)=entry else{return Ok(false)};
+    let mut to_close=Vec::new();
+    {
+        let state=app.state::<Mutex<Browser>>();
+        let mut browser=state.lock().map_err(|e|e.to_string())?;
+        for current in &browser.tabs{
+            let original=entry.tabs.iter().find(|saved|saved.id==current.id);
+            if original.map(|saved|saved.url==current.url && saved.private==current.private).unwrap_or(false){
+                continue;
+            }
+            if let Some(label)=current.view.clone(){to_close.push(label);}
+        }
+        for restored in &mut entry.tabs {
+            if let Some(current)=browser.tabs.iter().find(|t|t.id==restored.id && t.url==restored.url && t.private==restored.private){
+                restored.view=current.view.clone();
+            }else{restored.view=None;}
+        }
+        browser.tabs=entry.tabs;
+        browser.active_id=entry.active_id;
+        browser.next_id=browser.next_id.max(browser.tabs.iter().map(|t|t.id).max().unwrap_or(0)+1);
+        browser.warming.clear();
+        browser.last_notified=None;
+    }
+    for label in to_close{
+        if let Some(view)=app.get_webview(&label){let _=view.close();}
+    }
+    save_pinned(app)?;
+    activated(app)?;
+    notify(app);
+    Ok(true)
+}
 
 #[derive(Default)]
 struct LayoutCache {
@@ -697,6 +748,13 @@ fn browser_snapshot(app: tauri::AppHandle) -> Result<Snapshot,String> { snapshot
 
 #[tauri::command]
 async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Result<Value, String> {
+    if name=="undo" { return Ok(json!({"undone":undo_last(&app)?})); }
+    if matches!(name.as_str(),
+        "new"|"new-private"|"new-url"|"pin"|"unpin"|"toggle-pin"|
+        "duplicate"|"close"|"close-many"|"navigate"|"home"|"privacy"|
+        "back"|"forward") {
+        remember_undo(&app);
+    }
     match name.as_str() {
         "vault-status" => {
             let exists=password_vault::file(&app)?.exists();
@@ -1063,6 +1121,29 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             };
             navigate_tab(&app, id, url, true)?;
         }
+        "close-many" => {
+            let ids=value.as_array().ok_or("Expected tab ID array")?;
+            if ids.len()>MAX_TABS{return Err("Too many tabs".into());}
+            let wanted:HashSet<u32>=ids.iter().map(|v|v.as_u64().map(|x|x as u32)
+                .ok_or_else(||"Invalid tab ID".to_string())).collect::<Result<_,_>>()?;
+            let labels={
+                let state=app.state::<Mutex<Browser>>();
+                let mut b=state.lock().map_err(|e|e.to_string())?;
+                let mut labels=Vec::new();
+                b.tabs.retain(|t|{
+                    if wanted.contains(&t.id){if let Some(label)=&t.view{labels.push(label.clone());}false}
+                    else{true}
+                });
+                if !b.tabs.iter().any(|t|t.id==b.active_id){
+                    b.active_id=b.tabs.iter().find(|t|t.pinned).or_else(||b.tabs.first()).map(|t|t.id).unwrap_or(0);
+                }
+                labels
+            };
+            for label in labels {if let Some(wv)=app.get_webview(&label){let _=wv.close();}}
+            save_pinned(&app)?;
+            activated(&app)?;
+            return Ok(json!({"ok":true,"closed":wanted.len()}));
+        }
         "close" => {
             let id = value.as_u64().ok_or("Invalid tab")? as u32;
             let label = {
@@ -1205,6 +1286,7 @@ fn main() {
     tauri::Builder::default()
         .manage(PopupDeduper(Mutex::new(HashMap::new())))
         .manage(ZoomState(Mutex::new(1.0)))
+        .manage(UndoHistory(Mutex::new(VecDeque::new())))
         .manage(Mutex::new(Browser::new()))
         .manage(Mutex::new(password_vault::Vault::default()))
         .manage(Mutex::new(LayoutCache::default()))
