@@ -70,12 +70,13 @@ struct UndoState { tabs: Vec<Tab>, active_id:u32, split_ids:Vec<u32> }
 struct UndoHistory(Mutex<VecDeque<UndoState>>);
 
 fn remember_undo(app:&tauri::AppHandle) {
-    let snapshot={
+    let (tabs,active_id)={
         let state=app.state::<Mutex<Browser>>();
         let Ok(browser)=state.lock() else{return};
-        UndoState{tabs:browser.tabs.clone(),active_id:browser.active_id,
-            split_ids:app.state::<SplitState>().0.lock().map(|s|s.clone()).unwrap_or_default()}
+        (browser.tabs.clone(),browser.active_id)
     };
+    let split_ids=app.state::<SplitState>().0.lock().map(|s|s.clone()).unwrap_or_default();
+    let snapshot=UndoState{tabs,active_id,split_ids};
     if let Ok(mut list)=app.state::<UndoHistory>().0.lock(){
         if list.len()>=100{list.pop_front();}
         list.push_back(snapshot);
