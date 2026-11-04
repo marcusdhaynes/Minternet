@@ -909,3 +909,51 @@ html.minternet-overlay-active .group-editor-backdrop {
 .split-drag-zone{border:1px solid #a9a0df55;border-radius:7px;background:#8491c30e;
   transition:background 80ms ease,border-color 80ms ease;}
 .split-drag-zone.active{background:#ae9af05c;border:2px solid #d2c1ff99;}
+
+/* Tab-only context menus: deliberately denser than group/folder inspectors.
+   Blank strip is a three-action menu; individual tabs share this scale. */
+.minternet-context-menu.compact-tab-menu {
+  width:164px;
+  padding:3px;
+  border-radius:7px;
+  max-height:min(68vh,410px);
+}
+.compact-tab-menu .minternet-context-heading {
+  font-size:7px;
+  padding:2px 5px 4px;
+  margin-bottom:1px;
+  letter-spacing:.11em;
+}
+.minternet-context-menu.compact-tab-menu .system-popup-list{gap:0;}
+.minternet-context-menu.compact-tab-menu .system-popup-row {
+  font-size:9px;
+  min-height:19px;
+  line-height:1.15;
+  padding:2px 5px;
+  gap:3px;
+  border-radius:3px;
+}
+.minternet-context-menu.compact-tab-menu .system-popup-separator {
+  height:1px;
+  margin:2px 4px;
+}
+.minternet-context-menu.compact-tab-menu .system-popup-child {
+  width:164px;
+  min-width:155px;
+  max-height:min(65vh,370px);
+  border-radius:6px;
+  padding:2px;
+}
+.compact-tab-menu .tab-context-quick {
+  gap:3px;
+  padding:2px 0 4px;
+  margin-bottom:2px;
+}
+.compact-tab-menu .tab-context-quick-icon {
+  min-height:22px;
+  height:22px;
+  padding:2px;
+  border-radius:3px;
+}
+.compact-tab-menu .tab-context-quick-icon svg{width:13px;height:13px;}
+.compact-tab-menu .system-popup-arrow{font-size:10px;}
