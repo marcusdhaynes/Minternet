@@ -48,6 +48,7 @@
       <div class="history-controls">
         <button id="back" class="icon-btn" title="Back" aria-label="Back">←</button>
         <button id="forward" class="icon-btn" title="Forward" aria-label="Forward">→</button>
+        <button id="undo" class="icon-btn" title="Undo last change (Ctrl+Z)" aria-label="Undo last change">↶</button>
         <button id="reload" class="icon-btn" title="Reload" aria-label="Reload">↻</button>
       </div>
       <form id="addressForm" class="address-wrap" autocomplete="off">
@@ -87,6 +88,11 @@
           <option value="ecosia">Ecosia</option>
         </select>
       </label>
+      <div class="zoom-setting-row" aria-label="Page Zoom">
+        <span>Zoom</span><button id="zoomOut" type="button" aria-label="Zoom Out" title="Zoom Out (Ctrl+-)">−</button>
+        <output id="zoomLevel" aria-live="polite">100%</output>
+        <button id="zoomIn" type="button" aria-label="Zoom In" title="Zoom In (Ctrl++)">+</button>
+      </div>
       <button class="bookmark-menu-action" id="bookmarkSettingsManage">☆ Manage Bookmarks <span>›</span></button>
       <button class="bookmark-menu-action" id="passwordManagerOpen">♢ Passwords <span>›</span></button>
             <div class="bookmark-settings-foot">Saved locally · No account required</div>
