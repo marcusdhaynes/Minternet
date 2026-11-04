@@ -176,6 +176,17 @@ impl Vault {
         self.cards.push(PaymentCard{id:id.clone(),label,name,number,month,year,postal});
         Ok(id)
     }
+    pub fn update_card(&mut self,id:&str,label:String,name:String,
+                       month:u8,year:u16,postal:String)->Result<(),String>{
+        if !self.unlocked(){return Err("Unlock the encrypted vault first".into());}
+        if label.len()>80||name.trim().is_empty()||name.len()>120||
+            postal.len()>40||!(1..=12).contains(&month)||
+            !(2020..=2100).contains(&year){return Err("Invalid card details".into());}
+        let card=self.cards.iter_mut().find(|c|c.id==id).ok_or("Card not found")?;
+        card.name.zeroize();card.postal.zeroize();
+        card.label=label;card.name=name;card.month=month;card.year=year;card.postal=postal;
+        Ok(())
+    }
     pub fn remove_card(&mut self,id:&str)->Result<(),String>{
         if !self.unlocked(){return Err("Unlock the encrypted vault first".into());}
         let i=self.cards.iter().position(|c|c.id==id).ok_or("Card not found")?;
@@ -233,6 +244,9 @@ mod card_tests{
         vault.lock();
         assert!(vault.list_cards().is_err());
         vault.unlock(&path,"correct horse battery staple",false).unwrap();
+        assert_eq!(vault.card(&id).unwrap().number,"4111111111111111");
+        vault.update_card(&id,"Travel".into(),"Updated User".into(),3,2031,"10001".into()).unwrap();
+        assert_eq!(vault.card(&id).unwrap().name,"Updated User");
         assert_eq!(vault.card(&id).unwrap().number,"4111111111111111");
         let _=fs::remove_file(path);
     }
