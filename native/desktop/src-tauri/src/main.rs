@@ -1331,8 +1331,8 @@ fn fill_payment_card(app:&tauri::AppHandle,id:&str)->Result<bool,String>{
     let origin=password_vault::origin(&url)?;
     let mut card={
         let state=app.state::<Mutex<password_vault::Vault>>();
-        state.lock().map_err(|e|e.to_string())?.card(id)
-            .ok_or("Unlock the vault and choose a saved card")?
+        let vault=state.lock().map_err(|e|e.to_string())?;
+        vault.card(id).ok_or("Unlock the vault and choose a saved card")?
     };
     let webview=app.get_webview(&label).ok_or("No active webpage")?;
     let actual=webview.url().map_err(|e|e.to_string())?;
