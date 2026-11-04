@@ -249,7 +249,7 @@
     name.className='group-inspector-name';
     name.value=group.name;name.maxLength=42;name.title='Rename group';
     name.setAttribute('aria-label','Group name');
-    name.addEventListener('input',()=>groups()?.updateGroup(id,{name:name.value}));
+    name.addEventListener('change',()=>groups()?.updateGroup(id,{name:name.value.trim()}));
     name.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();groups()?.updateGroup(id,{name:name.value.trim()});closeFallback();}});
     const eye=document.createElement('button');
     eye.className='group-inspector-icon';
@@ -283,6 +283,9 @@
       const caption=document.createElement('span');caption.textContent=title;
       const range=document.createElement('input');range.type='range';range.min='0';range.max=String(max);range.value=String(channels[index]);range.setAttribute('aria-label',title);
       line.append(caption,range);huePanel.append(line);sliders.push(range);
+      range.addEventListener('pointerdown',()=>groups()?.beginColorUndo());
+      range.addEventListener('pointerup',()=>groups()?.endColorUndo());
+      range.addEventListener('pointercancel',()=>groups()?.endColorUndo());
       range.addEventListener('input',()=>{
         const hex=hsvToHex(...sliders.map(x=>Number(x.value)));
         groups()?.updateGroup(id,{color:hex});refreshSelected();
