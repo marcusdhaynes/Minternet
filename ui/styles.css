@@ -1016,3 +1016,50 @@ html.minternet-overlay-active .group-editor-backdrop {
 .downloads-reveal:hover{background:#665282;}
 .downloads-reveal:disabled{opacity:.32;cursor:default;}
 .downloads-footer{padding:6px 3px 1px;font-size:8px;color:#a9a0bd;}
+
+/* Search engine selector lives in the address bar's old diamond position. */
+.address-wrap .search-provider-button {
+  flex:0 0 21px;display:grid;place-items:center;
+  width:21px;height:21px;min-width:21px;
+  padding:1px;margin-left:-3px;
+  border:0;border-radius:5px;background:transparent;
+  color:#d8dee8;cursor:pointer;
+  -webkit-app-region:no-drag;
+}
+.address-wrap .search-provider-button svg {
+  display:block;width:17px;height:17px;overflow:visible;
+  pointer-events:none;
+}
+.address-wrap .search-provider-button.provider-chatgpt{color:#e8f0ec;}
+.address-wrap .search-provider-button.provider-temporary{
+  color:#b48aff;background:#a46df51d;
+}
+.address-wrap .search-provider-button:hover,
+.address-wrap .search-provider-button[aria-expanded="true"]{
+  background:#71609950;
+}
+.search-provider-menu {
+  position:fixed;z-index:420!important;
+  width:143px;padding:3px;border-radius:8px;
+}
+.search-provider-menu .minternet-context-heading {
+  font-size:7px;padding:3px 5px 5px;margin-bottom:2px;
+}
+.search-provider-option {
+  display:flex;align-items:center;gap:7px;
+  width:100%;height:24px;min-height:24px;
+  border:0;border-radius:5px;padding:3px 6px;
+  background:transparent;color:#eee9ff;cursor:pointer;
+  text-align:left;font-size:10px;
+}
+.search-provider-option:hover,.search-provider-option:focus-visible{
+  background:#70629a7b;outline:0;
+}
+.search-provider-option svg {
+  flex:0 0 16px;width:16px;height:16px;
+}
+.search-provider-hint {
+  margin-top:2px;padding:5px 5px 3px;
+  border-top:1px solid #bfa6ff25;
+  font-size:8px;line-height:1.35;color:#bcaed4;
+}
