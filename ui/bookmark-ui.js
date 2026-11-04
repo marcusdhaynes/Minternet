@@ -29,7 +29,9 @@
       const now=JSON.stringify(data);
       if(patch.start+patch.remove>now.length||patch.insert.length>950000)return false;
       const before=now.slice(0,patch.start)+patch.insert+now.slice(patch.start+patch.remove);
-      const parsed=model.hydrate(before);
+      const raw=JSON.parse(before);
+      if(!raw || !Array.isArray(raw.items))return false;
+      const parsed=model.hydrate(raw);
       data=parsed;
       applyVisibility();
       persist(true);
