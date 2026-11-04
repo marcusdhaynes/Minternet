@@ -124,7 +124,7 @@ fn undo_last(app:&tauri::AppHandle)->Result<bool,String> {
 
 #[derive(Default)]
 struct LayoutCache {
-    size_and_home: Option<(u32, u32, bool, bool, bool)>,
+    size_and_home: Option<(u32, u32, bool, bool, bool, u64)>,
     shown: HashSet<String>,
     bookmark_bar_visible: bool,
     overlay_open: bool,
@@ -442,12 +442,13 @@ fn refresh_layout(app: &tauri::AppHandle) {
         .lock()
         .map(|b| b.active().map(|t| t.url == HOME).unwrap_or(true))
         .unwrap_or(true);
+    let split_signature=visible_split(app).iter().fold(0u64,|hash,id|hash.wrapping_mul(37).wrapping_add(*id as u64));
     let (bar_visible, overlay_open) = {
         let cache = app.state::<Mutex<LayoutCache>>();
         let Ok(mut state) = cache.lock() else { return };
         let signature = (
             physical.width, physical.height, show_home,
-            state.bookmark_bar_visible, state.overlay_open
+            state.bookmark_bar_visible, state.overlay_open, split_signature
         );
         if state.size_and_home == Some(signature) { return; }
         state.size_and_home = Some(signature);
