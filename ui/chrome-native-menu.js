@@ -393,7 +393,7 @@
   });
   // The blank portion of the title/tab bar is another tab-bar target.
   // Never hijack native window buttons, the group button, or individual tabs.
-  document.querySelector('.tab-row')?.addEventListener('contextmenu',event=>{
+  document.querySelector?.('.tab-row')?.addEventListener('contextmenu',event=>{
     if(event.defaultPrevented || event.target.closest('button,.group-chip,.tab,[role="tab"]'))return;
     event.preventDefault();
     handlers.tab(null,{x:event.clientX,y:event.clientY});
