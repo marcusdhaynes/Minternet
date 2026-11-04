@@ -84,3 +84,25 @@ test('folder and subfolder context menus do not offer Bookmark This Page',()=>{
  const group=folderContext.find(x=>x.text?.includes('Tab Groups'));
  assert.ok(group);
 });
+
+test('blank tab strip creates a standalone group, without borrowing an active tab',()=>{
+  const h=harness();
+  let args;
+  h.window.minternetGroups.openEditor=(...values)=>{args=values;};
+  const menu=h.window.minternetMenus.inspectEmptyTabBar();
+  const create=menu.find(entry=>entry.text?.includes('New Group'));
+  assert.ok(create);
+  assert.equal(menu.some(entry=>entry.text?.includes('With This Tab')),false);
+  create.action();
+  assert.deepEqual(args,[null,false]);
+});
+test('right-clicking an actual tab directly offers a new group containing it',()=>{
+  const h=harness();
+  let args;
+  h.window.minternetGroups.openEditor=(...values)=>{args=values;};
+  const menu=h.window.minternetMenus.inspectTab(1);
+  const create=menu.find(entry=>entry.text?.includes('New Group With This Tab'));
+  assert.ok(create,'New Group With This Tab should be a direct action');
+  create.action();
+  assert.deepEqual(args,[null,1]);
+});
