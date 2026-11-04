@@ -66,30 +66,31 @@ struct PopupDeduper(Mutex<HashMap<(u32,String),Instant>>);
 struct ZoomState(Mutex<f64>);
 #[derive(Default)]
 struct SplitState(Mutex<Vec<u32>>);
-struct UndoState { tabs: Vec<Tab>, active_id:u32, split_ids:Vec<u32> }
+struct UndoState { tabs: Vec<Tab>, active_id:u32, split_ids:Vec<u32>, ui:Option<Value> }
 struct UndoHistory(Mutex<VecDeque<UndoState>>);
 
-fn remember_undo(app:&tauri::AppHandle) {
+fn remember_undo(app:&tauri::AppHandle, ui:Option<Value>) {
     let (tabs,active_id)={
         let state=app.state::<Mutex<Browser>>();
         let Ok(browser)=state.lock() else{return};
         (browser.tabs.clone(),browser.active_id)
     };
     let split_ids=app.state::<SplitState>().0.lock().map(|s|s.clone()).unwrap_or_default();
-    let snapshot=UndoState{tabs,active_id,split_ids};
+    let snapshot=UndoState{tabs,active_id,split_ids,ui};
     let history=app.state::<UndoHistory>();
     if let Ok(mut list)=history.0.lock(){
         if list.len()>=100{list.pop_front();}
         list.push_back(snapshot);
     };
 }
-fn undo_last(app:&tauri::AppHandle)->Result<bool,String> {
+fn undo_last(app:&tauri::AppHandle)->Result<Option<Value>,String> {
     let entry={
         let state=app.state::<UndoHistory>();
         let mut undo=state.0.lock().map_err(|e|e.to_string())?;
         undo.pop_back()
     };
-    let Some(mut entry)=entry else{return Ok(false)};
+    let Some(mut entry)=entry else{return Ok(None)};
+    let ui=entry.ui.take();
     let mut to_close=Vec::new();
     {
         let state=app.state::<Mutex<Browser>>();
@@ -120,7 +121,7 @@ fn undo_last(app:&tauri::AppHandle)->Result<bool,String> {
     save_pinned(app)?;
     activated(app)?;
     notify(app);
-    Ok(true)
+    Ok(Some(ui.unwrap_or(Value::Null)))
 }
 
 #[derive(Default)]
@@ -968,12 +969,23 @@ fn browser_snapshot(app: tauri::AppHandle) -> Result<Snapshot,String> { snapshot
 
 #[tauri::command]
 async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Result<Value, String> {
-    if name=="undo" { return Ok(json!({"undone":undo_last(&app)?})); }
+    if name=="undo" {
+        let result=undo_last(&app)?;
+        return Ok(json!({"undone":result.is_some(),"ui":result.flatten()}));
+    }
+    if name=="undo-ui-checkpoint" {
+        let kind=value.get("kind").and_then(Value::as_str).ok_or("Undo state kind required")?;
+        if kind!="groups" && kind!="bookmarks" {return Err("Unsupported UI undo kind".into());}
+        let size=serde_json::to_vec(&value).map_err(|e|e.to_string())?.len();
+        if size>256_000{return Err("Undo change exceeds size budget".into());}
+        remember_undo(&app,Some(value));
+        return Ok(json!({"ok":true}));
+    }
     if matches!(name.as_str(),
         "new"|"new-private"|"new-url"|"pin"|"unpin"|"toggle-pin"|
         "duplicate"|"close"|"close-many"|"navigate"|"home"|"privacy"|
         "back"|"forward"|"split-add"|"split-remove"|"split-clear") {
-        remember_undo(&app);
+        remember_undo(&app,None);
     }
     match name.as_str() {
         "vault-status" => {
