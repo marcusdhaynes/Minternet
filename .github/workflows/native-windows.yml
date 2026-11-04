@@ -49,8 +49,8 @@ jobs:
           python scripts/generate_icons.py
       - name: Build native portable EXE with embedded UI, no installer
         run: npm run build
-      - name: Verify password vault cryptographic round-trip and HTTPS isolation
-        run: cargo test --manifest-path src-tauri/Cargo.toml password_vault::tests
+      - name: Verify password vault cryptography and split-window geometry
+        run: cargo test --manifest-path src-tauri/Cargo.toml
       - name: Copy EXE ALONE to clean directory, ensure no sidecar dependencies
         shell: pwsh
         run: |
