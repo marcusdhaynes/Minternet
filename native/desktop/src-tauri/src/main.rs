@@ -1124,7 +1124,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         return Ok(json!({"ok":true}));
     }
     if matches!(name.as_str(),
-        "new"|"new-private"|"new-url"|"pin"|"unpin"|"toggle-pin"|
+        "new"|"new-private"|"new-url"|"new-background-url"|"pin"|"unpin"|"toggle-pin"|
         "duplicate"|"close"|"close-many"|"navigate"|"home"|"privacy"|
         "back"|"forward"|"split-add"|"split-remove"|"split-clear") {
         remember_undo(&app,None);
@@ -1537,16 +1537,30 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             return Ok(json!({"zoom":zoom}));
         }
         "prepare-tab" => { prepare_active(&app)?; }
-        "new" | "new-private" | "new-url" => {
+        "new" | "new-private" | "new-url" | "new-background-url" => {
             let private = name == "new-private";
+            // A Ctrl-click creates a new tab and starts loading its page, but
+            // never changes the active tab or steals keyboard focus.
+            let background = name == "new-background-url";
+            let address = if name == "new-url" || background {
+                let raw = value.as_str().ok_or("Missing URL")?;
+                Some(tauri::Url::parse(raw).map_err(|_|"Invalid URL".to_string())?)
+            }else{None};
+            if let Some(ref url)=address {
+                if url.scheme()!="https" || url.host_str().is_none() || !url.username().is_empty() || url.password().is_some() {
+                    return Err("Only secure HTTPS pages may open in a new tab".into());
+                }
+            }
             let id = {
                 let state = app.state::<Mutex<Browser>>();
                 let mut b = state.lock().map_err(|e| e.to_string())?;
-                b.add(private)?
+                let selected=b.active_id;
+                let id=b.add(private)?;
+                if background { b.active_id=selected; }
+                id
             };
-            if name == "new-url" {
-                let address = value.as_str().ok_or("Missing URL")?;
-                navigate_tab(&app, id, parse_address(address)?, true)?;
+            if let Some(url)=address {
+                navigate_tab(&app,id,Some(url),true)?;
             } else { display_active(&app); }
         }
         "deselect" => {
