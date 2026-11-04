@@ -1528,15 +1528,14 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         let history=app.state::<Mutex<browsing_history::History>>();
         let mut store=history.lock().map_err(|e|e.to_string())?;
         match name.as_str(){
-            "history-search"=>{
+            "history-search" | "history-list"=>{
                 if private{return Ok(json!([]));}
-                let query=value.as_str().unwrap_or("");
+                let query=value.as_str().or_else(||value.get("query").and_then(Value::as_str)).unwrap_or("");
                 if query.len()>240{return Ok(json!([]));}
-                return Ok(json!(store.search(query,25)));
-            },
-            "history-list"=>{
-                if private{return Ok(json!([]));}
-                return Ok(json!(store.search("",100)));
+                let offset=value.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize;
+                let limit=value.get("limit").and_then(Value::as_u64).map(|n|n as usize)
+                    .unwrap_or(if name=="history-search"{25}else{75});
+                return Ok(json!(store.search_page(query,offset,limit)));
             },
             "history-remove"=>{
                 let url=value.as_str().ok_or("History address missing")?;
