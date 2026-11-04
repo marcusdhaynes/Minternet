@@ -1075,3 +1075,99 @@ html.minternet-overlay-active .group-editor-backdrop {
 .bookmark-bar.bookmark-drop-target,
 .bookmark-manager.bookmark-drop-target,
 .bookmark-folder-menu.bookmark-drop-target{border-color:#cdb0ff80;}
+
+/* Purple incognito identity: unmistakable even when not selected. */
+.tab.private-tab{background:#47206888;border-color:#9c64db88;}
+.tab.private-tab:hover{background:#62288d9c;}
+.tab.private-tab.selected{background:#5b2d92!important;border-color:#c18cff!important;
+  box-shadow:inset 0 1px #e4b7ff42,0 -2px 10px #a25ce829;}
+.tab.private-tab .tab-choose{color:#eadbff;}
+.tab.private-tab .private-eye{display:grid;place-items:center;flex:0 0 13px;color:#dfb3ff;}
+.tab.private-tab .private-eye svg{width:13px;height:13px;display:block;}
+.private-active .address-wrap{border-color:#8d49c35c;}
+.private-active .toolbar{background-image:linear-gradient(90deg,#54228020,transparent 65%);}
+
+/* Nonprivate history and bookmarks combine into one keyboard-friendly
+   address completion list. Chrome is lifted above the site WebView. */
+.address-suggestions{position:fixed!important;z-index:465!important;
+  max-height:min(335px,56vh);overflow-y:auto;overflow-x:hidden;
+  box-sizing:border-box;padding:3px;border-radius:7px;}
+.history-suggestion{width:100%;display:flex;align-items:center;gap:7px;
+  text-align:left;border:0;border-radius:4px;color:#ece7fb;background:transparent;
+  padding:5px 7px;min-height:34px;cursor:pointer;}
+.history-suggestion:hover,.history-suggestion.chosen,.history-suggestion:focus-visible{
+  background:#8166b366;outline:none;}
+.history-suggestion-symbol{width:16px;flex:0 0 16px;text-align:center;
+  font-size:13px;color:#bba1e3;}
+.history-suggestion-text{min-width:0;flex:1;display:flex;flex-direction:column;gap:2px;}
+.history-suggestion-text strong,.history-suggestion-text small{
+  text-overflow:ellipsis;overflow:hidden;white-space:nowrap;}
+.history-suggestion-text strong{font-size:10px;font-weight:600;}
+.history-suggestion-text small{font-size:9px;color:#a7a2c2;}
+.toolbar-actions #historyButton{display:grid;place-items:center;flex:0 0 23px;width:23px;
+  height:23px;border-radius:4px;color:#cfc8e1;background:transparent;border:0;padding:0;}
+.toolbar-actions #historyButton:hover,
+.toolbar-actions #historyButton[aria-expanded="true"]{color:#fff;background:#67568460;}
+.history-popup{position:fixed!important;z-index:466!important;
+  width:275px;max-width:calc(100vw - 8px);height:auto;
+  max-height:min(420px,70vh);overflow:hidden;padding:5px;border-radius:8px;}
+.history-head{display:flex;align-items:center;padding:3px 5px 6px;gap:8px;
+  border-bottom:1px solid #a68cc83d;}
+.history-head strong{font-size:11px;flex:1;}
+.history-head button,.history-remove{font-size:9px;border:0;border-radius:4px;
+  padding:4px 6px;color:#cfc8e1;background:#6351794b;cursor:pointer;}
+.history-head button:hover,.history-remove:hover{background:#7d5d9b;}
+.history-entries{overflow:auto;max-height:355px;font-size:10px;color:#bdb3d2;
+  scrollbar-width:thin;}
+.history-entry{display:flex;align-items:center;gap:3px;min-height:37px;
+  border-bottom:1px solid #c7b0f11a;}
+.history-entry-open{display:grid;text-align:left;gap:2px;min-width:0;flex:1;
+  padding:5px 4px;border:0;background:transparent;color:#f0eafe;cursor:pointer;}
+.history-entry-open:hover{background:#76649a38;}
+.history-entry-open strong,.history-entry-open small{overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap;}
+.history-entry-open strong{font-size:10px;}
+.history-entry-open small{font-size:9px;color:#a99fc0;}
+.history-remove{flex:0 0 21px;height:21px;}
+
+/* Payment panel never blurs/resizes active websites; it floats above the
+   native surface. Card details remain inside encrypted native vault only. */
+.payment-screen{position:fixed;z-index:480;inset:0;display:flex;justify-content:flex-end;
+  align-items:flex-start;padding:calc(var(--chrome-height,52px) + 5px) 7px 5px;}
+.payment-backdrop{position:absolute;inset:0;background:transparent;}
+.payment-panel{position:relative;z-index:1;display:flex;flex-direction:column;
+  width:min(322px,calc(100vw - 14px));max-height:calc(100vh - 64px);
+  overflow:auto;padding:9px;color:#f0eaff;border:1px solid #8d72b0ab;
+  border-radius:10px;background:#211b31f5;box-shadow:0 12px 44px #0009;
+  backdrop-filter:blur(14px);}
+.payment-head{display:flex;align-items:center;gap:5px;padding:1px 0 6px;
+  border-bottom:1px solid #aa8dca44;}
+.payment-head strong{flex:1;font-size:12px;}
+.payment-head button,.payment-auth button,.payment-save,.payment-card button{
+  border:1px solid #8a73ac80;border-radius:5px;background:#584674;
+  color:#f3eaff;font-size:10px;padding:5px 7px;cursor:pointer;}
+.payment-head button:hover,.payment-auth button:hover,.payment-save:hover,
+.payment-card button:hover{background:#765b9a;}
+.payment-info{font-size:9px;line-height:1.4;color:#c1b1d9;margin:7px 0;}
+.payment-auth,.payment-form{display:grid;gap:7px;padding:6px 0;}
+.payment-auth[hidden],.payment-form[hidden],.payment-list[hidden],
+.payment-lock[hidden]{display:none!important;}
+.payment-field{display:grid;gap:4px;font-size:10px;color:#d5c8e9;}
+.payment-field input{width:100%;min-width:0;height:28px;padding:4px 6px;
+  color:#fff;background:#181323;border:1px solid #8e74a085;
+  border-radius:5px;font-size:11px;}
+.payment-expiry{display:grid;grid-template-columns:1fr 1fr;gap:7px;}
+.payment-save{width:100%;font-weight:600;}
+.payment-list-heading{font-size:10px;margin-top:6px;padding:5px 0;
+  border-bottom:1px solid #b79cdb38;}
+.payment-list{max-height:220px;overflow:auto;}
+.payment-card{display:flex;align-items:center;gap:4px;padding:6px 0;
+  border-bottom:1px solid #b79cdb24;}
+.payment-card-caption{display:grid;gap:2px;min-width:0;flex:1;}
+.payment-card-caption strong,.payment-card-caption small{overflow:hidden;
+  white-space:nowrap;text-overflow:ellipsis;}
+.payment-card-caption strong{font-size:10px;}
+.payment-card-caption small{font-size:9px;color:#bcadd0;}
+.payment-card-delete{color:#ffb0c4!important;}
+.payment-empty,.payment-status{font-size:9px;line-height:1.5;color:#c6b4e0;}
+.payment-status{min-height:12px;margin:6px 0 0;}
