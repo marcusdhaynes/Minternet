@@ -509,6 +509,119 @@ mod search_provider_tests {
         }
     }
 }
+// Inspect the bookmarked document for its actual declared site icon.
+// GitHub Pages apps commonly publish /Project/favicon.svg; guessing
+// https://username.github.io/favicon.ico returns a generic/missing icon.
+fn html_attribute(tag:&str,name:&str)->Option<String>{
+    let bytes=tag.as_bytes();
+    let mut i=0usize;
+    while i<bytes.len(){
+        while i<bytes.len() && (!bytes[i].is_ascii_alphanumeric() && bytes[i]!=b'_' && bytes[i]!=b'-'){i+=1;}
+        let start=i;
+        while i<bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i]==b'_' || bytes[i]==b'-'){i+=1;}
+        if i==start{continue;}
+        let attr=&tag[start..i];
+        while i<bytes.len() && bytes[i].is_ascii_whitespace(){i+=1;}
+        if i>=bytes.len() || bytes[i]!=b'=' {continue;}
+        i+=1;
+        while i<bytes.len() && bytes[i].is_ascii_whitespace(){i+=1;}
+        if i>=bytes.len(){break;}
+        let value=if bytes[i]==b'"' || bytes[i]==b'\''{
+            let quote=bytes[i];i+=1;let begin=i;
+            while i<bytes.len() && bytes[i]!=quote {i+=1;}
+            let value=&tag[begin..i];
+            if i<bytes.len(){i+=1;}
+            value
+        }else{
+            let begin=i;
+            while i<bytes.len() && !bytes[i].is_ascii_whitespace() && bytes[i]!=b'>'{i+=1;}
+            &tag[begin..i]
+        };
+        if attr.eq_ignore_ascii_case(name){
+            return Some(value.replace("&amp;","&").replace("&#38;","&"));
+        }
+    }
+    None
+}
+fn declared_site_icons(html:&str,page:&tauri::Url)->Vec<String>{
+    let lower=html.to_ascii_lowercase();
+    let mut seek=0;
+    let mut discovered=Vec::<(u8,String)>::new();
+    while let Some(offset)=lower[seek..].find("<link") {
+        let start=seek+offset;
+        let Some(close_offset)=lower[start..].find('>') else{break};
+        let end=start+close_offset+1;
+        if end-start>1800{seek=end;continue;}
+        let tag=&html[start..end];
+        seek=end;
+        let Some(rel)=html_attribute(tag,"rel") else{continue};
+        let words=rel.to_ascii_lowercase();
+        let (priority,allowed)=if words.split_whitespace().any(|part|part=="icon"){
+            (0,true)
+        }else if words.contains("apple-touch-icon"){
+            (2,true)
+        }else{(3,false)};
+        if !allowed{continue;}
+        let Some(href)=html_attribute(tag,"href") else{continue};
+        let Ok(url)=page.join(href.trim()) else{continue};
+        if url.scheme()!="https" || url.host_str().is_none() ||
+            !url.username().is_empty() || url.password().is_some(){continue;}
+        // For ordinary icons prefer scalable SVG, but honor the original
+        // document's link order for ties.
+        let priority=if priority==0 && (url.path().ends_with(".svg") ||
+            html_attribute(tag,"type").as_deref()==Some("image/svg+xml")){0}
+            else if priority==0{1}else{priority};
+        let address=url.to_string();
+        if !discovered.iter().any(|(_,v)|*v==address){
+            discovered.push((priority,address));
+        }
+        if discovered.len()>=16 {break;}
+    }
+    discovered.sort_by_key(|(priority,_)|*priority);
+    discovered.into_iter().map(|(_,href)|href).collect()
+}
+fn lookup_site_icons(url:&str)->Vec<String>{
+    use std::io::Read;
+    let Ok(mut page)=tauri::Url::parse(url) else{return Vec::new()};
+    if page.scheme()!="https" || page.host_str().is_none() ||
+       !page.username().is_empty() || page.password().is_some(){return Vec::new();}
+    // Never probe local addresses as part of bookmark icon discovery.
+    let host=page.host_str().unwrap_or_default().to_ascii_lowercase();
+    if host=="localhost" || host.ends_with(".localhost") ||
+       host.ends_with(".local") || host.parse::<std::net::IpAddr>().is_ok(){
+        return Vec::new();
+    }
+    page.set_fragment(None);
+    // Avoid forwarding bookmark URL search/query tokens in icon lookups.
+    page.set_query(None);
+    let agent=ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(2))
+        .timeout_read(Duration::from_secs(3))
+        .timeout_write(Duration::from_secs(2))
+        .redirects(0)
+        .build();
+    for _ in 0..3 {
+        let response=match agent.get(page.as_str()).set("Accept","text/html").call(){
+            Ok(response)=>response,
+            Err(ureq::Error::Status(code,response)) if (300..400).contains(&code)=>{
+                let Some(location)=response.header("Location") else{break};
+                let Ok(next)=page.join(location) else{break};
+                if next.scheme()!="https" || !next.username().is_empty() ||
+                   next.password().is_some() {break;}
+                page=next;continue;
+            },
+            Err(_)=>break,
+        };
+        let mime=response.header("Content-Type").unwrap_or("");
+        if !mime.to_ascii_lowercase().contains("text/html"){break;}
+        let mut data=Vec::new();
+        if response.into_reader().take(262_144).read_to_end(&mut data).is_err(){break;}
+        let html=String::from_utf8_lossy(&data);
+        return declared_site_icons(&html,&page);
+    }
+    Vec::new()
+}
+
 fn percent_encode_search(text: &str) -> String {
     let mut output = String::new();
     for byte in text.as_bytes() {
@@ -1274,6 +1387,15 @@ fn browser_snapshot(app: tauri::AppHandle) -> Result<Snapshot,String> { snapshot
 
 #[tauri::command]
 async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Result<Value, String> {
+    if name=="bookmark-site-icons" {
+        let url=value.as_str().ok_or("Expected bookmarked HTTPS URL")?;
+        if url.len()>4096 {return Err("Bookmark URL too long".into());}
+        let target=url.to_owned();
+        // Never block the browser's main/IPC executor for favicon discovery.
+        let discovered=tauri::async_runtime::spawn_blocking(move||lookup_site_icons(&target))
+            .await.map_err(|e|e.to_string())?;
+        return Ok(json!(discovered));
+    }
     if name=="undo" {
         let result=undo_last(&app)?;
         return Ok(json!({"undone":result.is_some(),"ui":result.clone().unwrap_or(Value::Null)}));
