@@ -66,7 +66,8 @@ struct PopupDeduper(Mutex<HashMap<(u32,String),Instant>>);
 struct ZoomState(Mutex<f64>);
 #[derive(Default)]
 struct SplitState(Mutex<Vec<u32>>);
-struct UndoState { tabs: Vec<Tab>, active_id:u32, split_ids:Vec<u32>, ui:Option<Value> }
+struct SplitRatios(Mutex<(f64,f64)>);
+struct UndoState { tabs: Vec<Tab>, active_id:u32, split_ids:Vec<u32>, ratios:(f64,f64), ui:Option<Value> }
 struct UndoHistory(Mutex<VecDeque<UndoState>>);
 
 fn remember_undo(app:&tauri::AppHandle, ui:Option<Value>) {
@@ -76,7 +77,8 @@ fn remember_undo(app:&tauri::AppHandle, ui:Option<Value>) {
         (browser.tabs.clone(),browser.active_id)
     };
     let split_ids=app.state::<SplitState>().0.lock().map(|s|s.clone()).unwrap_or_default();
-    let snapshot=UndoState{tabs,active_id,split_ids,ui};
+    let ratios=app.state::<SplitRatios>().0.lock().map(|r|*r).unwrap_or((0.5,0.5));
+    let snapshot=UndoState{tabs,active_id,split_ids,ratios,ui};
     let history=app.state::<UndoHistory>();
     if let Ok(mut list)=history.0.lock(){
         if list.len()>=100{list.pop_front();}
@@ -117,6 +119,7 @@ fn undo_last(app:&tauri::AppHandle)->Result<Option<Value>,String> {
         if let Some(view)=app.get_webview(&label){let _=view.close();}
     }
     *app.state::<SplitState>().0.lock().map_err(|e|e.to_string())?=entry.split_ids;
+    *app.state::<SplitRatios>().0.lock().map_err(|e|e.to_string())?=entry.ratios;
     invalidate_layout(app);
     save_pinned(app)?;
     activated(app)?;
@@ -393,25 +396,28 @@ fn chrome_top(app: &tauri::AppHandle) -> f64 {
     CHROME + if bar_visible { BOOKMARK_BAR } else { 0.0 }
 }
 
-fn split_rect(index:usize,count:usize,width:f64,height:f64,top:f64)->(f64,f64,f64,f64){
+fn split_rect(index:usize,count:usize,width:f64,height:f64,top:f64,
+              horizontal:f64,vertical:f64)->(f64,f64,f64,f64){
+    let left=(width*horizontal.clamp(0.2,0.8)).round();
+    let right=width-left;
+    let upper=(height*vertical.clamp(0.2,0.8)).round();
+    let lower=height-upper;
     match count {
-        2 => {
-            let w=width/2.0;
-            (index as f64*w,top,w,height)
-        }
-        3 => {
-            let w=width/2.0;
-            if index==0{(0.0,top,w,height)}
-            else{(w,top+(index-1) as f64*height/2.0,w,height/2.0)}
-        }
-        4 => {
-            let w=width/2.0;let h=height/2.0;
-            (((index % 2) as f64)*w,top+((index / 2) as f64)*h,w,h)
-        }
-        _ => (0.0,top,width,height)
+        2=>if index==0{(0.0,top,left,height)}else{(left,top,right,height)},
+        3=>match index{
+            0=>(0.0,top,left,height),
+            1=>(left,top,right,upper),
+            _=>(left,top+upper,right,lower)
+        },
+        4=>match index{
+            0=>(0.0,top,left,upper),
+            1=>(left,top,right,upper),
+            2=>(0.0,top+upper,left,lower),
+            _=>(left,top+upper,right,lower)
+        },
+        _=>(0.0,top,width,height)
     }
 }
-
 fn return_split_pane(app:&tauri::AppHandle,id:u32){
     let remaining={
         let state=app.state::<SplitState>();
@@ -468,6 +474,7 @@ fn start_split_badge_drag(_app:tauri::AppHandle,_id:u32){}
 
 fn update_split_badges(app:&tauri::AppHandle,window:&tauri::Window,
                        ids:&[u32],width:f64,height:f64,top:f64){
+    let ratios=app.state::<SplitRatios>().0.lock().map(|r|*r).unwrap_or((0.5,0.5));
     let title_map={
         let state=app.state::<Mutex<Browser>>();
         let Ok(browser)=state.lock() else{return};
@@ -481,7 +488,7 @@ fn update_split_badges(app:&tauri::AppHandle,window:&tauri::Window,
     }
     if ids.len()<2{return;}
     for (index,id) in ids.iter().enumerate(){
-        let (x,y,w,_)=split_rect(index,ids.len(),width,height,top);
+        let (x,y,w,_)=split_rect(index,ids.len(),width,height,top,ratios.0,ratios.1);
         let label=format!("split-badge-{id}");
         let position=LogicalPosition::new(x+6.0,y+6.0);
         let size=LogicalSize::new(w.min(190.0).max(40.0)-12.0,24.0);
@@ -578,13 +585,14 @@ fn refresh_layout(app: &tauri::AppHandle) {
     let available = (height - top).max(1.0);
     let positions=visible_split(app);
     let split_count=if positions.len()>1{positions.len()}else{0};
+    let ratios=app.state::<SplitRatios>().0.lock().map(|r|*r).unwrap_or((0.5,0.5));
     for view in window.webviews() {
         if view.label() == "chrome" || view.label().starts_with("split-badge-") {continue;}
         let index=if split_count>0 {
             positions.iter().position(|id|view.label()==format!("tab-{id}"))
         }else{None};
         let (x,y,w,h)=if let Some(index)=index {
-            split_rect(index,split_count,width,available,top)
+            split_rect(index,split_count,width,available,top,ratios.0,ratios.1)
         }else{(0.0,top,width,available)};
         let _ = view.set_position(LogicalPosition::new(x,y));
         let _ = view.set_size(LogicalSize::new(w.max(1.0),h.max(1.0)));
@@ -1682,6 +1690,7 @@ fn main() {
         .manage(PopupDeduper(Mutex::new(HashMap::new())))
         .manage(ZoomState(Mutex::new(1.0)))
         .manage(SplitState::default())
+        .manage(SplitRatios(Mutex::new((0.5,0.5))))
         .manage(UndoHistory(Mutex::new(VecDeque::new())))
         .manage(Mutex::new(Browser::new()))
         .manage(Mutex::new(password_vault::Vault::default()))
