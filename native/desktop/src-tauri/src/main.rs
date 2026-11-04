@@ -81,7 +81,7 @@ fn remember_undo(app:&tauri::AppHandle) {
     if let Ok(mut list)=history.0.lock(){
         if list.len()>=100{list.pop_front();}
         list.push_back(snapshot);
-    }
+    };
 }
 fn undo_last(app:&tauri::AppHandle)->Result<bool,String> {
     let entry={
@@ -414,7 +414,7 @@ fn invalidate_layout(app:&tauri::AppHandle){
     let state=app.state::<Mutex<LayoutCache>>();
     if let Ok(mut cache)=state.lock(){
         cache.size_and_home=None;
-    }
+    };
 }
 fn prune_splits(app:&tauri::AppHandle){
     let ids={
@@ -1203,7 +1203,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 view.with_webview(move |native| {
                     use windows::core::Interface;
                     use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_8;
-                    if let Ok(audio)=native.inner().cast::<ICoreWebView2_8>(){
+                    if let Ok(audio)=(unsafe{native.controller().CoreWebView2()}).and_then(|webview|webview.cast::<ICoreWebView2_8>()){
                         let mut current=windows::core::BOOL::default();
                         let _=unsafe{audio.IsMuted(&mut current)};
                         let _=unsafe{audio.SetIsMuted(!current.as_bool())};
