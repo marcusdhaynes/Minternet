@@ -410,6 +410,117 @@ fn split_rect(index:usize,count:usize,width:f64,height:f64,top:f64)->(f64,f64,f6
         _ => (0.0,top,width,height)
     }
 }
+
+fn return_split_pane(app:&tauri::AppHandle,id:u32){
+    let remaining={
+        let state=app.state::<SplitState>();
+        let Ok(mut split)=state.0.lock() else{return};
+        split.retain(|entry|*entry!=id);
+        if split.len()<2 {split.clear();}
+        split.clone()
+    };
+    if remaining.len()>1 {
+        let state=app.state::<Mutex<Browser>>();
+        if let Ok(mut browser)=state.lock(){
+            if browser.active_id==id {browser.active_id=remaining[0];}
+        }
+    }
+    invalidate_layout(app);
+    display_active(app);
+}
+#[cfg(windows)]
+fn start_split_badge_drag(app:tauri::AppHandle,id:u32){
+    std::thread::spawn(move||{
+        use windows::Win32::Foundation::POINT;
+        use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+        use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState,VK_LBUTTON};
+        let mut start=POINT::default();
+        if unsafe{GetCursorPos(&mut start)}.is_err(){return;}
+        let deadline=Instant::now()+Duration::from_secs(12);
+        loop {
+            std::thread::sleep(Duration::from_millis(16));
+            if Instant::now()>=deadline{return;}
+            if unsafe{GetAsyncKeyState(VK_LBUTTON.0 as i32)}>=0 {
+                let mut end=POINT::default();
+                if unsafe{GetCursorPos(&mut end)}.is_err(){return;}
+                let Some(window)=app.get_window("main") else{return};
+                let Ok(position)=window.outer_position() else{return};
+                let Ok(scale)=window.scale_factor() else{return};
+                let local_y=(end.y-position.y) as f64/scale;
+                let local_x=(end.x-position.x) as f64/scale;
+                let dx=end.x-start.x;
+                let dy=end.y-start.y;
+                // A short click is handled by the badge's Return button.
+                // Dragging up into the actual tab strip unsplits this pane.
+                if dx*dx+dy*dy>400 && (0.0..=22.0).contains(&local_y)
+                    && local_x>=47.0 {
+                    let handle=app.clone();
+                    let _=app.run_on_main_thread(move||return_split_pane(&handle,id));
+                }
+                return;
+            }
+        }
+    });
+}
+#[cfg(not(windows))]
+fn start_split_badge_drag(_app:tauri::AppHandle,_id:u32){}
+
+fn update_split_badges(app:&tauri::AppHandle,window:&tauri::Window,
+                       ids:&[u32],width:f64,height:f64,top:f64){
+    let title_map={
+        let state=app.state::<Mutex<Browser>>();
+        let Ok(browser)=state.lock() else{return};
+        browser.tabs.iter().map(|tab|(tab.id,tab.title.clone()))
+            .collect::<HashMap<_,_>>()
+    };
+    for existing in window.webviews() {
+        if !existing.label().starts_with("split-badge-"){continue;}
+        let still_used=ids.iter().any(|id|existing.label()==format!("split-badge-{id}"));
+        if !still_used {let _=existing.close();}
+    }
+    if ids.len()<2{return;}
+    for (index,id) in ids.iter().enumerate(){
+        let (x,y,w,_)=split_rect(index,ids.len(),width,height,top);
+        let label=format!("split-badge-{id}");
+        let position=LogicalPosition::new(x+6.0,y+6.0);
+        let size=LogicalSize::new(w.min(190.0).max(40.0)-12.0,24.0);
+        if let Some(view)=app.get_webview(&label){
+            let _=view.set_position(position);
+            let _=view.set_size(size);
+            let _=view.show();
+            continue;
+        }
+        let title=title_map.get(id).cloned().unwrap_or_else(||"Split Tab".into());
+        let safe_title=serde_json::to_string(&title).unwrap_or_else(|_|"\"Split Tab\"".into());
+        let callback_app=app.clone();
+        let badge_id=*id;
+        let builder=WebviewBuilder::new(label,WebviewUrl::App("split-badge.html".into()))
+            .transparent(true)
+            .on_navigation(move |url|{
+                if url.host_str()==Some("minternet.invalid") {
+                    match url.path(){
+                        "/return"=>{
+                            let handle=callback_app.clone();
+                            let _=callback_app.run_on_main_thread(move||return_split_pane(&handle,badge_id));
+                        },
+                        "/drag"=>start_split_badge_drag(callback_app.clone(),badge_id),
+                        _=>{}
+                    }
+                    return false;
+                }
+                let hostname=url.host_str().unwrap_or("");
+                // A badge only ever loads its own packaged local HTML.
+                url.scheme()=="tauri" || hostname=="tauri.localhost" || hostname=="localhost"
+            })
+            .on_page_load(move |view,event|{
+                if matches!(event.event(),PageLoadEvent::Finished){
+                    let _=view.eval(&format!("document.getElementById('title').textContent={safe_title};"));
+                }
+            });
+        let _=window.add_child(builder,position,size);
+    }
+}
+
 fn invalidate_layout(app:&tauri::AppHandle){
     let state=app.state::<Mutex<LayoutCache>>();
     if let Ok(mut cache)=state.lock(){
@@ -467,7 +578,7 @@ fn refresh_layout(app: &tauri::AppHandle) {
     let positions=visible_split(app);
     let split_count=if positions.len()>1{positions.len()}else{0};
     for view in window.webviews() {
-        if view.label() == "chrome" { continue; }
+        if view.label() == "chrome" || view.label().starts_with("split-badge-") {continue;}
         let index=if split_count>0 {
             positions.iter().position(|id|view.label()==format!("tab-{id}"))
         }else{None};
@@ -477,6 +588,7 @@ fn refresh_layout(app: &tauri::AppHandle) {
         let _ = view.set_position(LogicalPosition::new(x,y));
         let _ = view.set_size(LogicalSize::new(w.max(1.0),h.max(1.0)));
     }
+    update_split_badges(app,&window,if split_count>1 {&positions} else {&[]},width,available,top);
 }
 fn display_active(app: &tauri::AppHandle) {
     let mut targets=HashSet::new();
