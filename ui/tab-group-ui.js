@@ -52,6 +52,7 @@
     try {const stored=JSON.parse(model.serialize(state));stored.slots=latest.tabs.filter(t=>!t.private).map(t=>state.assignments[String(t.id)]||null);stored.visualOrder=state.order.map(id=>latest.tabs.filter(t=>!t.private).findIndex(t=>t.id===id)).filter(i=>i>=0);localStorage.setItem(KEY,JSON.stringify(stored));}
     catch { window.minternetToast?.('Cannot save tab groups locally.');}
     repaint();
+    if(!skipUndo)window.dispatchEvent(new CustomEvent('minternet:local-change',{detail:{kind:'group'}}));
   }
   function displayName(g) {return g.name || 'Unnamed Group';}
   function groupColor(g) {return palette[g.color]||(/^#[0-9a-f]{6}$/i.test(g.color)?g.color:palette.purple);}

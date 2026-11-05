@@ -62,6 +62,7 @@
     }
     renderBar();
     renderStar();
+    if(!skipUndo)window.dispatchEvent(new CustomEvent('minternet:local-change',{detail:{kind:'bookmark'}}));
     if (mode === 'manager') renderManager();
     if (mode === 'folder') renderFolder();
   }

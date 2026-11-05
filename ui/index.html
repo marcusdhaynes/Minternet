@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://*.supabase.co wss://*.supabase.co; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
   <title>Minternet</title>
   <link rel="icon" type="image/png" href="./minternet-brand.png">
   <link rel="stylesheet" href="./styles.css">
@@ -22,6 +22,8 @@
   <script src="./history-ui.js" defer></script>
   <script src="./payment-ui.js" defer></script>
   <script src="./google-sync-core.js" defer></script>
+  <script src="./live-sync-core.js" defer></script>
+  <script src="./live-sync-transport.js" defer></script>
   <script src="./google-sync-ui.js" defer></script>
 </head>
 <body>
@@ -110,9 +112,11 @@
           <div class="google-choice"><button type="button" id="googleSyncYes">Yes, Sync</button><button type="button" id="googleSyncNo">No, Keep Local</button></div>
         </div>
         <div id="googleSyncEncryption" hidden>
-          <label>Sync Encryption Passphrase<input id="googleSyncPassphrase" type="password" autocomplete="new-password" minlength="12" placeholder="Same passphrase on every device"></label>
-          <small>Required once per session to decrypt data on this device. Your passphrase is never sent to Google.</small>
-          <button type="button" id="googleSyncEnable" class="google-primary-button">Enable Encrypted Sync</button>
+          <label>Minternet Realtime Backend URL<input id="googleLiveUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://your-minternet.supabase.co"></label>
+          <label>Publishable Key<input id="googleLiveKey" autocomplete="off" spellcheck="false" placeholder="sb_publishable_…"></label>
+          <label>Sync Encryption Passphrase<input id="googleSyncPassphrase" type="password" autocomplete="new-password" minlength="16" placeholder="Same passphrase on every device"></label>
+          <small>Google identity verifies the account. An encrypted, per-item Realtime channel sends updates immediately; passwords, payment methods and Undo all use server-assigned ordering. No Drive polling.</small>
+          <button type="button" id="googleSyncEnable" class="google-primary-button">Enable Live Encrypted Sync</button>
         </div>
         <div id="googleSyncConnected" hidden>
           <span id="googleSyncEmail" class="google-account-email"></span>

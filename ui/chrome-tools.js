@@ -27,6 +27,12 @@
   if(window.__TAURI__)void setZoom(zoom);
   const undo=$('undo');
   undo?.addEventListener('click',async()=>{
+    if(window.minternetSyncV2?.active){
+      try{await window.minternetSyncV2.undo();}catch(err){
+        window.minternetToast?.('Shared Undo unavailable: '+String(err.message||err));
+      }
+      return;
+    }
     const result=await api.command('undo');
     if(result?.undone===false)window.minternetToast?.('Nothing to undo.');
     else if(result?.message)window.minternetToast?.(result.message);
