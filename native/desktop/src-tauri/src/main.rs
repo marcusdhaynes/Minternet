@@ -1756,6 +1756,81 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             google_account::push(&handle.state::<Mutex<google_account::GoogleState>>(),&encrypted))
             .await.map_err(|e|e.to_string())?;
     }
+    if name=="live-sync-apply-tab" {
+        // Remote changes never create private/Tor tabs, switch focus, or steal
+        // typed page data. Existing active pages are not silently destroyed.
+        let sync_id=value.get("syncId").and_then(Value::as_str)
+            .ok_or("Missing stable tab identity")?;
+        if !(sync_id.len()==32 && sync_id.chars().all(|c|c.is_ascii_hexdigit())){
+            return Err("Invalid cross-device tab identity".into());
+        }
+        let deleted=value.get("deleted").and_then(Value::as_bool)==Some(true);
+        let pinned=value.get("pinned").and_then(Value::as_bool)==Some(true);
+        let dest=if deleted {None}else{
+            let address=value.get("url").and_then(Value::as_str)
+                .ok_or("Missing synced HTTPS URL")?;
+            let url=tauri::Url::parse(address).map_err(|_|"Invalid tab URL")?;
+            if url.scheme()!="https"||url.host_str().is_none()||
+               url.host_str().is_some_and(|h|h.ends_with(".onion"))||
+               !url.username().is_empty()||url.password().is_some()||
+               address.len()>2048{return Err("Private, Tor or unsafe URL excluded".into());}
+            Some(address.to_owned())
+        };
+        let (changed,to_close,deferred)={
+            let store=app.state::<Mutex<Browser>>();
+            let mut b=store.lock().map_err(|e|e.to_string())?;
+            let found=b.tabs.iter().position(|t|t.sync_id==sync_id&&!t.private);
+            let mut to_close=None;
+            let mut changed=false;
+            let mut deferred=false;
+            if let Some(i)=found{
+                let active=b.tabs[i].id==b.active_id;
+                if deleted {
+                    if active {deferred=true;}
+                    else {
+                        let old=b.tabs.remove(i);
+                        to_close=old.view;
+                        changed=true;
+                    }
+                }else if let Some(url)=dest.as_ref(){
+                    if active&&b.tabs[i].url!=*url{deferred=true;}
+                    else {
+                        let tab=&mut b.tabs[i];
+                        if tab.url!=*url {
+                            to_close=tab.view.take();
+                            tab.url=url.clone();
+                            tab.title=title_for(url);
+                            tab.history=vec![HOME.into(),url.clone()];
+                            tab.at=1;tab.loading=false;
+                            tab.inactive_since=Some(Instant::now());
+                            changed=true;
+                        }
+                        if tab.pinned!=pinned{tab.pinned=pinned;changed=true;}
+                    }
+                }
+            }else if !deleted && b.tabs.len()<MAX_TABS {
+                let selected=b.active_id;
+                let id=b.add(false)?;
+                if let (Some(tab),Some(url))=(b.tabs.iter_mut().find(|t|t.id==id),dest.as_ref()){
+                    tab.sync_id=sync_id.to_owned();
+                    tab.pinned=pinned;tab.url=url.clone();
+                    tab.title=title_for(url);tab.history=vec![HOME.into(),url.clone()];
+                    tab.at=1;tab.inactive_since=Some(Instant::now());
+                }
+                b.active_id=selected;changed=true;
+            }else if !deleted {deferred=true;}
+            (changed,to_close,deferred)
+        };
+        if let Some(label)=to_close {
+            if let Some(view)=app.get_webview(&label){let _=view.close();}
+        }
+        if changed {
+            let _=save_pinned(&app);
+            let _=save_session(&app);
+            notify(&app);
+        }
+        return Ok(json!({"ok":true,"changed":changed,"deferred":deferred}));
+    }
     if name=="google-sync-tabs-merge" {
         // Sync never mutates private tabs or foreground input, and unopened
         // remote tabs stay suspended until the user explicitly selects one.
