@@ -493,6 +493,25 @@
     displayName, groupColor, createGroup, updateGroup, toggleVisible, toggleCollapsed,
     assign, ungroup, pin, removeGroup, openEditor, closeEditor, renderTabs, repaint,
     isVisibleTab:id=>model.isVisibleTab(state,id),
-    restoreUndoGroup,beginColorUndo,endColorUndo
+    restoreUndoGroup,beginColorUndo,endColorUndo,
+    applySyncedGroups:(groups,tabs)=>{
+      if(!Array.isArray(groups)||!Array.isArray(tabs))return false;
+      const parsed=model.hydrate({groups});
+      state.groups=parsed.groups;
+      state.assignments=Object.create(null);
+      const available=latest.tabs.filter(t=>!t.private);
+      // The same URL may exist more than once; consume each local slot once.
+      const used=new Set();
+      for(const item of tabs){
+        if(!item?.groupId)continue;
+        const matching=available.find(tab=>tab.url===item.url&&!used.has(tab.id));
+        if(matching&&model.get(state,item.groupId)){
+          state.assignments[String(matching.id)]=item.groupId;
+          used.add(matching.id);
+        }
+      }
+      model.prune(state,latest.tabs.map(t=>t.id));
+      persist(true);return true;
+    }
   };
 })();

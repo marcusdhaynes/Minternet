@@ -21,6 +21,7 @@
   <script src="./downloads-ui.js" defer></script>
   <script src="./history-ui.js" defer></script>
   <script src="./payment-ui.js" defer></script>
+  <script src="./google-sync-ui.js" defer></script>
 </head>
 <body>
   <header class="chrome">
@@ -61,6 +62,7 @@
         <button id="connectionIcon" class="connection-icon search-provider-button" type="button" aria-label="Search Engine: Google" aria-haspopup="menu" aria-expanded="false" title="Google · Click to choose search engine"></button>
         <input id="address" role="combobox" aria-autocomplete="list" aria-controls="addressSuggestions" aria-expanded="false" autocomplete="off" autocapitalize="none" spellcheck="false" type="text" placeholder="Search privately or enter a secure address" aria-label="Search or enter address">
         <span id="addressState" class="address-state"></span>
+        <button type="button" id="gmailCodeBadge" class="gmail-code-badge" title="Click to copy verification code" aria-label="Copy verification code" hidden></button>
         <button type="button" id="bookmarkThisPage" class="address-star" title="Bookmark This Page (Ctrl+D)" aria-label="Bookmark This Page">☆</button>
       </form>
       <div class="toolbar-actions">
@@ -92,6 +94,33 @@
     <div class="bookmark-backdrop" id="bookmarkBackdrop"></div>
     <aside id="bookmarkSettings" class="bookmark-panel bookmark-settings" hidden aria-label="Settings">
       <div class="bookmark-panel-head"><strong>Settings</strong><button class="bookmark-close" id="bookmarkSettingsClose" aria-label="Close Settings">×</button></div>
+      <section class="google-settings" aria-label="Google Account and Sync" id="googleSettings">
+        <div class="google-settings-title"><strong>Google Account</strong><span id="googleSyncState">Not connected</span></div>
+        <button type="button" id="googleAccountLogin" class="google-primary-button">G · Sign In With Google</button>
+        <div id="googleAccountConfig" hidden>
+          <label>Google Desktop OAuth Client ID
+            <input id="googleClientId" inputmode="url" spellcheck="false" autocomplete="off" placeholder="123456-…apps.googleusercontent.com">
+          </label>
+          <small>This app needs its own Google Cloud OAuth client ID. Google sign-in happens in your system browser, not inside a website.</small>
+          <button type="button" id="googleConnectContinue" class="google-primary-button">Continue to Google</button>
+        </div>
+        <div id="googleSyncChoice" hidden>
+          <p>Sync this Minternet with your other Minternet devices? Private and Tor tabs are excluded.</p>
+          <div class="google-choice"><button type="button" id="googleSyncYes">Yes, Sync</button><button type="button" id="googleSyncNo">No, Keep Local</button></div>
+        </div>
+        <div id="googleSyncEncryption" hidden>
+          <label>Sync Encryption Passphrase<input id="googleSyncPassphrase" type="password" autocomplete="new-password" minlength="12" placeholder="Same passphrase on every device"></label>
+          <small>Required once per session to decrypt data on this device. Your passphrase is never sent to Google.</small>
+          <button type="button" id="googleSyncEnable" class="google-primary-button">Enable Encrypted Sync</button>
+        </div>
+        <div id="googleSyncConnected" hidden>
+          <span id="googleSyncEmail" class="google-account-email"></span>
+          <span id="googleSyncStatus" class="google-account-status" role="status"></span>
+          <div class="google-choice"><button type="button" id="googleSyncRefresh">Sync Now</button><button type="button" id="googleSyncDisconnect">Stop Sync</button></div>
+          <button type="button" id="googleAddGmail" class="google-secondary-button">+ Connect Gmail For Verification Codes</button>
+          <small id="googleGmailAccounts">Gmail monitoring is off until you explicitly grant read-only access for each account.</small>
+        </div>
+      </section>
       <label class="bookmark-toggle"><span><strong>Bookmark Bar</strong><small>Show beneath the address line</small></span><input id="bookmarkBarToggle" type="checkbox" checked></label>
       <label class="search-setting-field" for="defaultSearchEngine">
         <span><strong>Default Search Engine</strong><small>Plain text in the address bar searches here</small></span>
@@ -111,7 +140,7 @@
       <button class="bookmark-menu-action" id="passwordManagerOpen">♢ Passwords <span>›</span></button>
       <button class="bookmark-menu-action" id="paymentManagerOpen">▣ Payment Methods <span>›</span></button>
       <button class="bookmark-menu-action" id="historyManagerOpen">◷ Browsing History <span>›</span></button>
-            <div class="bookmark-settings-foot">Saved locally · No account required</div>
+      <div class="bookmark-settings-foot">Stored locally by default · Google sync is optional</div>
     </aside>
     <aside id="bookmarkFolderMenu" class="bookmark-panel bookmark-folder-menu" hidden aria-label="Bookmark Folder">
       <div class="bookmark-panel-head"><button class="bookmark-mini" id="bookmarkFolderBack" aria-label="Parent Folder">‹</button><strong id="bookmarkFolderTitle">Bookmarks</strong><button class="bookmark-close" id="bookmarkFolderClose" aria-label="Close Folder">×</button></div>

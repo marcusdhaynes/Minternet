@@ -754,7 +754,13 @@
     },
     openLink, toggleBookmark, manager:()=>{renderManager();setMode('manager');},
     toggleBar:()=>changeVisibility(!data.visible),
-    closeOverlay,restoreUndoBookmark
+    closeOverlay,restoreUndoBookmark,
+    applySyncedState:incoming=>{
+      if(!incoming || !Array.isArray(incoming.items))return false;
+      data=model.hydrate(incoming);
+      applyVisibility();persist(true);
+      return true;
+    }
   };
   api.onState(state => {
     const tab = state.tabs.find(t => t.id === state.activeId);

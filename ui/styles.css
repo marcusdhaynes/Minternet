@@ -1237,3 +1237,21 @@ html.minternet-overlay-active .group-editor-backdrop {
 .auto-unload-setting small{font-size:9px;color:#9caccd;}
 .auto-unload-setting select{background:#202c46;color:#f0f4ff;border:1px solid #5c6d92;border-radius:5px;padding:5px 6px;max-width:130px;}
 .bookmark-icon-source{width:100%;margin-top:5px;background:#1c2940;border:1px solid #506489;color:#f2f4ff;border-radius:5px;padding:5px;}
+
+/* Google account is deliberately first in Settings and stays lightweight. */
+.google-settings{padding:9px 10px 11px;border-bottom:1px solid #ffffff24;display:grid;gap:7px;color:#e7eafb;font-size:11px;}
+.google-settings[hidden],.google-settings [hidden],.gmail-code-badge[hidden]{display:none!important;}
+.google-settings-title{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.google-settings-title span{color:#9aa9ca;font-size:9px;}
+.google-settings label{display:grid;gap:4px;font-size:10px;color:#aebfda;}
+.google-settings input{box-sizing:border-box;width:100%;border-radius:5px;padding:6px;background:#172136;color:#edf2ff;border:1px solid #536485;font-size:10px;}
+.google-settings small{color:#a3b1cf;font-size:9px;line-height:1.4;}
+.google-settings p{margin:0;font-size:10px;line-height:1.5;}
+.google-settings button{color:#eee9ff;background:#293755;border:1px solid #6a7295;border-radius:5px;padding:6px 8px;min-height:27px;text-align:center;font-size:10px;}
+.google-settings button:hover{background:#42557a;}
+.google-settings .google-primary-button{background:#3a426a;}
+.google-choice{display:flex;gap:6px;}
+.google-choice button{flex:1;min-width:0;}
+.google-account-email{font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.google-account-status{font-size:9px;color:#a9b6d3;}
+.gmail-code-badge{flex:0 0 auto;padding:2px 6px;margin:0 3px;height:19px;border-radius:4px;border:1px solid #89a4dd;background:#374d7d;color:#fff;font:600 11px/14px system-ui;letter-spacing:1px;cursor:pointer;max-width:104px;text-overflow:ellipsis;overflow:hidden;white-space:nowrap;}
