@@ -13,7 +13,7 @@ if (window.__TAURI__ && !window.minternet) {
       const detail=event.payload;
       const url=typeof detail==='string'?detail:detail?.url;
       const privateTab=typeof detail==='object' && detail?.private===true;
-      if(typeof url==='string'&&url.startsWith('https://')){
+      if(typeof url==='string'&&/^https?:\/\//i.test(url)){
         void api.core.invoke('browser_action',{
           name:privateTab?'new-private-background-url':'new-background-url',
           value:{url,openerTabId:Number.isSafeInteger(detail?.openerTabId)?detail.openerTabId:null}
