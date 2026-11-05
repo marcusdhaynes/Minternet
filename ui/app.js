@@ -21,32 +21,47 @@ function toast(message) {
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => el.classList.remove('visible'), 3800);
 }
+function tabTooltip(tab) {
+  const title=tab.title || (tab.url?.startsWith('https://') ? new URL(tab.url).hostname : 'New Tab');
+  return (tab.suspended ? 'Unloaded · ' : tab.loading ? 'Loading · ' : '') + title;
+}
+function renderSiteIcon(tab, slot) {
+  slot.replaceChildren();
+  slot.classList.remove('private-eye');
+  if (!tab.url?.startsWith('https://')) {
+    slot.textContent=tab.private ? '◉' : '◆';
+    return;
+  }
+  let host;
+  try {host=new URL(tab.url).hostname;} catch {slot.textContent='◆';return;}
+  const fallback=host.replace(/^www\./,'').charAt(0).toUpperCase() || '◆';
+  const img=document.createElement('img');
+  img.alt='';
+  img.decoding='async';
+  img.referrerPolicy='no-referrer';
+  img.src=new URL('/favicon.ico','https://'+host).href;
+  img.addEventListener('error',()=>{if(img.parentNode===slot)slot.textContent=fallback;},{once:true});
+  slot.append(img);
+}
 function buildTab(tab, active) {
   const root = document.createElement('div');
   root.className = 'tab' + (active ? ' selected' : '') +
-    (tab.private ? ' private-tab' : '') + (tab.pinned ? ' pinned-tab' : '');
+    (tab.private ? ' private-tab' : '') + (tab.pinned ? ' pinned-tab' : '') + (tab.suspended ? ' unloaded-tab' : '');
   root.setAttribute('role', 'tab');
   root.setAttribute('aria-selected', String(active));
-  root.title = tab.suspended ? 'Inactive tab (reloads on selection) · ' + tab.url : (tab.url === 'about:blank' ? 'New tab' : tab.url);
+  root.title = tabTooltip(tab);
   const choose = document.createElement('button');
   choose.className = 'tab-choose';
-  choose.title = (tab.pinned?'Pinned · ':'')+tab.title;
+  choose.title = (tab.pinned ? 'Pinned · ' : '') + tabTooltip(tab);
   choose.addEventListener('click', () => command('activate', tab.id));
   const symbol = document.createElement('span');
   symbol.className = 'tab-symbol';
-  // Compact local site monogram; no third-party favicon requests/leaks.
-  let monogram='◆';
-  if(tab.pinned && tab.url?.startsWith('https://')){
-    try {monogram=new URL(tab.url).hostname.replace(/^www\./,'').charAt(0).toUpperCase()||'◆';}
-    catch {}
-  }
-  if(tab.private){symbol.classList.add('private-eye');symbol.innerHTML=PRIVATE_EYE;}
-  else symbol.textContent = tab.pinned ? monogram :
-    (tab.suspended ? '◌' : tab.loading ? '◌' : '◉');
+  renderSiteIcon(tab,symbol);
   const text = document.createElement('span');
   text.className = 'tab-text';
   text.textContent = tab.title || 'New Tab';
   choose.append(symbol, text);
+  if(tab.private){const eye=document.createElement('span');eye.className='tab-private-eye';eye.innerHTML=PRIVATE_EYE;choose.append(eye);}
   const close = document.createElement('button');
   close.className = 'tab-close';
   close.textContent = '×';
@@ -81,7 +96,7 @@ function render(data) {
   snapshot = data;
   const tabs = byId('tabs');
   const active = data.tabs.find(t => t.id === data.activeId);
-  const signature = data.tabs.map(t => [t.id,t.audioPlaying,t.audioMuted]).join(';');
+  const signature = data.tabs.map(t => [t.id,t.title,t.url,t.private,t.pinned,t.suspended,t.loading,t.audioPlaying,t.audioMuted]).join(';');
   if (window.minternetGroups?.renderTabs) {
     window.minternetGroups.renderTabs(data,tabs,buildTab);
     render.lastSignature = null;
@@ -95,17 +110,11 @@ function render(data) {
       const el = tabs.children[i];
       const activeTab = tab.id === data.activeId;
       el.className = 'tab' + (activeTab ? ' selected' : '') +
-        (tab.private ? ' private-tab' : '')+(tab.pinned ? ' pinned-tab' : '');
+        (tab.private ? ' private-tab' : '')+(tab.pinned ? ' pinned-tab' : '')+(tab.suspended ? ' unloaded-tab' : '');
       el.setAttribute('aria-selected', String(activeTab));
-      el.title = tab.suspended ? 'Inactive tab (reloads on selection) · ' + tab.url : tab.url;
+      el.title = tabTooltip(tab);
       const symbol=el.querySelector('.tab-symbol');
-      if(tab.private){symbol.classList.add('private-eye');symbol.innerHTML=PRIVATE_EYE;}
-      else{
-        symbol.classList.remove('private-eye');
-        symbol.textContent = tab.pinned ?
-          (tab.url?.startsWith('https://')?new URL(tab.url).hostname.replace(/^www\./,'').charAt(0).toUpperCase():'◆') :
-          tab.suspended || tab.loading ? '◌' : '◉';
-      }
+      renderSiteIcon(tab,symbol);
       el.querySelector('.tab-text').textContent = tab.title || 'New Tab';
     }
   }
@@ -200,4 +209,19 @@ if(window.__TAURI__){
     pendingDrag=null;
     void api.command('maximize').catch(()=>{});
   });
+}
+
+// Auto-unload requests run in native code, which independently verifies each
+// page is safe to discard before freeing its webview memory.
+const AUTO_UNLOAD_KEY='minternet.autoUnloadMinutes.v1';
+function autoUnloadMinutes(){
+  const raw=localStorage.getItem(AUTO_UNLOAD_KEY);
+  const n=raw===null?1:Number(raw);
+  return Number.isInteger(n)&&n>=0&&n<=120?n:1;
+}
+if(window.__TAURI__){
+  setInterval(()=>{
+    const minutes=autoUnloadMinutes();
+    if(minutes>0)void api.command('auto-unload-check',minutes).catch(()=>{});
+  },10000);
 }

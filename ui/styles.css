@@ -1212,3 +1212,28 @@ html.minternet-overlay-active .group-editor-backdrop {
 .toolbar-actions #paymentToolbarButton[aria-expanded="true"]{
   background:#67568460;color:#fff;
 }
+
+/* Website favicon + close/audio icons only; full title is available on hover. */
+.tabs{gap:1px;}
+.tabs .tab:not(.group-end-cap){flex:0 0 auto!important;width:auto!important;min-width:26px!important;max-width:64px!important;height:20px;align-items:center;gap:1px;padding:0 2px;}
+.tabs .tab .tab-choose{flex:0 0 20px;min-width:20px;width:20px;padding:0!important;justify-content:center;gap:0!important;position:relative;}
+.tabs .tab .tab-symbol{width:16px;height:16px;flex:0 0 16px;display:grid;place-items:center;font-size:12px;overflow:hidden;line-height:1;}
+.tabs .tab .tab-symbol img{display:block;width:16px;height:16px;object-fit:contain;}
+.tabs .tab .tab-text{display:none!important;}
+.tabs .tab .tab-close{flex:0 0 12px!important;width:12px!important;height:15px;margin:0!important;font-size:13px;line-height:15px;}
+.tabs .tab .tab-audio{flex:0 0 14px!important;width:14px;height:15px;margin:0!important;padding:0;}
+.tabs .tab.pinned-tab{min-width:26px!important;max-width:42px!important;}
+.tabs .tab.pinned-tab .tab-choose{flex-basis:20px;}
+.tab-private-eye{position:absolute;right:-2px;bottom:-2px;width:9px;height:9px;color:#e8c2ff;pointer-events:none;filter:drop-shadow(0 0 2px #090713);}
+.tab-private-eye svg{width:9px;height:9px;display:block;}
+.tabs .tab.unloaded-tab{background:#393b43!important;border-color:#4a4d53!important;box-shadow:none!important;filter:saturate(.18);opacity:.62;}
+.tabs .tab.unloaded-tab .tab-symbol{color:#a4a7af;}
+.tabs .tab.unloaded-tab:hover{opacity:.88;filter:saturate(.5);}
+.bookmark-bar .bookmark-item[data-bookmark-kind="folder"]{max-width:124px;padding:0 3px;gap:2px;}
+.bookmark-bar .bookmark-item[data-bookmark-kind="folder"] .bookmark-caption{max-width:94px;}
+.bookmark-folder-menu{width:min(225px,calc(100vw - 14px));}
+.auto-unload-setting{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;color:#dbe2fa;font-size:11px;}
+.auto-unload-setting span{display:grid;gap:3px;min-width:0;}
+.auto-unload-setting small{font-size:9px;color:#9caccd;}
+.auto-unload-setting select{background:#202c46;color:#f0f4ff;border:1px solid #5c6d92;border-radius:5px;padding:5px 6px;max-width:130px;}
+.bookmark-icon-source{width:100%;margin-top:5px;background:#1c2940;border:1px solid #506489;color:#f2f4ff;border-radius:5px;padding:5px;}

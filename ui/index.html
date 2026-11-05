@@ -101,6 +101,7 @@
           <option value="chatgpt-private">ChatGPT (Temporary Chat)</option>
         </select>
       </label>
+      <label class="auto-unload-setting" for="autoUnloadMinutes"><span><strong>Unload Inactive Tabs</strong><small>Only when idle, not loading or holding entered data</small></span><select id="autoUnloadMinutes" aria-label="Automatically unload inactive tabs"><option value="0">Never</option><option value="1" selected>1 minute</option><option value="2">2 minutes</option><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option><option value="120">2 hours</option></select></label>
       <div class="zoom-setting-row" aria-label="Page Zoom">
         <span>Zoom</span><button id="zoomOut" type="button" aria-label="Zoom Out" title="Zoom Out (Ctrl+-)">−</button>
         <output id="zoomLevel" aria-live="polite">100%</output>
@@ -131,9 +132,9 @@
         <label class="bookmark-field">Name <small>(optional for folders)</small><input id="bookmarkName" maxlength="180" placeholder="Leave blank for icon only"></label>
         <label class="bookmark-field" id="bookmarkUrlField">Website URL<input id="bookmarkUrl" type="url" spellcheck="false" placeholder="https://example.com"></label>
         <label class="bookmark-field">Icon <small>(emoji or image)</small>
-          <div class="bookmark-icon-row"><span id="bookmarkIconPreview" class="bookmark-icon-preview">📁</span><input id="bookmarkIcon" maxlength="24" placeholder="📁 or 🌿" aria-label="Emoji Icon"><button type="button" id="bookmarkIconUpload" title="Choose Image">Image…</button></div>
+          <div class="bookmark-icon-row"><span id="bookmarkIconPreview" class="bookmark-icon-preview">📁</span><input id="bookmarkIcon" maxlength="24" placeholder="📁 or 🌿" aria-label="Emoji Icon"><button type="button" id="bookmarkIconUpload" title="Choose any image file">Image…</button></div><select id="bookmarkIconSource" class="bookmark-icon-source" aria-label="Copy Icon From Another Bookmark"><option value="">Use Any Bookmark’s Icon…</option></select>
         </label>
-        <input type="file" id="bookmarkImageFile" accept="image/png,image/jpeg,image/webp" hidden>
+        <input type="file" id="bookmarkImageFile" accept="image/*" hidden>
         <label class="bookmark-field">Location<select id="bookmarkParent"></select></label>
         <div class="bookmark-editor-buttons"><button type="button" id="bookmarkRemove" class="bookmark-delete" hidden>Delete</button><span class="bookmark-fill"></span><button type="button" id="bookmarkCancel">Cancel</button><button type="submit" class="bookmark-save">Save</button></div>
       </form>
