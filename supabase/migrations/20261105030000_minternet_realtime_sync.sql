@@ -103,12 +103,13 @@ declare
 begin
   insert into public.minternet_sync_journal(
     user_id,kind,item_key,previous_ciphertext,previous_deleted,
-    ciphertext,deleted,server_at,revision)
+    ciphertext,deleted,server_at,revision,undo_of)
   values (
     new.user_id,new.kind,new.item_key,
     case when tg_op='INSERT' then null else old.ciphertext end,
     case when tg_op='INSERT' then true else old.deleted end,
-    new.ciphertext,new.deleted,new.server_at,new.revision
+    new.ciphertext,new.deleted,new.server_at,new.revision,
+    nullif(current_setting('minternet.undo_of',true),'')::bigint
   ) returning sequence into change_id;
 
   perform realtime.send(
@@ -147,10 +148,20 @@ begin
   -- Serializes undo against other undo requests in the same user account.
   perform pg_advisory_xact_lock(hashtext((select auth.uid())::text), 91821);
 
-  select * into last_change
-  from public.minternet_sync_journal
-  where user_id=(select auth.uid())
-  order by sequence desc limit 1;
+  -- Undo chooses the most recent still-current *original* user change.
+  -- An Undo record itself is not another action to undo; otherwise pressing
+  -- Undo twice would endlessly toggle the same value.
+  select j.* into last_change
+  from public.minternet_sync_journal j
+  join public.minternet_sync_state current
+    on current.user_id=j.user_id and current.kind=j.kind
+      and current.item_key=j.item_key and current.revision=j.revision
+  where j.user_id=(select auth.uid()) and j.undo_of is null
+    and not exists(
+      select 1 from public.minternet_sync_journal reversal
+      where reversal.user_id=j.user_id and reversal.undo_of=j.sequence
+    )
+  order by j.sequence desc limit 1;
   if not found then return jsonb_build_object('ok',false,'reason','empty');end if;
 
   select * into current_row from public.minternet_sync_state
@@ -160,12 +171,17 @@ begin
     return jsonb_build_object('ok',false,'reason','newer-change');
   end if;
 
+  -- The audit record created by the update marks its target so it is not
+  -- itself immediately eligible for Undo on any of the user's devices.
+  perform set_config('minternet.undo_of',last_change.sequence::text,true);
+
   update public.minternet_sync_state
   set ciphertext=last_change.previous_ciphertext,
       deleted=last_change.previous_deleted
   where user_id=(select auth.uid()) and
       kind=last_change.kind and item_key=last_change.item_key
   returning * into latest;
+  perform set_config('minternet.undo_of','',true);
   return jsonb_build_object('ok',true,'kind',latest.kind,
     'item_key',latest.item_key,'revision',latest.revision,
     'server_at',latest.server_at,'undid_sequence',last_change.sequence);
