@@ -500,15 +500,15 @@ fn parse_address_with_engine(text: &str, engine: &str) -> Result<Option<tauri::U
     if s.is_empty() || s == HOME { return Ok(None); }
     if s.len() > 4096 { return Err("Address too long".into()); }
     let lowered = s.to_ascii_lowercase();
-    if lowered.contains("://") && !lowered.starts_with("https://") {
-        return Err("Only HTTPS sites are allowed. Insecure HTTP is not enabled.".into());
+    if lowered.contains("://") && !lowered.starts_with("https://") && !lowered.starts_with("http://") {
+        return Err("Only HTTP and HTTPS pages are supported.".into());
     }
     if lowered.starts_with("file:") || lowered.starts_with("javascript:") ||
        lowered.starts_with("data:") || lowered.starts_with("about:") ||
        lowered.starts_with("chrome:") || lowered.starts_with("blob:") {
         return Err("Unsafe navigation blocked".into());
     }
-    let candidate = if lowered.starts_with("https://") {
+    let candidate = if lowered.starts_with("https://") || lowered.starts_with("http://") {
         s.to_string()
     } else if !s.contains(char::is_whitespace) && s.contains('.') &&
               !s.contains(':') && !s.starts_with('.') {
@@ -527,7 +527,7 @@ fn parse_address_with_engine(text: &str, engine: &str) -> Result<Option<tauri::U
         format!("{base}{}{query_param}", percent_encode_search(s))
     };
     let url = tauri::Url::parse(&candidate).map_err(|e| e.to_string())?;
-    if url.scheme() != "https" || url.host_str().is_none() ||
+    if !matches!(url.scheme(),"https"|"http") || url.host_str().is_none() ||
        !url.username().is_empty() || url.password().is_some() {
         return Err("Blocked unsafe address".into());
     }
@@ -553,6 +553,12 @@ mod search_provider_tests {
     fn private_chatgpt_adds_temporary_flag_and_escapes_input() {
         let url=parse_address_with_engine("cats & dogs", "chatgpt-private").unwrap().unwrap();
         assert_eq!(url.as_str(),"https://chatgpt.com/?temporary-chat=true&q=cats%20%26%20dogs");
+    }
+    #[test]
+    fn explicit_http_pages_can_open_without_downgrading_https() {
+        assert_eq!(parse_address_with_engine("http://neverssl.com", "google").unwrap().unwrap().scheme(),"http");
+        assert_eq!(parse_address_with_engine("example.com", "google").unwrap().unwrap().scheme(),"https");
+        assert!(parse_address_with_engine("file:///test", "google").is_err());
     }
     #[test]
     fn explicit_secure_urls_ignore_engine_preference() {
@@ -1189,7 +1195,17 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
         // Honor Ctrl/Cmd + plus/minus and Ctrl + mouse-wheel when focus is
         // inside the actual website WebView, not just the browser toolbar.
         .zoom_hotkeys_enabled(true)
-        .on_navigation(|url| url.scheme() == "https")
+        // Do not block internal warmup.html: the prepared WebView2 controller
+        // must actually load before its first HTTPS navigation. Ordinary HTTP
+        // is legitimate browser content but remains visibly marked insecure.
+        .on_navigation(|url| {
+            if matches!(url.scheme(), "https"|"http") {
+                return url.host_str().is_some();
+            }
+            url.as_str()=="about:blank" ||
+                ((url.scheme()=="tauri" || url.host_str()==Some("tauri.localhost"))
+                 && url.path()=="/warmup.html")
+        })
         .on_permission_request(|_view, _kind| PermissionResponse::Deny)
         .on_download(move |_view,event|{
             match event {
@@ -1212,7 +1228,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
             }
         })
         .on_new_window(move |url, _features| {
-            if url.scheme() == "https" {
+            if matches!(url.scheme(),"https"|"http") && url.host_str().is_some() {
                 // WebView2 may emit both window.open and modifier-click callbacks
                 // for the same gesture. Coalesce only the identical source/URL
                 // pair within one short event burst, without blocking other URLs.
@@ -2801,15 +2817,27 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             return Ok(json!({"ok":true}));
         }
         "reload" => {
-            let label = {
+            let (id,url,label)={
                 let state=app.state::<Mutex<Browser>>();
                 let b=state.lock().map_err(|e|e.to_string())?;
-                b.active().and_then(|t|t.view.clone())
+                let tab=b.active().ok_or("No active tab to reload")?;
+                (tab.id,tab.url.clone(),tab.view.clone())
             };
+            if url==HOME{return Ok(json!({"ok":true}));}
+            // Reload a live renderer; suspended tabs must recreate the
+            // WebView rather than silently doing nothing.
+            let mut reloaded=false;
             if let Some(label)=label {
-                if let Some(view)=app.get_webview(&label) {
-                    view.reload().map_err(|e|e.to_string())?;
+                if let Some(view)=app.get_webview(&label){
+                    reloaded=view.reload().is_ok();
                 }
+            }
+            if !reloaded {
+                let target=tauri::Url::parse(&url).map_err(|e|e.to_string())?;
+                if !matches!(target.scheme(),"http"|"https") {
+                    return Err("This page cannot be reloaded".into());
+                }
+                navigate_tab(&app,id,Some(target),false)?;
             }
         }
         "privacy" => {
