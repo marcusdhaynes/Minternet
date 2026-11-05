@@ -19,6 +19,8 @@ zeroize = "1"
 ureq = { version = "2.12", default-features = false, features = ["tls", "json"] }
 base64 = "0.22"
 sha2 = "0.10"
+# Read only the Firefox bookmark-folder subtree explicitly dragged by the user.
+rusqlite = { version = "0.32", features = ["bundled"] }
 tauri-plugin-clipboard-manager = "2"
 
 [target.'cfg(windows)'.dependencies]
