@@ -2190,6 +2190,26 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             save_recent_downloads(&app);
             return Ok(json!({"ok":true}));
         }
+        "downloads-drag" => {
+            let id=value.as_u64().ok_or("Invalid download ID")?;
+            let path=checked_download_path(&app,id)?;
+            #[cfg(any(windows,target_os="macos"))]
+            {
+                let handle=app.clone();
+                // Browser JS never receives file bytes. Initiate a true OS
+                // CF_HDROP / Finder file drag on the native window thread.
+                app.run_on_main_thread(move||{
+                    if let Some(window)=handle.get_window("main"){
+                        let item=drag::DragItem::Files(vec![path]);
+                        let preview=drag::Image::Raw(include_bytes!("../icons/icon.png").to_vec());
+                        let _=drag::start_drag(&window,item,preview);
+                    }
+                }).map_err(|e|e.to_string())?;
+                return Ok(json!({"ok":true}));
+            }
+            #[cfg(not(any(windows,target_os="macos")))]
+            {let _=path;return Err("Native file drag is not yet supported on this desktop".into());}
+        }
         "downloads-open" | "downloads-reveal" | "downloads-drag-info" => {
             let id=value.as_u64().ok_or("Invalid download ID")?;
             let path=checked_download_path(&app,id)?;
