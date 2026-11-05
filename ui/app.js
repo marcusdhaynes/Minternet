@@ -32,23 +32,85 @@ function tabTooltip(tab) {
   const title=tab.title || (tab.url?.startsWith('https://') ? new URL(tab.url).hostname : 'New Tab');
   return (tab.suspended ? 'Unloaded · ' : tab.loading ? 'Loading · ' : '') + title;
 }
-function renderSiteIcon(tab, slot) {
+// Icons appear immediately, even on sites that omit /favicon.ico or block
+// third-party favicon requests. Fetch each host at most once per session.
+const faviconCache=new Map();
+function iconCandidates(host){
+  const root='https://'+host;
+  return [root+'/favicon.ico',root+'/favicon.svg',root+'/favicon-32x32.png',
+    root+'/apple-touch-icon.png'];
+}
+function iconFallback(host){
+  const chip=document.createElement('span');
+  chip.className='site-icon-fallback'+(host==='chatgpt.com'||host.endsWith('.chatgpt.com')?' site-icon-chatgpt':'');
+  chip.textContent=chip.classList.contains('site-icon-chatgpt')?'✳':
+    (host.replace(/^www\./,'').charAt(0).toUpperCase()||'◆');
+  // Distinct visible fallback at 16px even if the site supplies no icon.
+  let hash=0;for(const c of host)hash=(hash*31+c.charCodeAt(0))>>>0;
+  chip.style.setProperty('--favicon-hue',String(hash%360));
+  return chip;
+}
+function refreshHostIcons(host){
+  document.querySelectorAll('.tab-symbol[data-site-host]').forEach(slot=>{
+    if(slot.dataset.siteHost!==host)return;
+    const state=faviconCache.get(host);
+    if(!state?.src)return;
+    const img=document.createElement('img');
+    img.alt='';img.decoding='async';img.referrerPolicy='no-referrer';
+    img.src=state.src;
+    slot.replaceChildren(img);
+  });
+}
+function discoverSiteIcon(host,page){
+  if(faviconCache.has(host))return;
+  const state={src:null,loading:true};
+  faviconCache.set(host,state);
+  const candidates=iconCandidates(host);
+  const tryIcon=index=>{
+    if(index>=candidates.length){
+      // Reuse native site-declared icon discovery for sites such as ChatGPT
+      // with app-specific favicon paths rather than /favicon.ico.
+      if(!window.__TAURI__||!page)return;
+      void api.command('bookmark-site-icons',page).then(found=>{
+        if(!Array.isArray(found))return;
+        const extras=found.filter(url=>typeof url==='string'&&url.startsWith('https://')).slice(0,5);
+        if(extras.length){candidates.push(...extras);tryIcon(index);}
+      }).catch(()=>{});
+      return;
+    }
+    const probe=new Image();
+    probe.decoding='async';probe.referrerPolicy='no-referrer';
+    probe.onload=()=>{
+      if(probe.naturalWidth===0||probe.naturalHeight===0){tryIcon(index+1);return;}
+      state.src=candidates[index];state.loading=false;refreshHostIcons(host);
+    };
+    probe.onerror=()=>tryIcon(index+1);
+    probe.src=candidates[index];
+  };
+  tryIcon(0);
+}
+function renderSiteIcon(tab,slot){
   slot.replaceChildren();
   slot.classList.remove('private-eye');
-  if (!tab.url?.startsWith('https://')) {
-    slot.textContent=tab.private ? '◉' : '◆';
+  slot.removeAttribute('data-site-host');
+  if(!tab.url||!/^https?:\/\//i.test(tab.url)){
+    slot.append(iconFallback('',tab.private));
     return;
   }
   let host;
-  try {host=new URL(tab.url).hostname;} catch {slot.textContent='◆';return;}
-  const fallback=host.replace(/^www\./,'').charAt(0).toUpperCase() || '◆';
-  const img=document.createElement('img');
-  img.alt='';
-  img.decoding='async';
-  img.referrerPolicy='no-referrer';
-  img.src=new URL('/favicon.ico','https://'+host).href;
-  img.addEventListener('error',()=>{if(img.parentNode===slot)slot.textContent=fallback;},{once:true});
-  slot.append(img);
+  try{host=new URL(tab.url).hostname.toLowerCase();}catch{
+    slot.append(iconFallback(''));return;
+  }
+  slot.dataset.siteHost=host;
+  const cached=faviconCache.get(host);
+  if(cached?.src){
+    const img=document.createElement('img');
+    img.alt='';img.decoding='async';img.referrerPolicy='no-referrer';
+    img.src=cached.src;slot.append(img);
+  }else{
+    slot.append(iconFallback(host));
+    discoverSiteIcon(host,tab.url);
+  }
 }
 function buildTab(tab, active) {
   const root = document.createElement('div');
@@ -214,22 +276,8 @@ if(window.__TAURI__){
     if(event.button!==0||event.target.closest(interactive))return;
     event.preventDefault();
     pendingDrag=null;
-    const strip=byId('tabs'),newButton=byId('newTab');
-    if(strip&&newButton && (event.target===strip||event.target===topRow)){
-      const bounds=strip.getBoundingClientRect();
-      const lastRight=[...strip.children].reduce((max,child)=>{
-        const rect=child.getBoundingClientRect();
-        return rect.width>0?Math.max(max,rect.right):max;
-      },bounds.left);
-      const from=Math.max(bounds.left,lastRight);
-      const to=newButton.getBoundingClientRect().left;
-      if(to>from && event.clientX>=from && event.clientX<to){
-        // Left half creates a tab; right half restores to a window (never maximizes).
-        if(event.clientX<(from+to)/2)void command('new');
-        else void api.command('restore-window').catch(()=>{});
-        return;
-      }
-    }
+    // Every blank part of the title bar toggles maximize/restore, including
+    // the space to the RIGHT of the final tab. Do not create a tab instead.
     void api.command('maximize').catch(()=>{});
   });
 }
