@@ -3220,7 +3220,16 @@ fn main() {
                                       compactBookmarks:getComputedStyle($('bookmarkItems')).columnGap==='0px',
                                       searchSetting:$('defaultSearchEngine')?.value==='google'&&!!window.minternetSearch
                                     };
-                                    const fire=()=>row.dispatchEvent(new MouseEvent('dblclick',{bubbles:true,button:0}));
+                                    // Regression: double-click the empty RIGHT side of the
+                                    // real tab strip, not merely the outer title bar.
+                                    const strip=$('tabs');
+                                    const fire=()=>{
+                                      const bounds=strip.getBoundingClientRect();
+                                      strip.dispatchEvent(new MouseEvent('dblclick',{
+                                        bubbles:true,button:0,
+                                        clientX:bounds.right-5,clientY:bounds.top+bounds.height/2
+                                      }));
+                                    };
                                     const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
                                     await window.minternet?.command('rapid-ui-smoke-stage','init');
                                     fire();await sleep(550);
