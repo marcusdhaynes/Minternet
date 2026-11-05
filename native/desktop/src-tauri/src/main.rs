@@ -3,6 +3,7 @@ mod password_vault;
 mod browsing_history;
 mod google_account;
 use base64::Engine as _;
+use tauri_plugin_clipboard_manager::ClipboardExt;
 
 use std::{sync::Mutex, collections::{HashSet, HashMap, VecDeque}, path::PathBuf, time::{Instant, Duration}};
 use serde::{Serialize,Deserialize};
@@ -1810,6 +1811,10 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         // Enter codes into fields even in background tabs, but only at the
         // exact originally checked HTTPS hostname. Never press submit.
         for hit in &found {
+            // A single freshly detected code is placed on the OS clipboard.
+            // The user must separately authorize Gmail read access before
+            // this background operation is ever enabled.
+            let _=app.clipboard().write_text(hit.code.clone());
             let eligible={
                 let browser=app.state::<Mutex<Browser>>();
                 let b=browser.lock().map_err(|e|e.to_string())?;
@@ -2737,6 +2742,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(PopupDeduper(Mutex::new(HashMap::new())))
         .manage(DownloadsState::default())
         .manage(Mutex::new(browsing_history::History::default()))
