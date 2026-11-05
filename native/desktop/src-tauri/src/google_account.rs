@@ -29,7 +29,7 @@ pub struct GoogleState {
 pub fn status(state:&Mutex<GoogleState>)->Result<Value,String>{
     let b=state.lock().map_err(|e|e.to_string())?;
     let mut mail=b.sessions.iter().filter(|(_,s)|s.gmail)
-        .map(|(email,_)|email.clone()).collect::<Vec<_>>();
+        .filter_map(|(key,_)|key.strip_prefix("gmail:").map(str::to_owned)).collect::<Vec<_>>();
     mail.sort();
     Ok(json!({"email":b.primary,"connected":b.primary.is_some(),
        "syncEnabled":b.sync_enabled,"gmailAccounts":mail}))
@@ -148,13 +148,14 @@ pub fn login(state:&Mutex<GoogleState>,client_id:&str,mail:bool)->Result<Value,S
         gmail:mail,client_id:client_id.to_owned()};
     let mut b=state.lock().map_err(|e|e.to_string())?;
     if !mail {b.primary=Some(verified.clone());b.sync_enabled=false;}
-    b.sessions.insert(verified.clone(),token);
+    b.sessions.insert(format!("{}:{verified}",if mail{"gmail"}else{"drive"}),token);
     Ok(json!({"email":verified,"gmail":mail,"authorized":true}))
 }
 fn bearer(state:&Mutex<GoogleState>,mail_for:Option<&str>)->Result<String,String>{
     let mut b=state.lock().map_err(|e|e.to_string())?;
     let email=match mail_for {Some(name)=>name.to_owned(),None=>b.primary.clone().ok_or("Connect Google in Settings first")?};
-    let token=b.sessions.get_mut(&email).ok_or("Google account is not signed in")?;
+    let session_key=format!("{}:{email}",if mail_for.is_some(){"gmail"}else{"drive"});
+    let token=b.sessions.get_mut(&session_key).ok_or("Google account is not signed in")?;
     if mail_for.is_some()&&!token.gmail{return Err("Gmail permission is not authorized".into());}
     if Instant::now()<token.expires{return Ok(token.access.clone());}
     if token.refresh.is_empty(){return Err("Google session expired; sign in again".into());}
@@ -265,7 +266,8 @@ pub fn codes(state:&Mutex<GoogleState>,hosts:&[String])->Result<Vec<CodeResult>,
     if hosts.is_empty(){return Ok(Vec::new());}
     let mailboxes={
         let b=state.lock().map_err(|e|e.to_string())?;
-        b.sessions.iter().filter(|(_,s)|s.gmail).map(|(e,_)|e.clone()).collect::<Vec<_>>()
+        b.sessions.iter().filter(|(_,s)|s.gmail)
+            .filter_map(|(key,_)|key.strip_prefix("gmail:").map(str::to_owned)).collect::<Vec<_>>()
     };
     let mut results=Vec::new();
     for email in mailboxes.into_iter().take(6){
