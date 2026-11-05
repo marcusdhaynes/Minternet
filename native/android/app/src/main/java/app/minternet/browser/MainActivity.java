@@ -4,6 +4,10 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.os.Bundle;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemClock;
+import android.graphics.drawable.BitmapDrawable;
 import android.content.Intent;
 import android.webkit.WebStorage;
 import android.graphics.Color;
@@ -48,12 +52,19 @@ public class MainActivity extends Activity {
     private FrameLayout content;
     private Button back,forward,reload;
     private boolean updatingAddress=false;
+    private final Handler idleHandler=new Handler(Looper.getMainLooper());
+    private final Runnable idleSweep=new Runnable(){@Override public void run(){checkIdleTabs();idleHandler.postDelayed(this,10000);}};
 
     private static final class BrowserTab {
         WebView web;
         String title="New Tab";
         String url="about:blank";
         Button button;
+        Button closeButton;
+        LinearLayout slot;
+        Bitmap icon;
+        boolean loading=false,suspended=false,checking=false;
+        long inactiveSince=0;
     }
 
     private int dp(int n) { return (int)(getResources().getDisplayMetrics().density*n+0.5f); }
@@ -148,6 +159,9 @@ public class MainActivity extends Activity {
         Button add=button("+","New tab");
         Button privateButton=button("◈",isolatedPrivate?"Return to normal browser":"Open isolated private window");
         controls.addView(go);controls.addView(add);controls.addView(privateButton);
+        Button settings=button("⚙","Tab Unload Settings");
+        controls.addView(settings,new LinearLayout.LayoutParams(dp(34),dp(38)));
+        settings.setOnClickListener(v->openIdleSettings());
         root.addView(controls,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(42)));
         content=new FrameLayout(this);
         content.setBackgroundColor(Color.WHITE);
@@ -190,6 +204,60 @@ public class MainActivity extends Activity {
         String startUrl=isolatedPrivate?getIntent().getStringExtra("url"):null;
         if(startUrl==null || (!"about:blank".equals(startUrl) && !startUrl.startsWith("https://"))) startUrl="about:blank";
         newTab(startUrl,true);
+        idleHandler.postDelayed(idleSweep,10000);
+    }
+
+    private static final String SAFE_TO_UNLOAD="(()=>{try{\n if(document.readyState!=='complete'||document.hasFocus()||window.onbeforeunload!==null)return false;\n if(document.querySelector('iframe,canvas,[aria-busy=\"true\"],[role=\"progressbar\"],progress,.loading,.spinner'))return false;\n if([...document.querySelectorAll('audio,video')].some(m=>!m.paused||m.seeking||m.networkState===m.NETWORK_LOADING))return false;\n if([...document.querySelectorAll('input,textarea,select')].some(e=>{\n  if(['hidden','submit','button','reset'].includes(e.type))return false;\n  if(e.type==='checkbox'||e.type==='radio')return e.checked!==e.defaultChecked;\n  if(e.type==='file')return e.files?.length>0;\n  if(e.tagName==='SELECT')return [...e.options].some(o=>o.selected!==o.defaultSelected);\n  return !!e.value;\n }))return false;\n if([...document.querySelectorAll('[contenteditable=\"true\"],[role=\"textbox\"]')].some(e=>e.textContent?.trim()))return false;\n const r=performance.getEntriesByType('resource');if(r.length&&performance.now()-(r[r.length-1].responseEnd||r[r.length-1].startTime)<15000)return false;\n return true;\n }catch(e){return false}})()";
+
+    private int autoUnloadMinutes(){
+        return getSharedPreferences("minternet.settings",MODE_PRIVATE).getInt("autoUnloadMinutes",1);
+    }
+    private void openIdleSettings(){
+        final int[] values={0,1,2,5,10,15,30,60,120};
+        final String[] labels={"Never","1 minute","2 minutes","5 minutes","10 minutes","15 minutes","30 minutes","1 hour","2 hours"};
+        int selected=1;
+        for(int i=0;i<values.length;i++)if(values[i]==autoUnloadMinutes()){selected=i;break;}
+        new AlertDialog.Builder(this).setTitle("Unload Inactive Tabs")
+            .setSingleChoiceItems(labels,selected,(d,choice)->{
+                getSharedPreferences("minternet.settings",MODE_PRIVATE).edit()
+                    .putInt("autoUnloadMinutes",values[choice]).apply();
+                d.dismiss();
+            }).setNegativeButton("Cancel",null).show();
+    }
+    private void unloadTab(BrowserTab tab,boolean manual){
+        if(tab.web==null)return;
+        if(tab==current()){
+            int ix=tabs.indexOf(tab),other=ix==0?1:0;
+            if(other>=tabs.size())newTab("about:blank",true);
+            else switchTab(other);
+        }
+        if(tab==current())return;
+        if(tab.web.getParent() instanceof ViewGroup)((ViewGroup)tab.web.getParent()).removeView(tab.web);
+        tab.web.stopLoading();
+        tab.web.destroy();
+        tab.web=null;
+        tab.loading=false;tab.checking=false;tab.suspended=true;
+        updateTabLabels();
+    }
+    private void checkIdleTabs(){
+        int minutes=autoUnloadMinutes();
+        if(minutes<=0)return;
+        long now=SystemClock.elapsedRealtime();
+        for(BrowserTab tab:new ArrayList<>(tabs)){
+            if(tab==current()||tab.web==null||tab.suspended||tab.loading||tab.checking||
+                !tab.url.startsWith("https://")||tab.inactiveSince<=0||
+                now-tab.inactiveSince<minutes*60000L)continue;
+            tab.checking=true;
+            WebView web=tab.web;
+            web.evaluateJavascript(SAFE_TO_UNLOAD,result->{
+                tab.checking=false;
+                if("true".equals(result)&&tab.web==web&&tab!=current()&&
+                    !tab.loading&&tab.inactiveSince>0&&
+                    SystemClock.elapsedRealtime()-tab.inactiveSince>=autoUnloadMinutes()*60000L){
+                    unloadTab(tab,false);
+                }
+            });
+        }
     }
 
     private BrowserTab current() {
@@ -225,12 +293,7 @@ public class MainActivity extends Activity {
         address.clearFocus();
     }
 
-    private BrowserTab newTab(String url,boolean activate) {
-        if(tabs.size()>=24){
-            new AlertDialog.Builder(this).setMessage("Maximum 24 tabs. Close some before opening more.").setPositiveButton("OK",null).show();
-            return null;
-        }
-        BrowserTab tab=new BrowserTab();
+    private void prepareWebView(BrowserTab tab) {
         WebView web=new WebView(this);
         tab.web=web;
         web.setBackgroundColor(Color.WHITE);
@@ -289,22 +352,54 @@ public class MainActivity extends Activity {
                 cb.invoke(origin,false,false);
             }
         });
-        tab.button=button("New Tab  ×","Tab");
+        tab.suspended=false;
+    }
+
+    private BrowserTab newTab(String url,boolean activate) {
+        if(tabs.size()>=24){
+            new AlertDialog.Builder(this).setMessage("Maximum 24 tabs. Close some before opening more.").setPositiveButton("OK",null).show();
+            return null;
+        }
+        BrowserTab tab=new BrowserTab();
+        prepareWebView(tab);
+        tab.url=url;
+        tab.inactiveSince=SystemClock.elapsedRealtime();
+        tab.button=button("◆","Select tab");
+        tab.button.setMinWidth(0);tab.button.setMinimumWidth(0);
+        tab.button.setTextSize(13);
+        tab.closeButton=button("×","Close tab");
+        tab.closeButton.setMinWidth(0);tab.closeButton.setMinimumWidth(0);
+        tab.closeButton.setTextSize(15);
+        tab.slot=new LinearLayout(this);
+        tab.slot.addView(tab.button,new LinearLayout.LayoutParams(dp(29),dp(32)));
+        tab.slot.addView(tab.closeButton,new LinearLayout.LayoutParams(dp(22),dp(32)));
         tabs.add(tab);
-        tabRow.addView(tab.button,new LinearLayout.LayoutParams(dp(136),dp(32)));
+        tabRow.addView(tab.slot,new LinearLayout.LayoutParams(dp(53),dp(32)));
         tab.button.setOnClickListener(v->switchTab(tabs.indexOf(tab)));
-        tab.button.setOnLongClickListener(v->{closeTab(tab);return true;});
+        tab.button.setOnLongClickListener(v->{new AlertDialog.Builder(this)
+            .setTitle(tab.title).setItems(new String[]{"Unload Tab","Close Tab"},(d,which)->{
+                if(which==0)unloadTab(tab,true);else closeTab(tab);
+            }).show();return true;});
+        tab.closeButton.setOnClickListener(v->closeTab(tab));
         if(activate)switchTab(tabs.indexOf(tab));
-        if(!"about:blank".equals(url))web.loadUrl(url);
+        if(!"about:blank".equals(url)){tab.loading=true;tab.web.loadUrl(url);}
         return tab;
     }
 
     private void switchTab(int index) {
         if(index<0||index>=tabs.size())return;
         BrowserTab prev=current();
-        if(prev!=null)content.removeView(prev.web);
+        if(prev!=null){
+            if(prev.web!=null)content.removeView(prev.web);
+            prev.inactiveSince=SystemClock.elapsedRealtime();
+        }
         currentIndex=index;
         BrowserTab tab=current();
+        tab.inactiveSince=0;
+        if(tab.suspended||tab.web==null){
+            prepareWebView(tab);
+            if(tab.url.startsWith("https://")){tab.loading=true;tab.web.loadUrl(tab.url);}
+        }
         if(tab.web.getParent() instanceof ViewGroup)((ViewGroup)tab.web.getParent()).removeView(tab.web);
         content.addView(tab.web,new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT));
         updateUI();
@@ -312,9 +407,22 @@ public class MainActivity extends Activity {
 
     private void updateTabLabels() {
         for(BrowserTab tab:tabs){
-            String label=tab.title.length()>15?tab.title.substring(0,15)+"…":tab.title;
-            tab.button.setText((tab==current()?"● ":"")+" "+label+"  ×");
-            tab.button.setTextColor(tab==current()?Color.WHITE:0xffa5b4cf);
+            String letter="◆";
+            if(tab.url.startsWith("https://")){
+                try{String host=Uri.parse(tab.url).getHost();if(host!=null&&!host.isEmpty())letter=host.substring(0,1).toUpperCase();}catch(Exception ignored){}
+            }
+            if(tab.icon!=null){
+                Bitmap scaled=Bitmap.createScaledBitmap(tab.icon,dp(16),dp(16),true);
+                tab.button.setCompoundDrawablesWithIntrinsicBounds(new BitmapDrawable(getResources(),scaled),null,null,null);
+                tab.button.setText("");
+            }else{
+                tab.button.setCompoundDrawablesWithIntrinsicBounds(null,null,null,null);
+                tab.button.setText(letter);
+            }
+            tab.button.setContentDescription((tab.suspended?"Unloaded · ":"")+tab.title);
+            tab.button.setBackgroundTintList(android.content.res.ColorStateList.valueOf(
+                tab.suspended?0xff41434b:tab==current()?0xff474570:SURFACE));
+            tab.button.setTextColor(tab.suspended?0xff8a8c96:tab==current()?Color.WHITE:0xffc5cde6);
         }
     }
     private void updateUI() {
@@ -329,12 +437,13 @@ public class MainActivity extends Activity {
     private void closeTab(BrowserTab tab) {
         int index=tabs.indexOf(tab);
         if(index<0)return;
-        if(tab==current())content.removeView(tab.web);
-        tabRow.removeView(tab.button);
+        if(tab==current() && tab.web!=null)content.removeView(tab.web);
+        boolean wasCurrent=index==currentIndex;
+        tabRow.removeView(tab.slot);
         tabs.remove(index);
-        tab.web.stopLoading();tab.web.destroy();
+        if(tab.web!=null){tab.web.stopLoading();tab.web.destroy();tab.web=null;}
         if(tabs.isEmpty()){currentIndex=-1;newTab("about:blank",true);}
-        else if(tab==current()||index==currentIndex) {
+        else if(wasCurrent) {
             currentIndex=-1;
             switchTab(Math.min(index,tabs.size()-1));
         }else {
@@ -351,7 +460,9 @@ public class MainActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        idleHandler.removeCallbacks(idleSweep);
         for(BrowserTab tab:new ArrayList<>(tabs)){
+            if(tab.web==null)continue;
             if(tab.web.getParent() instanceof ViewGroup)((ViewGroup)tab.web.getParent()).removeView(tab.web);
             if(isolatedPrivate) {
                 tab.web.clearHistory();
