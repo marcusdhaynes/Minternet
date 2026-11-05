@@ -9,6 +9,7 @@ rabbit and its universe are preserved. Native sizes are always regenerated.
 """
 import json
 from collections import deque
+import sys
 from pathlib import Path
 from PIL import Image, ImageEnhance, ImageFilter
 
@@ -73,6 +74,10 @@ def remove_outer_black_matte(source):
     return fixed
 
 artwork = remove_outer_black_matte(artwork)
+if "--normalize-source" in sys.argv:
+    # Update the canonical PNG as well, so GitHub Pages, favicons and every
+    # application surface receive the same genuine RGBA transparency.
+    artwork.save(SOURCE, format="PNG", optimize=True)
 resample = Image.Resampling.LANCZOS
 
 def icon(size):
