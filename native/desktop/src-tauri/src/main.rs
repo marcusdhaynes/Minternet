@@ -167,17 +167,85 @@ fn download_path(app:&tauri::AppHandle,url:&tauri::Url)->Result<PathBuf,String>{
     }
     Err("Too many files with this name in Downloads".into())
 }
+// Server URLs often end in /download or .txt even when the response is a
+// genuine executable. Detect the actual file signature AFTER a completed
+// download and fix the filename rather than handing the user a text file.
+fn download_signature(path:&std::path::Path)->Option<&'static str>{
+    use std::io::{Read,Seek,SeekFrom};
+    let mut f=std::fs::File::open(path).ok()?;
+    let mut head=[0u8;512];
+    let count=f.read(&mut head).ok()?;
+    let h=&head[..count];
+    if h.starts_with(b"MZ") && count>=64 {
+        let offset=u32::from_le_bytes(h[0x3c..0x40].try_into().ok()?) as u64;
+        if offset<4_000_000 {
+            let mut marker=[0u8;4];
+            if f.seek(SeekFrom::Start(offset)).is_ok()
+                && f.read_exact(&mut marker).is_ok() && &marker==b"PE\\0\\0" {
+                return Some("exe");
+            }
+        }
+    }
+    if h.starts_with(b"%PDF-"){return Some("pdf");}
+    if h.starts_with(b"PK\\x03\\x04") || h.starts_with(b"PK\\x05\\x06"){return Some("zip");}
+    if h.starts_with(b"\\x89PNG\\r\\n\\x1a\\n"){return Some("png");}
+    if h.starts_with(b"\\xff\\xd8\\xff"){return Some("jpg");}
+    if h.starts_with(b"7z\\xbc\\xaf\\x27\\x1c"){return Some("7z");}
+    if h.starts_with(b"Rar!\\x1a\\x07"){return Some("rar");}
+    None
+}
+fn repair_download_extension(path:&std::path::Path)->PathBuf{
+    let Some(detected)=download_signature(path) else{return path.to_path_buf()};
+    let ext=path.extension().and_then(|x|x.to_str()).unwrap_or("").to_ascii_lowercase();
+    if ext==detected || (detected=="jpg" && ext=="jpeg"){return path.to_path_buf();}
+    // Correct an actual PE binary even if the server mislabeled it .txt.
+    // For other formats, only rename extensionless/misleading generic files.
+    if detected!="exe" && !matches!(ext.as_str(),""|"txt"|"bin"|"dat"|"download"){
+        return path.to_path_buf();
+    }
+    // A file named Program.exe.txt should become Program.exe, not .exe.exe.
+    let original=path.file_name().and_then(|n|n.to_str()).unwrap_or("download");
+    let lower=original.to_ascii_lowercase();
+    let base=if lower.ends_with(&format!(".{detected}.txt")){
+        original[..original.len()-4].to_string()
+    }else{
+        path.with_extension(detected).file_name().and_then(|n|n.to_str())
+            .unwrap_or(original).to_string()
+    };
+    let dir=path.parent().unwrap_or_else(||std::path::Path::new("."));
+    for n in 0..100 {
+        let name=if n==0{base.clone()}else{
+            let stem=std::path::Path::new(&base).file_stem().and_then(|x|x.to_str()).unwrap_or("download");
+            format!("{stem} ({n}).{detected}")
+        };
+        let candidate=dir.join(name);
+        if candidate==path{return path.to_path_buf();}
+        if !candidate.exists() && std::fs::rename(path,&candidate).is_ok(){
+            return candidate;
+        }
+    }
+    path.to_path_buf()
+}
 fn download_update(app:&tauri::AppHandle,url:&tauri::Url,path:Option<&std::path::Path>,
                    private:bool,success:Option<bool>){
     let state=app.state::<DownloadsState>();
     let Ok(mut history)=state.0.lock() else{return};
     let source=url.as_str().to_string();
     if let Some(done)=success {
-        // Match only an unfinished download from the same source, oldest first.
+        // Match the source AND original destination: parallel downloads must
+        // never replace one another's statuses or filenames.
         if let Some(entry)=history.iter_mut().rev().find(|d|
             d.source==source&&d.status=="downloading"&&d.private==private
             &&path.map(|p|p.to_string_lossy()==d.path).unwrap_or(true)){
-            entry.status=if done{"completed"}else{"failed"}.into();
+            if done && std::path::Path::new(&entry.path).is_file() {
+                let corrected=repair_download_extension(std::path::Path::new(&entry.path));
+                let is_exe=corrected.extension().and_then(|x|x.to_str())
+                    .map(|x|x.eq_ignore_ascii_case("exe")).unwrap_or(false);
+                let valid_binary=!is_exe || download_signature(&corrected)==Some("exe");
+                entry.path=corrected.to_string_lossy().to_string();
+                entry.name=corrected.file_name().and_then(|x|x.to_str()).unwrap_or("Download").to_string();
+                entry.status=if valid_binary{"completed"}else{"invalid"}.into();
+            }else{entry.status="failed".into();}
         }
     }else if let Some(file)=path{
         let next=history.back().map(|d|d.id+1).unwrap_or(1);
