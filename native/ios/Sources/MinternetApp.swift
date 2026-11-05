@@ -23,7 +23,7 @@ final class BrowserState: ObservableObject {
             view.scrollView.contentInsetAdjustmentBehavior = .never
             return view
         }
-        init(isPrivate: Bool) {
+        @MainActor init(isPrivate: Bool) {
             self.isPrivate = isPrivate
             self.webView = Tab.makeWebView(isPrivate: isPrivate)
         }
