@@ -11,7 +11,7 @@
   const knownCodes=new Set();
   let latestCode='';
   let mailboxes=[];
-  let lastSyncAt=0;
+  let lastSyncAt=0,pendingVault=null;
   const toast=msg=>window.minternetToast?.(msg);
   const call=async(name,value)=>{
     const response=await api.command(name,value);
@@ -91,16 +91,32 @@
     if(remote.encryptedVault && typeof remote.encryptedVault==='string'){
       const imported=await call('google-vault-import',remote.encryptedVault);
       if(imported?.reason==='local-vault-exists'){
-        // Never overwrite a different local vault, potentially destroying
-        // passwords/cards. The native vault is still encrypted in Drive.
-        setStatus('Tabs/bookmarks synced · Existing local vault preserved');
+        // Authenticated merge requires the user's local master password to
+        // unlock the vault; no plaintext or master password enters cloud sync.
+        pendingVault=remote.encryptedVault;
+        await mergePendingVault();
       }
     }
+  }
+  async function mergePendingVault(){
+    if(!pendingVault)return;
+    const result=await call('google-vault-merge',pendingVault);
+    if(result?.reason==='vault-locked'){
+      setStatus('Bookmarks/tabs synced · Unlock Passwords to merge encrypted vault');
+      return;
+    }
+    if(result?.ok){
+      if(result.conflicts)setStatus(result.conflicts+' password/card conflicts preserved locally');
+      pendingVault=null;
+      return;
+    }
+    if(result?.reason==='no-local-vault')pendingVault=null;
   }
   async function syncOnce(){
     if(!active||!key||busy)return;
     busy=true;
     try{
+      await mergePendingVault();
       const local=await capture();
       const localText=signature(local);
       const cloud=await call('google-drive-pull');
@@ -175,7 +191,7 @@
   $('googleSyncNo').addEventListener('click',async()=>{
     $('googleSyncChoice').hidden=true;
     $('googleSyncEncryption').hidden=true;
-    active=false;key=null;salt=null;lastCloud=null;lastLocal=null;
+    active=false;key=null;salt=null;lastCloud=null;lastLocal=null;pendingVault=null;
     try{await call('google-sync-enable',false);}catch(err){fail(err);}
     connected();
   });
@@ -209,7 +225,7 @@
   });
   $('googleSyncRefresh').addEventListener('click',()=>void syncOnce());
   $('googleSyncDisconnect').addEventListener('click',async()=>{
-    active=false;key=null;salt=null;lastCloud=null;lastLocal=null;
+    active=false;key=null;salt=null;lastCloud=null;lastLocal=null;pendingVault=null;
     try{await call('google-sync-enable',false);}catch(err){fail(err);}
     connected();
     setStatus('Sync off · Local data unchanged');
