@@ -40,26 +40,65 @@
       list.append(empty);
     }
     for(const entry of entries.slice(0,25)){
-      const row=document.createElement('div');row.className='downloads-entry';
+      const completed=entry.status==='completed';
+      const row=document.createElement('div');
+      row.className='downloads-entry'+(completed?' downloads-draggable':'');
+      row.dataset.downloadId=String(entry.id);
       const symbol=document.createElement('span');symbol.className='downloads-entry-symbol';
-      symbol.textContent=entry.status==='completed'?'✓':entry.status==='failed'?'!':'↓';
+      symbol.textContent=completed?'✓':entry.status==='invalid'?'!':entry.status==='failed'?'!':'↓';
       const details=document.createElement('div');details.className='downloads-entry-details';
       const name=document.createElement('strong');name.textContent=entry.name;
       name.title=entry.name;
       const status=document.createElement('span');
-      status.textContent=entry.status==='completed'?'Completed':entry.status==='failed'?'Failed':'Downloading…';
+      status.textContent=completed?'Ready · Drag out to desktop or a folder':
+        entry.status==='invalid'?'Invalid executable: server returned non-EXE data':
+        entry.status==='failed'?'Download failed':entry.status==='interrupted'?'Interrupted':'Downloading…';
       details.append(name,status);
+      const actions=document.createElement('div');actions.className='downloads-actions';
+      const openFile=document.createElement('button');openFile.type='button';
+      openFile.className='downloads-open';
+      openFile.textContent=/\\.(exe|msi)$/i.test(entry.name)?'Run':'Open';
+      openFile.title='Open '+entry.name+' using the operating system';
+      openFile.setAttribute('aria-label',openFile.title);
+      openFile.disabled=!completed;
+      openFile.addEventListener('click',async()=>{
+        const result=await command('downloads-open',entry.id);
+        if(result?.message)window.minternetToast?.(result.message);
+      });
       const reveal=document.createElement('button');reveal.type='button';
       reveal.className='downloads-reveal';
       reveal.textContent='⌕';
-      reveal.title='Show in Downloads folder';
+      reveal.title='Show in folder';
       reveal.setAttribute('aria-label','Show '+entry.name+' in folder');
-      reveal.disabled=entry.status!=='completed';
+      reveal.disabled=!completed;
       reveal.addEventListener('click',async()=>{
         const result=await command('downloads-reveal',entry.id);
         if(result?.message)window.minternetToast?.(result.message);
       });
-      row.append(symbol,details,reveal);list.append(row);
+      actions.append(openFile,reveal);
+      if(completed){
+        row.title='Drag this file directly into Explorer, Finder, or your desktop';
+        // A native drag is necessary: HTML5 can only drag URLs, not real
+        // filesystem files, into Windows Explorer. Wait for a short genuine
+        // pointer movement so simple clicks still open the correct controls.
+        let start=null;
+        row.addEventListener('pointerdown',event=>{
+          if(event.button!==0||event.target.closest('button'))return;
+          start={id:event.pointerId,x:event.clientX,y:event.clientY};
+        });
+        row.addEventListener('pointermove',event=>{
+          if(!start||event.pointerId!==start.id||!(event.buttons&1))return;
+          if(Math.hypot(event.clientX-start.x,event.clientY-start.y)<6)return;
+          start=null;
+          if(window.__TAURI__)void command('downloads-drag',entry.id).then(result=>{
+            if(result?.message)window.minternetToast?.(result.message);
+          });
+        });
+        for(const type of ['pointerup','pointercancel','lostpointercapture'])
+          row.addEventListener(type,()=>{start=null;});
+        name.addEventListener('click',()=>{void command('downloads-open',entry.id);});
+      }
+      row.append(symbol,details,actions);list.append(row);
     }
     const clear=panel.querySelector('.downloads-clear');
     clear.disabled=!entries.length;
