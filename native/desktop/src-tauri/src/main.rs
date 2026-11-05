@@ -2,6 +2,7 @@
 mod password_vault;
 mod browsing_history;
 mod google_account;
+mod firefox_bookmarks;
 use base64::Engine as _;
 use rand::{rngs::OsRng,RngCore};
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -2181,6 +2182,17 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         let minutes=value.as_u64().unwrap_or(1);
         check_idle_tabs(&app,minutes)?;
         return Ok(json!({"ok":true}));
+    }
+    if name=="firefox-folder-import" {
+        let guid=value.get("guid").and_then(Value::as_str).unwrap_or("").to_owned();
+        let id=value.get("id").and_then(Value::as_i64);
+        let title=value.get("title").and_then(Value::as_str).unwrap_or("").to_owned();
+        // The user's explicit folder drop is the only trigger. Reading the
+        // local Firefox Places database is performed on a worker thread and
+        // restricted to that one folder; no background profile inspection.
+        return tauri::async_runtime::spawn_blocking(move||
+            firefox_bookmarks::resolve_folder(&guid,id,&title))
+            .await.map_err(|e|e.to_string())?;
     }
     if name=="bookmark-site-icons" {
         let url=value.as_str().ok_or("Expected bookmarked HTTPS URL")?;
