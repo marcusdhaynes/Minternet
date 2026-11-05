@@ -25,7 +25,7 @@
   function url(v) {
     try {
       const parsed = new URL(v);
-      if (parsed.protocol !== 'https:' || !parsed.hostname || parsed.username || parsed.password || parsed.href.length > 4096) return null;
+      if (!['https:','http:'].includes(parsed.protocol) || !parsed.hostname || parsed.username || parsed.password || parsed.href.length > 4096) return null;
       return parsed.href;
     } catch { return null; }
   }
