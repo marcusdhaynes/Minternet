@@ -1728,6 +1728,41 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             google_account::push(&handle.state::<Mutex<google_account::GoogleState>>(),&encrypted))
             .await.map_err(|e|e.to_string())?;
     }
+    if name=="google-sync-tabs-merge" {
+        // Sync never mutates private tabs or foreground input, and unopened
+        // remote tabs stay suspended until the user explicitly selects one.
+        let urls=value.as_array().ok_or("Expected synced tab list")?;
+        if urls.len()>MAX_TABS{return Err("Too many synced tabs".into());}
+        let (added,total)={
+            let state=app.state::<Mutex<Browser>>();
+            let mut b=state.lock().map_err(|e|e.to_string())?;
+            let selected=b.active_id;
+            let mut added=0;
+            for item in urls {
+                let Some(url)=item.get("url").and_then(Value::as_str) else{continue;};
+                if url.len()>2048{continue;}
+                let Ok(parsed)=tauri::Url::parse(url) else{continue;};
+                if parsed.scheme()!="https"||parsed.host_str().is_none()||
+                    !parsed.username().is_empty()||parsed.password().is_some(){continue;}
+                if b.tabs.iter().any(|tab|!tab.private&&tab.url==url){continue;}
+                if b.tabs.len()>=MAX_TABS{break;}
+                let id=b.add(false)?;
+                if let Some(tab)=b.tabs.iter_mut().find(|tab|tab.id==id){
+                    tab.url=url.to_owned();
+                    tab.title=title_for(url);
+                    tab.pinned=item.get("pinned").and_then(Value::as_bool).unwrap_or(false);
+                    tab.history=vec![HOME.into(),url.to_owned()];
+                    tab.at=1;
+                    tab.inactive_since=Some(Instant::now());
+                }
+                added+=1;
+            }
+            b.active_id=selected;
+            (added,b.tabs.len())
+        };
+        if added>0 {notify(&app);}
+        return Ok(json!({"ok":true,"added":added,"total":total}));
+    }
     if name=="google-vault-export" {
         // Upload the original authenticated, encrypted vault bytes, never PANs
         // or plaintext passwords. No private browsing credentials enter it.
