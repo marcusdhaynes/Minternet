@@ -1,7 +1,7 @@
 //! Opt-in Google Drive appData sync and separately consented Gmail OTP retrieval.
 //! No Google OAuth tokens or plaintext mail are written to disk.
-use std::{collections::HashMap,io::{Read,Write},net::TcpListener,process::Command,
-          sync::Mutex,time::{Duration,Instant}};
+use std::{collections::{HashMap,HashSet},io::{Read,Write},net::TcpListener,process::Command,
+          sync::Mutex,time::{Duration,Instant,SystemTime,UNIX_EPOCH}};
 use serde_json::{json,Value};
 use rand::{rngs::OsRng,RngCore};
 use base64::{Engine as _,engine::general_purpose::URL_SAFE_NO_PAD};
@@ -25,6 +25,7 @@ pub struct GoogleState {
     pub primary:Option<String>,
     sessions:HashMap<String,Session>,
     pub sync_enabled:bool,
+    seen_codes:HashSet<String>,
 }
 pub fn status(state:&Mutex<GoogleState>)->Result<Value,String>{
     let b=state.lock().map_err(|e|e.to_string())?;
@@ -292,6 +293,12 @@ pub fn codes(state:&Mutex<GoogleState>,hosts:&[String])->Result<Vec<CodeResult>,
             let response=ureq::get(detail.as_str()).set("Authorization",&format!("Bearer {access}"))
                 .timeout(Duration::from_secs(15)).call().map_err(|e|e.to_string())?
                 .into_json::<Value>().map_err(|e|e.to_string())?;
+            let received=response["internalDate"].as_str().and_then(|v|v.parse::<u128>().ok())
+                .unwrap_or(0);
+            let now=SystemTime::now().duration_since(UNIX_EPOCH)
+                .unwrap_or_default().as_millis();
+            // Never replay stale codes, even if the sender still exists in Inbox.
+            if received==0||now.saturating_sub(received)>180_000 {continue;}
             let headers=response["payload"]["headers"].as_array().cloned().unwrap_or_default();
             let value=|name:&str|headers.iter().find(|v|v["name"].as_str()
                 .is_some_and(|s|s.eq_ignore_ascii_case(name)))
@@ -306,6 +313,9 @@ pub fn codes(state:&Mutex<GoogleState>,hosts:&[String])->Result<Vec<CodeResult>,
             }
         }
     }
+    let mut state=state.lock().map_err(|e|e.to_string())?;
+    if state.seen_codes.len()>300{state.seen_codes.clear();}
+    results.retain(|hit|state.seen_codes.insert(format!("{}:{}",hit.email,hit.message_id)));
     Ok(results)
 }
 #[cfg(test)]
