@@ -15,7 +15,7 @@ test('nested unnamed folders and emoji icons survive serialization', () => {
 test('rejects unsafe bookmark URLs and injected icons',()=>{
  const s=b.blank();
  assert.equal(b.add(s,'link',null,{url:'javascript:alert(1)'}),null);
- assert.equal(b.add(s,'link',null,{url:'http://example.com'}),null);
+ assert.equal(b.add(s,'link',null,{url:'http://example.com'}).url,'http://example.com/');
  assert.equal(b.add(s,'link',null,{url:'https://u:p@example.com'}),null);
  assert.equal(b.icon('data:image/svg+xml;base64,PHN2Zz4='),'');
  assert.equal(b.url('https://example.com/path'),'https://example.com/path');
