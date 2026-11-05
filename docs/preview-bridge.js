@@ -54,7 +54,7 @@ if (!window.minternet) {
       activeId,extensionsCount:0,
       tabs:tabs.map(x=>({
         id:x.id,title:x.title,url:x.url,private:!!x.private,pinned:!!x.pinned,
-        loading:false,suspended:false,error:'',
+        loading:false,suspended:!!x.suspended,error:'',
         canBack:x.at>0,canForward:x.at<x.history.length-1
       }))
     }));
@@ -74,7 +74,7 @@ if (!window.minternet) {
     async command(name,value){
       switch(name){
         case 'new':if(!addTab())return {message:'Maximum 35 tabs.'};break;
-        case 'activate':if(tabs.some(t=>t.id===value))activeId=value;break;
+        case 'activate':if(tabs.some(t=>t.id===value)){activeId=value;const t=current();if(t?.suspended){t.suspended=false;renderedUrl='';}}break;
         case 'deselect':activeId=0;break;
         case 'pin':case 'unpin':case 'toggle-pin':{
           const tab=tabs.find(t=>t.id===value);
@@ -122,6 +122,19 @@ if (!window.minternet) {
           break;
         }
         case 'reload':renderedUrl='';break;
+        case 'reload-tab':{
+          const t=tabs.find(x=>x.id===value);
+          if(t){t.suspended=false;if(activeId===t.id)renderedUrl='';}
+          break;
+        }
+        case 'unload-tab':{
+          const t=tabs.find(x=>x.id===value);
+          if(t){
+            t.suspended=true;
+            if(activeId===t.id){activeId=tabs.find(x=>x.id!==t.id)?.id||0;renderedUrl='';}
+          }
+          break;
+        }
         case 'privacy':case 'new-private':
           return {message:'A hosted website cannot create a real private browser. Use a private window or the Minternet desktop app.'};
         case 'tor':return {message:'Tor is not integrated. Use official Tor Browser for anonymity.'};

@@ -59,3 +59,19 @@ test('existing bookmarks without custom icons retain URL for automatic favicon d
  const custom=b.add(s,'link',null,{url:'https://example.com',icon:'🌟'});
  assert.equal(custom.icon,'🌟');
 });
+
+test('folder icons can copy HTTPS favicons, emojis and uploaded image data safely',()=>{
+ const s=b.blank(),folder=b.add(s,'folder',null,{name:'Projects'});
+ const link=b.add(s,'link',folder.id,{url:'https://docs.example.org/page',icon:'🌿'});
+ const icon=b.favicon(link.url);
+ assert.equal(icon,'https://docs.example.org/favicon.ico');
+ assert.equal(b.update(s,folder.id,{icon}),true);
+ assert.equal(b.hydrate(JSON.stringify(s)).items[0].icon,icon);
+ assert.equal(b.update(s,folder.id,{icon:link.icon}),true);
+ assert.equal(b.find(s,folder.id).icon,'🌿');
+ assert.equal(b.icon('https://u:secret@example.com/favicon.ico'),'');
+ assert.equal(b.icon('http://example.org/favicon.ico').startsWith('http://'),true);
+ const tinyPng='data:image/png;base64,iVBORw0KGgo=';
+ assert.equal(b.update(s,folder.id,{icon:tinyPng}),true);
+ assert.equal(b.find(s,folder.id).icon,tinyPng);
+});

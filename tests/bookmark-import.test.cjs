@@ -57,3 +57,25 @@ test('External HTML is never trusted: javascript, file, http and credential URLs
  assert.equal(data[0].url,'https://safe.example.com/');
  assert.equal(model.url(data[0].url),data[0].url);
 });
+
+test('dragged folder remains a single folder including every nested bookmark',()=>{
+ const payload=JSON.stringify({
+   type:'text/x-moz-place-container',title:'Imported Work',
+   children:[{type:'text/x-moz-place',title:'Inbox',uri:'https://mail.example.org/'},
+     {type:'text/x-moz-place-container',title:'Projects',children:[
+       {type:'text/x-moz-place',title:'Repository',uri:'https://code.example.org/repo'}]}]
+ });
+ const items=imp.parseTransfer({types:['application/x-moz-place-container','text/uri-list'],
+    getData:type=>type==='application/x-moz-place-container'?payload:'https://flattened.invalid'});
+ assert.equal(items.length,1);
+ assert.equal(items[0].kind,'folder');
+ assert.equal(items[0].name,'Imported Work');
+ assert.equal(items[0].children[1].kind,'folder');
+ assert.equal(items[0].children[1].children[0].url,'https://code.example.org/repo');
+});
+test('HTML bookmark export retains a safe explicitly chosen icon',()=>{
+ const items=imp.parseHtml('<DL><DT><H3>Folder</H3><DL><DT><A HREF="https://example.com/" ICON="data:image/png;base64,iVBORw0KGgo=">Site</A></DL></DL>');
+ assert.equal(items.length,1);
+ assert.equal(items[0].kind,'folder');
+ assert.equal(items[0].children[0].icon,'data:image/png;base64,iVBORw0KGgo=');
+});
