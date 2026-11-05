@@ -10,16 +10,22 @@ final class BrowserState: ObservableObject {
         var title: String = "New Tab"
         var url: URL?
         let isPrivate: Bool
-        let webView: WKWebView
-
-        init(isPrivate: Bool) {
-            self.isPrivate = isPrivate
+        var webView: WKWebView?
+        var suspended = false
+        var checking = false
+        var inactiveSince: Date?
+        static func makeWebView(isPrivate: Bool) -> WKWebView {
             let configuration = WKWebViewConfiguration()
             configuration.websiteDataStore = isPrivate ? .nonPersistent() : .default()
             configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
-            webView = WKWebView(frame: .zero, configuration: configuration)
-            webView.allowsBackForwardNavigationGestures = true
-            webView.scrollView.contentInsetAdjustmentBehavior = .never
+            let view = WKWebView(frame: .zero, configuration: configuration)
+            view.allowsBackForwardNavigationGestures = true
+            view.scrollView.contentInsetAdjustmentBehavior = .never
+            return view
+        }
+        init(isPrivate: Bool) {
+            self.isPrivate = isPrivate
+            self.webView = Tab.makeWebView(isPrivate: isPrivate)
         }
     }
 
@@ -27,7 +33,9 @@ final class BrowserState: ObservableObject {
     @Published var selectedId: UUID?
     @Published var address: String = ""
     @Published var message: String?
-
+    @Published var autoUnloadMinutes: Int = UserDefaults.standard.object(forKey: "autoUnloadMinutes") as? Int ?? 1 {
+        didSet { UserDefaults.standard.set(autoUnloadMinutes, forKey: "autoUnloadMinutes") }
+    }
     init() { newTab() }
 
     var active: Tab? { tabs.first(where: { $0.id == selectedId }) }
@@ -37,22 +45,34 @@ final class BrowserState: ObservableObject {
             message = "Maximum 25 open tabs."
             return
         }
+        if let former=active { former.inactiveSince = Date() }
         let tab = Tab(isPrivate: privateMode)
         tabs.append(tab)
         selectedId = tab.id
         address = load?.absoluteString ?? ""
-        if let load { tab.webView.load(URLRequest(url: load)) }
+        tab.url = load
+        if let load { tab.webView?.load(URLRequest(url: load)) }
     }
 
     func select(_ id: UUID) {
+        if let former=active, former.id != id { former.inactiveSince = Date() }
         selectedId = id
         let tab = active
-        address = tab?.webView.url?.absoluteString ?? tab?.url?.absoluteString ?? ""
+        tab?.inactiveSince = nil
+        if let tab, tab.suspended || tab.webView == nil {
+            tab.webView = Tab.makeWebView(isPrivate: tab.isPrivate)
+            tab.suspended = false
+            if let destination=tab.url, destination.scheme == "https" {
+                tab.webView?.load(URLRequest(url: destination))
+            }
+        }
+        address = tab?.webView?.url?.absoluteString ?? tab?.url?.absoluteString ?? ""
+        objectWillChange.send()
     }
 
     func close(_ id: UUID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
-        tabs[index].webView.stopLoading()
+        tabs[index].webView?.stopLoading()
         tabs.remove(at: index)
         if tabs.isEmpty { newTab(); return }
         if selectedId == id { select(tabs[min(index, tabs.count - 1)].id) }
@@ -61,13 +81,13 @@ final class BrowserState: ObservableObject {
     func switchPrivacy() {
         guard let tab = active,
               let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
-        let destination = tab.webView.url ?? tab.url
-        tab.webView.stopLoading()
+        let destination = tab.webView?.url ?? tab.url
+        tab.webView?.stopLoading()
         let replacement = Tab(isPrivate: !tab.isPrivate)
         tabs[index] = replacement
         selectedId = replacement.id
         if let destination, destination.scheme == "https" {
-            replacement.webView.load(URLRequest(url: destination))
+            replacement.webView?.load(URLRequest(url: destination))
             address = destination.absoluteString
         } else {
             address = ""
@@ -102,12 +122,78 @@ final class BrowserState: ObservableObject {
             return
         }
         tab.url = url
-        tab.webView.load(URLRequest(url: url))
+        if tab.webView == nil { select(tab.id) }
+        tab.webView?.load(URLRequest(url: url))
         address = url.absoluteString
+    }
+
+    private static let safeToUnload = """
+    (()=>{try{
+      if(document.readyState!=='complete'||document.hasFocus()||window.onbeforeunload!==null)return false;
+      if(document.pictureInPictureElement||navigator.mediaSession?.playbackState==='playing')return false;
+      if(document.querySelector('iframe,canvas,[aria-busy="true"],[role="progressbar"],progress,.spinner,.loading'))return false;
+      if([...document.querySelectorAll('audio,video')].some(m=>!m.paused||m.seeking||m.networkState===m.NETWORK_LOADING))return false;
+      if([...document.querySelectorAll('input,textarea,select')].some(e=>{
+        if(['hidden','submit','button','reset'].includes(e.type))return false;
+        if(e.type==='checkbox'||e.type==='radio')return e.checked!==e.defaultChecked;
+        if(e.type==='file')return e.files?.length>0;
+        if(e.tagName==='SELECT')return [...e.options].some(o=>o.selected!==o.defaultSelected);
+        return !!e.value;
+      }))return false;
+      if([...document.querySelectorAll('[contenteditable="true"],[role="textbox"]')].some(e=>e.textContent?.trim()))return false;
+      const r=performance.getEntriesByType('resource');
+      if(r.length&&performance.now()-(r[r.length-1].responseEnd||r[r.length-1].startTime)<15000)return false;
+      return true;
+    }catch(e){return false}})()
+    """
+
+    func unload(_ tab: Tab) {
+        guard tab.id != selectedId, tab.webView != nil else { return }
+        tab.webView?.stopLoading()
+        tab.webView?.navigationDelegate = nil
+        tab.webView?.uiDelegate = nil
+        tab.webView?.removeFromSuperview()
+        tab.webView = nil
+        tab.suspended = true
+        tab.checking = false
+        objectWillChange.send()
+    }
+
+    func manuallyUnload(_ id: UUID) {
+        guard let tab=tabs.first(where: { $0.id == id }) else { return }
+        if selectedId == id {
+            if let other=tabs.first(where: { $0.id != id }) { select(other.id) }
+            else { newTab() }
+        }
+        unload(tab)
+    }
+
+    func checkIdleTabs() {
+        guard autoUnloadMinutes > 0 else { return }
+        for tab in tabs {
+            guard tab.id != selectedId, !tab.isPrivate, !tab.suspended, !tab.checking,
+                  let since=tab.inactiveSince,
+                  Date().timeIntervalSince(since)>=Double(autoUnloadMinutes*60),
+                  let view=tab.webView, !view.isLoading, tab.url?.scheme == "https" else { continue }
+            tab.checking = true
+            view.evaluateJavaScript(Self.safeToUnload) { [weak self, weak view] result, error in
+                Task { @MainActor in
+                    guard let self else { return }
+                    tab.checking = false
+                    if error == nil, let safe=result as? Bool, safe,
+                       tab.id != self.selectedId, tab.webView === view, !view.isLoading,
+                       let since=tab.inactiveSince,
+                       Date().timeIntervalSince(since)>=Double(self.autoUnloadMinutes*60) {
+                        self.unload(tab)
+                    }
+                }
+            }
+        }
     }
 
     func update(_ webView: WKWebView) {
         guard let tab = active, tab.webView === webView else { return }
+        tab.url = webView.url ?? tab.url
         address = webView.url?.absoluteString ?? ""
         tab.title = (webView.title?.isEmpty == false) ? webView.title! : (webView.url?.host ?? "New Tab")
         objectWillChange.send()
@@ -156,7 +242,7 @@ struct SecureWebView: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(state) }
     func makeUIView(context: Context) -> WKWebView {
-        let view = tab.webView
+        let view = tab.webView ?? WKWebView(frame: .zero)
         view.navigationDelegate = context.coordinator
         view.uiDelegate = context.coordinator
         return view
@@ -176,25 +262,40 @@ struct ContentView: View {
                         .resizable().scaledToFit().frame(width: 24, height: 24)
                         .accessibilityLabel("Minternet")
                     ForEach(state.tabs) { tab in
-                        HStack(spacing: 3) {
+                        HStack(spacing: 2) {
                             Button(action: { state.select(tab.id) }) {
-                                HStack(spacing: 3) {
-                                    if tab.isPrivate { Image(systemName: "eye.slash.fill") }
-                                    Text(tab.title)
-                                        .lineLimit(1)
-                                        .frame(maxWidth: 100)
+                                ZStack(alignment: .bottomTrailing) {
+                                    AsyncImage(url: tab.url.flatMap { URL(string: "/favicon.ico", relativeTo: $0)?.absoluteURL }) { phase in
+                                        if let image = phase.image {
+                                            image.resizable().scaledToFit()
+                                        } else {
+                                            Image(systemName: "globe").resizable().scaledToFit()
+                                        }
+                                    }.frame(width: 16, height: 16)
+                                    if tab.isPrivate {
+                                        Image(systemName: "eye.slash.fill")
+                                            .font(.system(size: 7)).foregroundStyle(.purple)
+                                    }
                                 }
                             }
                             .accessibilityIdentifier("tab-\(tab.id)")
+                            .accessibilityLabel(tab.title)
+                            .help(tab.suspended ? "Unloaded · "+tab.title : tab.title)
                             Button("×") { state.close(tab.id) }
                                 .accessibilityLabel("Close \(tab.title)")
+                                .font(.system(size: 13))
                         }
-                        .font(.system(size: 10, weight: .medium))
+                        .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
+                        .padding(.horizontal, 4)
                         .frame(height: 25)
-                        .background(tab.id == state.selectedId ? Color.indigo.opacity(0.55) : Color.white.opacity(0.10))
+                        .background(tab.suspended ? Color.gray.opacity(0.28) : tab.id == state.selectedId ? Color.indigo.opacity(0.55) : Color.white.opacity(0.10))
+                        .saturation(tab.suspended ? 0.15 : 1)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .contextMenu {
+                            Button("Unload Tab") { state.manuallyUnload(tab.id) }
+                            Button("Close Tab", role: .destructive) { state.close(tab.id) }
+                        }
                     }
                     Button(action: { state.newTab() }) {
                         Image(systemName: "plus").font(.system(size: 13, weight: .bold))
@@ -204,11 +305,11 @@ struct ContentView: View {
             }
             .frame(height: 30)
             HStack(spacing: 7) {
-                Button(action: { state.active?.webView.goBack() }) { Image(systemName: "chevron.left") }
+                Button(action: { state.active?.webView?.goBack() }) { Image(systemName: "chevron.left") }
                     .accessibilityIdentifier("back")
-                Button(action: { state.active?.webView.goForward() }) { Image(systemName: "chevron.right") }
+                Button(action: { state.active?.webView?.goForward() }) { Image(systemName: "chevron.right") }
                     .accessibilityIdentifier("forward")
-                Button(action: { state.active?.webView.reload() }) { Image(systemName: "arrow.clockwise") }
+                Button(action: { state.active?.webView?.reload() }) { Image(systemName: "arrow.clockwise") }
                     .accessibilityIdentifier("reload")
                 TextField("", text: $state.address, prompt: Text("Search or HTTPS address").foregroundColor(Color(white: 0.70)))
                     .textInputAutocapitalization(.never)
@@ -226,6 +327,20 @@ struct ContentView: View {
                     .accessibilityIdentifier("address")
                 Button(action: { state.navigate(state.address); focused = false }) { Image(systemName: "arrow.right") }
                     .accessibilityIdentifier("go")
+                Menu {
+                    Picker("Unload Inactive Tabs", selection: $state.autoUnloadMinutes) {
+                        Text("Never").tag(0)
+                        Text("1 minute").tag(1)
+                        Text("2 minutes").tag(2)
+                        Text("5 minutes").tag(5)
+                        Text("10 minutes").tag(10)
+                        Text("15 minutes").tag(15)
+                        Text("30 minutes").tag(30)
+                        Text("1 hour").tag(60)
+                        Text("2 hours").tag(120)
+                    }
+                } label: { Image(systemName: "gearshape") }
+                .accessibilityLabel("Tab Unload Settings")
                 Button(action: { state.switchPrivacy() }) {
                     Image(systemName: state.active?.isPrivate == true ? "eye.slash.fill" : "eye")
                 }
@@ -247,6 +362,9 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Color(red: 0.07, green: 0.10, blue: 0.17))
+        .onReceive(Timer.publish(every: 10, on: .main, in: .common).autoconnect()) { _ in
+            state.checkIdleTabs()
+        }
         .alert("Minternet", isPresented: Binding(
             get: { state.message != nil },
             set: { if !$0 { state.message = nil } }
