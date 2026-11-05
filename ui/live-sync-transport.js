@@ -79,13 +79,13 @@
     }
     async write(kind,itemKey,ciphertext,deleted=false){
       if(!windowMinternetValid(kind,itemKey))throw Error('Invalid sync item');
-      if(!deleted&&(!ciphertext?.startsWith('enc1:')||ciphertext.length>262144))
-        throw Error('Refusing unencrypted sync write');
+      if(!ciphertext?.startsWith('enc1:')||ciphertext.length>262144)
+        throw Error('Refusing unencrypted sync write, including encrypted tombstones');
       return this.request('/rest/v1/minternet_sync_state?on_conflict=user_id,kind,item_key',{
         method:'POST',headers:{'Content-Type':TEXT,
           Prefer:'resolution=merge-duplicates,return=representation'},
         body:JSON.stringify({user_id:this.uid,kind,item_key:itemKey,
-          ciphertext:deleted?null:ciphertext,deleted:!!deleted})
+          ciphertext,deleted:!!deleted})
       });
     }
     async undo(){
