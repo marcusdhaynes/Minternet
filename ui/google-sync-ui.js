@@ -346,9 +346,18 @@
     const events=window.__TAURI__.event;
     events.listen('minternet:vault-changed',scheduleFlush).catch(()=>{});
     events.listen('minternet:vault-unlocked',()=>{
-      if(connected)void applyVault().then(()=>{baseline=null;return getLocal();})
-        .then(result=>{if(result){baseline=result.map;scheduleFlush();}})
-        .catch(fail);
+      if(!connected)return;
+      void (async()=>{
+        await applyVault();
+        const available=(await getLocal()).map;
+        // Publish newly unlocked local records only if the cloud has never
+        // seen their identity. Cloud tombstones prevent resurrection.
+        for(const [id,item] of available){
+          if((item.kind==='login'||item.kind==='payment')&&!remote.has(id))
+            await writeRecord(item,false);
+        }
+        baseline=available;
+      })().catch(fail);
     }).catch(()=>{});
     void command('google-status').then(status=>{
       email=status.email||null;
