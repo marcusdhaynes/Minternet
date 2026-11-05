@@ -34,7 +34,9 @@
   // bookmark's path, query, credentials or fragment.
   function favicon(v) {
     const target=url(v);
-    if(!target)return null;
+    // Import HTTP bookmarks faithfully, but never load their icon over
+    // unauthenticated HTTP into the trusted Minternet browser chrome.
+    if(!target||!target.startsWith('https://'))return null;
     try{return new URL(target).origin+'/favicon.ico';}
     catch{return null;}
   }
