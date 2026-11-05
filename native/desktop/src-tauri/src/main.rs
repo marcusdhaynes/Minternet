@@ -2562,6 +2562,21 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             if value.get("visible").and_then(Value::as_bool) != Some(true) {
                 return Err("Bookmark Bar toggle not persisted".into());
             }
+            let dropped=entries.iter().find(|x|
+                x.get("kind").and_then(Value::as_str)==Some("folder") &&
+                x.get("name").and_then(Value::as_str)==Some("Dragged Firefox Folder")
+            ).ok_or("Dragged Firefox bookmark folder missing")?;
+            let children=dropped.get("children").and_then(Value::as_array)
+                .ok_or("Dropped Firefox folder does not contain bookmarks")?;
+            if children.len()!=2 ||
+               children[0].get("name").and_then(Value::as_str)!=Some("First") ||
+               children[1].get("name").and_then(Value::as_str)!=Some("Nested Firefox Folder") ||
+               children[1].get("children").and_then(Value::as_array)
+                   .and_then(|nodes|nodes.first())
+                   .and_then(|node|node.get("name"))
+                   .and_then(Value::as_str)!=Some("Second") {
+                return Err("Firefox folder drag flattened or lost nested bookmarks".into());
+            }
             let marker = std::env::temp_dir()
                 .join(format!("minternet-bookmarks-{}.ok", std::process::id()));
             std::fs::write(marker, "Bookmark Bar and nested unnamed folders saved")
@@ -3190,6 +3205,28 @@ fn main() {
                                     $('bookmarkIcon').value = '🪐';
                                     $('bookmarkIcon').dispatchEvent(new Event('input'));
                                     $('bookmarkEditForm').requestSubmit();
+                                    // Real browser-chrome DropEvent regression: one Firefox
+                                    // folder must import with both direct links and children
+                                    // inside nested subfolders, not as flat bookmarks.
+                                    const payload=JSON.stringify({
+                                      type:'text/x-moz-place-container',
+                                      title:'Dragged Firefox Folder',
+                                      children:[
+                                        {type:'text/x-moz-place',title:'First',
+                                          uri:'https://example.com/a'},
+                                        {type:'text/x-moz-place-container',
+                                          title:'Nested Firefox Folder',children:[
+                                            {type:'text/x-moz-place',title:'Second',
+                                              uri:'https://example.org/b'}
+                                          ]}
+                                      ]
+                                    });
+                                    const transfer=new DataTransfer();
+                                    transfer.setData('application/x-moz-place-container',payload);
+                                    $('bookmarkBar').dispatchEvent(new DragEvent('drop',{
+                                      bubbles:true,cancelable:true,dataTransfer:transfer
+                                    }));
+                                    await new Promise(resolve=>setTimeout(resolve,420));
                                     const state = JSON.parse(localStorage.getItem('minternet.bookmark-tree.v1'));
                                     await window.minternet?.command('bookmarks-smoke-proof', state);
                                   }, 550);
