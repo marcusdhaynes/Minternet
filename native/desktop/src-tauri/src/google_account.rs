@@ -19,6 +19,7 @@ struct Session {
     expires:Instant,
     gmail:bool,
     client_id:String,
+    id_token:String,
 }
 #[derive(Default)]
 pub struct GoogleState {
@@ -146,12 +147,54 @@ pub fn login(state:&Mutex<GoogleState>,client_id:&str,mail:bool)->Result<Value,S
     let token=Session{access:access.to_owned(),refresh:refresh.to_owned(),
         expires:Instant::now()+Duration::from_secs(auth.get("expires_in").and_then(Value::as_u64)
             .unwrap_or(3600).saturating_sub(60)),
-        gmail:mail,client_id:client_id.to_owned()};
+        gmail:mail,client_id:client_id.to_owned(),
+        id_token:auth.get("id_token").and_then(Value::as_str).unwrap_or("").to_owned()};
     let mut b=state.lock().map_err(|e|e.to_string())?;
     if !mail {b.primary=Some(verified.clone());b.sync_enabled=false;}
     b.sessions.insert(format!("{}:{verified}",if mail{"gmail"}else{"drive"}),token);
     Ok(json!({"email":verified,"gmail":mail,"authorized":true}))
 }
+/// Trade a Google ID token for an app-specific, short-lived Supabase Auth JWT.
+/// This does not grant access to any other user's records; the database RLS
+/// rules authenticate the Supabase user id, never the client-provided email.
+pub fn live_auth(state:&Mutex<GoogleState>,project:&str,publishable:&str)
+    ->Result<Value,String>{
+    let project_url=tauri::Url::parse(project).map_err(|_|"Invalid Minternet backend URL")?;
+    let host=project_url.host_str().ok_or("Missing Supabase project hostname")?;
+    if project_url.scheme()!="https" || !host.ends_with(".supabase.co") ||
+       host.len()<16 || project_url.port().is_some() ||
+       project_url.path()!="/" || !project_url.username().is_empty() ||
+       project_url.password().is_some(){
+        return Err("Only your dedicated HTTPS Supabase project may host Minternet sync".into());
+    }
+    if !publishable.starts_with("sb_publishable_") || publishable.len()>256 {
+        return Err("Enter the Supabase project's publishable client key, never the secret key".into());
+    }
+    let token={
+        let state=state.lock().map_err(|e|e.to_string())?;
+        let email=state.primary.as_ref().ok_or("Sign in to Google first")?;
+        let session=state.sessions.get(&format!("drive:{email}"))
+            .ok_or("Google session missing")?;
+        if session.id_token.is_empty(){return Err("Google ID token unavailable: sign in again".into());}
+        session.id_token.clone()
+    };
+    let endpoint=format!("{project}/auth/v1/token?grant_type=id_token");
+    let response=ureq::post(&endpoint).set("apikey",publishable)
+        .set("Content-Type","application/json")
+        .timeout(Duration::from_secs(20))
+        .send_json(json!({"provider":"google","id_token":token}))
+        .map_err(|_|"Supabase Google provider not configured or token expired".to_string())?
+        .into_json::<Value>().map_err(|e|e.to_string())?;
+    let user=response["user"]["id"].as_str().ok_or("Missing validated Supabase account ID")?;
+    if !user.chars().all(|c|c.is_ascii_hexdigit()||c=='-')||user.len()!=36{
+        return Err("Supabase returned invalid user identity".into());
+    }
+    let access=response["access_token"].as_str().ok_or("Supabase access missing")?;
+    let refresh=response["refresh_token"].as_str().ok_or("Supabase refresh missing")?;
+    Ok(json!({"accessToken":access,"refreshToken":refresh,
+        "userId":user,"expiresIn":response["expires_in"].as_u64().unwrap_or(3600)}))
+}
+
 fn bearer(state:&Mutex<GoogleState>,mail_for:Option<&str>)->Result<String,String>{
     let mut b=state.lock().map_err(|e|e.to_string())?;
     let email=match mail_for {Some(name)=>name.to_owned(),None=>b.primary.clone().ok_or("Connect Google in Settings first")?};
