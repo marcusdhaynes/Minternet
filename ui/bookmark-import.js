@@ -36,6 +36,7 @@
      }
      if(/^<\/a\s*>/.test(lower)&&capture?.kind==='link'){
        const item=link(capture.attrs.href,capture.text);
+       if(item && typeof capture.attrs.icon==='string')item.icon=model.icon(capture.attrs.icon);
        if(item&&num++<MAX_NODES)frames.at(-1).children.push(item);
        capture=null;continue;
      }
@@ -101,7 +102,7 @@
    if(!dt)return [];
    const get=type=>{try{return dt.getData(type)||'';}catch{return '';}};
    // Firefox exposes structured container JSON for bookmark-folder drags.
-   for(const type of ['application/x-moz-place-container','text/x-moz-place-container','text/x-moz-place']){
+   for(const type of ['application/x-moz-place-container','text/x-moz-place-container','text/x-moz-place','application/x-bookmark-folder','application/json']){
      const content=get(type);if(content){
        const items=parseMozillaDrag(content);if(items.length)return items;
      }

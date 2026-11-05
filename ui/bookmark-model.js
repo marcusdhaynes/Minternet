@@ -16,6 +16,10 @@
   function icon(v) {
     if (typeof v !== 'string') return '';
     if (v.startsWith('data:')) return v.length <= MAX_IMAGE_LENGTH && imageRE.test(v) ? v : '';
+    if (/^https:\/\//i.test(v)) {
+      const safe=url(v); // A bookmark's favicon URL is allowed, never a script URL.
+      return safe&&safe.length<=1024?safe:'';
+    }
     return v.slice(0, 24).trim();
   }
   function url(v) {

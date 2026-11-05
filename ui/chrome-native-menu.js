@@ -13,7 +13,7 @@
   const sub=(text,items)=>({text:cleanLabel(text,'Folder'),items:items.length?items:[disabled('Empty')]});
   const iconText=node=>{
     const icon=node?.icon||'';
-    return icon.startsWith('data:')?(node?.kind==='folder'?'📁':'🔖'):icon|| (node?.kind==='folder'?'📁':'🔖');
+    return (icon.startsWith('data:')||icon.startsWith('https://'))?(node?.kind==='folder'?'📁':'🔖'):icon|| (node?.kind==='folder'?'📁':'🔖');
   };
   const label=node=>cleanLabel(node?.name,node?.kind==='folder'?'Unnamed Folder':node?.url||'Bookmark');
   const state=()=>window.minternetBookmarks?.getState();
@@ -123,7 +123,7 @@
     if(!tab)return null;
     return [
       {title:'Reload Tab',glyph:'reload',action:()=>window.minternet?.command('reload-tab',id)},
-      {title:'Unload Tab',glyph:'unload',action:()=>window.minternet?.command('unload-tab',id)},
+      {title:tab.suspended?'Already Unloaded':'Unload Tab',glyph:'unload',action:()=>window.minternet?.command('unload-tab',id)},
       {title:'Duplicate Tab',glyph:'duplicate',action:()=>window.minternet?.command('duplicate',id)},
       {title:tab.pinned?'Unpin Tab':'Pin Tab',glyph:'pin',action:()=>groups()?.pin(id,!tab.pinned)}
     ];

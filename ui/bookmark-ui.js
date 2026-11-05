@@ -147,6 +147,11 @@
       const img=document.createElement('img');
       img.src=value;img.alt='';
       slot.append(img);
+    }else if(/^https:\/\//i.test(value)){
+      const img=document.createElement('img');
+      img.alt='';img.referrerPolicy='no-referrer';img.decoding='async';
+      img.addEventListener('error',()=>{slot.textContent=isFolder?'📁':'🔖';},{once:true});
+      img.src=value;slot.append(img);
     }else if(value){
       slot.textContent=value;
     }else if(!isFolder && model.url(item?.url)){
@@ -188,6 +193,7 @@
         el.append(name);
       }
       el.dataset.bookmarkId = item.id;
+      el.dataset.bookmarkKind = item.kind;
       el.title = item.kind === 'folder' ? textFor(item) : (item.name || item.url);
       el.setAttribute('aria-label', item.kind === 'folder' ? 'Open Folder: ' + textFor(item) : 'Open Bookmark: ' + textFor(item));
       el.addEventListener('click', event => {
@@ -274,13 +280,13 @@
     function insert(node,parent,depth){
       if(!node||depth>11||added>=limit)return;
       if(node.kind==='folder'){
-        const created=model.add(draftState,'folder',parent,{name:node.name||'Imported Folder'});
+        const created=model.add(draftState,'folder',parent,{name:node.name||'Imported Folder',icon:node.icon||''});
         if(!created)return;
         added++;
         for(const child of node.children||[])insert(child,created.id,depth+1);
       }else if(node.kind==='link'){
         if(!model.url(node.url))return;
-        const created=model.add(draftState,'link',parent,{name:node.name,url:node.url});
+        const created=model.add(draftState,'link',parent,{name:node.name,url:node.url,icon:node.icon||''});
         if(created)added++;
       }
     }
@@ -551,8 +557,18 @@
     $('bookmarkUrl').value = node?.url || (kind === 'link' ? model.url(currentUrl) || '' : '');
     $('bookmarkRemove').hidden = !id;
     customIcon = node?.icon || '';
-    $('bookmarkIcon').value = customIcon.startsWith('data:') ? '' : customIcon;
+    $('bookmarkIcon').value = customIcon.startsWith('data:') || customIcon.startsWith('https://') ? '' : customIcon;
     $('bookmarkImageFile').value = '';
+    const sourceSelect=$('bookmarkIconSource');
+    sourceSelect.replaceChildren(new Option('Use Any Bookmark’s Icon…',''));
+    const collect=items=>{
+      for(const item of items){
+        if(item.kind==='link')sourceSelect.add(new Option(textFor(item).slice(0,85),item.id));
+        else if(item.kind==='folder')collect(item.children||[]);
+      }
+    };
+    collect(data.items);
+    sourceSelect.value='';
     renderIconPreview();
     const parentList = $('bookmarkParent');
     parentList.replaceChildren();
@@ -617,8 +633,10 @@
     }
   }
   async function imageFromFile(file) {
-    if (!file || !['image/png','image/jpeg','image/webp'].includes(file.type) || file.size > 3000000) {
-      throw new Error('Choose PNG, JPEG, or WebP smaller than 3 MB.');
+    if (!file || !(file.type.startsWith('image/') ||
+        /\.(png|jpe?g|gif|webp|bmp|svg|ico|avif|heic|tiff?)$/i.test(file.name)) ||
+        file.size > 12000000) {
+      throw new Error('Choose an image file smaller than 12 MB.');
     }
     const source = await new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -660,6 +678,14 @@
   $('bookmarkEditClose').addEventListener('click', closeOverlay);
   $('bookmarkCancel').addEventListener('click', closeOverlay);
   $('bookmarkBarToggle').addEventListener('change', event => changeVisibility(event.target.checked));
+  const idleSelect=$('autoUnloadMinutes');
+  if(idleSelect){
+    const saved=localStorage.getItem('minternet.autoUnloadMinutes.v1');
+    if(saved!==null && [...idleSelect.options].some(opt=>opt.value===saved))idleSelect.value=saved;
+    idleSelect.addEventListener('change',()=>{
+      localStorage.setItem('minternet.autoUnloadMinutes.v1',idleSelect.value);
+    });
+  }
   $('bookmarkSettingsManage').addEventListener('click', () => { renderManager(); setMode('manager'); });
   $('bookmarkBarManage').addEventListener('click', () => { renderManager(); setMode('manager'); });
   $('bookmarkManageNewFolder').addEventListener('click', () => openEditor('folder'));
@@ -677,6 +703,20 @@
     renderIconPreview();
   });
   $('bookmarkIconUpload').addEventListener('click', () => $('bookmarkImageFile').click());
+  $('bookmarkIconSource').addEventListener('change', async event=>{
+    const node=model.find(data,event.target.value);
+    if(!node||node.kind!=='link')return;
+    const editorId=draft?.id,editorKind=draft?.kind;
+    let selected=model.icon(node.icon);
+    if(!selected){
+      const candidates=await iconSources(node.url);
+      selected=candidates[0]||model.favicon(node.url)||'';
+    }
+    if(draft?.id!==editorId||draft?.kind!==editorKind)return;
+    customIcon=model.icon(selected);
+    $('bookmarkIcon').value=customIcon.startsWith('data:')||customIcon.startsWith('https://')?'':customIcon;
+    renderIconPreview();
+  });
   $('bookmarkImageFile').addEventListener('change', async event => {
     try {
       const file = event.target.files?.[0];
