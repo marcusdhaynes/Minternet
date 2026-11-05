@@ -310,6 +310,10 @@
     }
     for(const item of items)insert(item,parentId,0);
     if(!added)return 0;
+    if(JSON.stringify(draftState).length>950000){
+      toast('This folder is too large for the bookmark store; nothing was imported.');
+      return 0;
+    }
     data=draftState;
     persist();
     return added;
