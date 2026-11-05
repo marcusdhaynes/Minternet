@@ -47,15 +47,16 @@ test('Windows internet shortcuts and Ctrl-drag URLs import correctly',()=>{
  assert.equal(imp.parseTransfer({getData:t=>t==='text/x-moz-url'?'https://example.org/\nMozilla':''})[0].name,'Mozilla');
  assert.equal(imp.parseTransfer({getData:t=>t==='text/uri-list'?'#comment\nhttps://example.net/':''})[0].url,'https://example.net/');
 });
-test('External HTML is never trusted: javascript, file, http and credential URLs rejected',()=>{
+test('External HTML keeps HTTP/HTTPS while rejecting scripts, local files and credential URLs',()=>{
  const data=imp.parseHtml(`<DL><DT><A HREF="javascript:alert(1)">Unsafe</A>
  <DT><A HREF="file:///etc/passwd">Local</A>
  <DT><A HREF="http://example.com/">HTTP</A>
  <DT><A HREF="https://user:password@example.com/">Credentials</A>
  <DT><A HREF="https://safe.example.com/">Good</A></DL>`);
- assert.equal(data.length,1);
- assert.equal(data[0].url,'https://safe.example.com/');
- assert.equal(model.url(data[0].url),data[0].url);
+ assert.equal(data.length,2);
+ assert.equal(data[0].url,'http://example.com/');
+ assert.equal(data[1].url,'https://safe.example.com/');
+ assert.equal(model.url(data[1].url),data[1].url);
 });
 
 test('dragged folder remains a single folder including every nested bookmark',()=>{
@@ -78,4 +79,36 @@ test('HTML bookmark export retains a safe explicitly chosen icon',()=>{
  assert.equal(items.length,1);
  assert.equal(items[0].kind,'folder');
  assert.equal(items[0].children[0].icon,'data:image/png;base64,iVBORw0KGgo=');
+});
+
+test('Firefox metadata-only folder drag resolves by GUID and does not create empty folder',()=>{
+ const record=JSON.stringify({type:'text/x-moz-place-container',title:'Imported Work',
+   itemGuid:'AbCdE123_-45',id:541});
+ const transfer={
+   types:['text/x-moz-place'],
+   getData:type=>type==='text/x-moz-place'?record:''
+ };
+ assert.deepEqual(imp.parseTransfer(transfer),[]);
+ assert.deepEqual(imp.mozillaFolderReference(transfer),{
+   guid:'AbCdE123_-45',id:541,title:'Imported Work'
+ });
+});
+test('Malformed Firefox folder reference is ignored',()=>{
+ const data=JSON.stringify({type:'text/x-moz-place-container',title:'Fake',itemGuid:'../etc',id:0});
+ const transfer={getData:type=>type==='text/x-moz-place'?data:''};
+ assert.equal(imp.mozillaFolderReference(transfer),null);
+});
+test('Complete drag keeps folder with children; no unrelated flattened links',()=>{
+ const record=JSON.stringify({type:'text/x-moz-place-container',title:'Recipes',children:[
+    {type:'text/x-moz-place',title:'Potatoes',uri:'https://example.org/potatoes'},
+    {type:'text/x-moz-place-container',title:'Rice',children:[
+      {type:'text/x-moz-place',title:'Fried Rice',uri:'https://example.org/rice'}
+    ]}
+  ]});
+ const items=imp.parseTransfer({types:['text/x-moz-place','text/uri-list'],
+   getData:type=>type==='text/x-moz-place'?record:'https://wrong.example.org/'});
+ assert.equal(items.length,1);
+ assert.equal(items[0].name,'Recipes');
+ assert.equal(items[0].children[1].name,'Rice');
+ assert.equal(items[0].children[1].children[0].name,'Fried Rice');
 });
