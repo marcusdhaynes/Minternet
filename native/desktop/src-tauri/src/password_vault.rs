@@ -144,6 +144,53 @@ impl Vault {
         }
         Ok(())
     }
+    /// Merge the authenticated remote vault with the *same* Argon2 salt/key.
+    /// Existing credentials and cards are never replaced: concurrent edits
+    /// fail closed instead of destroying local secrets.
+    pub fn merge_encrypted_backup(&mut self,bytes:&[u8],path:&PathBuf)
+        ->Result<serde_json::Value,String>{
+        let key=self.key.as_ref().ok_or("Unlock the local vault to merge cloud secrets")?;
+        if bytes.len()>2_000_000{return Err("Remote vault exceeds safety limit".into());}
+        let disk:FileData=serde_json::from_slice(bytes)
+            .map_err(|_|"Invalid remote vault".to_string())?;
+        if disk.version!=1||Some(disk.salt)!=self.salt {
+            return Err("Different vault master key: preserve both vaults and resolve manually".into());
+        }
+        let cipher=ChaCha20Poly1305::new_from_slice(key).map_err(|_|"Crypto error")?;
+        let mut plain=cipher.decrypt(Nonce::from_slice(&disk.nonce),disk.ciphertext.as_ref())
+            .map_err(|_|"Cloud vault authentication failed".to_string())?;
+        let parsed=serde_json::from_slice::<VaultPayload>(&plain);
+        plain.zeroize();
+        let (logins,cards)=match parsed.map_err(|_|"Cloud vault data invalid".to_string())?{
+            VaultPayload::Legacy(logins)=>(logins,Vec::new()),
+            VaultPayload::Current{logins,cards}=>(logins,cards)
+        };
+        let mut new_logins=0;
+        let mut new_cards=0;
+        let mut conflicts=0;
+        for entry in logins {
+            if let Some(existing)=self.entries.iter().find(|e|
+                e.origin==entry.origin&&e.username==entry.username){
+                if existing.password!=entry.password {conflicts+=1;}
+            }else if self.entries.len()<MAX_ENTRIES{
+                self.entries.push(entry);
+                new_logins+=1;
+            }
+        }
+        for card in cards {
+            if let Some(existing)=self.cards.iter().find(|c|c.id==card.id){
+                if existing.number!=card.number||existing.month!=card.month||
+                   existing.year!=card.year {conflicts+=1;}
+            }else if self.cards.len()<50{
+                self.cards.push(card);
+                new_cards+=1;
+            }
+        }
+        if new_logins>0||new_cards>0{self.save(path)?;}
+        Ok(serde_json::json!({"ok":true,"addedLogins":new_logins,
+            "addedCards":new_cards,"conflicts":conflicts}))
+    }
+
     pub fn put(&mut self,origin:String,username:String,password:String,autofill:bool)->Result<(),String>{
         if !self.unlocked(){return Err("Vault locked".into());}
         if username.len()>320||password.is_empty()||password.len()>4096{return Err("Invalid credential length".into());}
