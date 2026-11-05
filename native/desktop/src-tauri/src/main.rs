@@ -235,7 +235,7 @@ mod download_format_tests {
         let mut content=vec![0u8;256];
         content[0..2].copy_from_slice(b"MZ");
         content[0x3c..0x40].copy_from_slice(&128u32.to_le_bytes());
-        content[128..132].copy_from_slice(b"PE\\0\\0");
+        content[128..132].copy_from_slice(b"PE\0\0");
         std::fs::write(&path,content).unwrap();
         assert_eq!(download_signature(&path),Some("exe"));
         let updated=repair_download_extension(&path);
