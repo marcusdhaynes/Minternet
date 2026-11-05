@@ -65,7 +65,11 @@
        if(item)count++;
        return item;
      }
-     if(Array.isArray(node.children)||node.type==='text/x-moz-place-container'||node.type==='folder'){
+     if(Array.isArray(node.children)||node.type==='text/x-moz-place-container'||node.type==='folder'||node.kind==='folder'){
+       // Firefox's Places drag object can be a *reference* (GUID and ID)
+       // with no children. Never import it as an incorrectly empty folder:
+       // the trusted native bridge resolves only the dropped subtree.
+       if(node.type==='text/x-moz-place-container'&&!Array.isArray(node.children))return null;
        count++;
        const children=(node.children||[]).map(x=>convert(x,depth+1)).filter(Boolean);
        return folder(node.name||node.title||'Imported Folder',children);
@@ -74,7 +78,8 @@
    }
    // A dragged Firefox container IS the folder. A generic export wrapper
    // is not: its children are the actual import roots.
-   const isFolder=raw?.type==='text/x-moz-place-container'||raw?.type==='folder';
+   const isFolder=raw?.type==='text/x-moz-place-container'||raw?.type==='folder'
+     || raw?.kind==='folder' || raw?.type==='container';
    const roots=Array.isArray(raw)?raw:raw?.roots?Object.values(raw.roots)
      :Array.isArray(raw?.items)?raw.items
      :Array.isArray(raw?.children)&&!isFolder?raw.children:[raw];
@@ -92,6 +97,32 @@
  function parseInternetShortcut(text){
    const match=String(text).match(/^URL\s*=\s*(.+)$/im);
    return match?parseUrlList(match[1]):[];
+ }
+ // Firefox native bookmark folder drags usually identify a Places node by
+ // GUID/ID but do not send its descendants. Keep these references separate
+ // from complete bookmark trees; only the trusted app may resolve them.
+ function mozillaFolderReference(dt){
+   if(!dt)return null;
+   for(const type of ['text/x-moz-place','text/x-moz-place-container',
+      'application/x-moz-place-container','application/x-moz-place']){
+     let content='';
+     try{content=dt.getData(type)||'';}catch{}
+     if(!content||content.length>200000)continue;
+     let parsed;try{parsed=JSON.parse(content);}catch{continue;}
+     const nodes=Array.isArray(parsed)?parsed:[parsed];
+     if(nodes.length!==1)continue;
+     const node=nodes[0];
+     if(!node||typeof node!=='object')continue;
+     if(node.type!=='text/x-moz-place-container'&&node.type!=='folder')continue;
+     const guid=typeof(node.itemGuid||node.guid)==='string'?(node.itemGuid||node.guid):'';
+     const id=Number(node.id??node.itemId);
+     const title=clean(node.title||node.name,100);
+     if(!/^[a-zA-Z0-9_-]{12}$/.test(guid) && !(Number.isSafeInteger(id)&&id>0))continue;
+     // The native code checks the title and GUID/ID against read-only local
+     // Firefox profile databases, never trusting these values as file paths.
+     return {guid:/^[a-zA-Z0-9_-]{12}$/.test(guid)?guid:'',id:Number.isSafeInteger(id)&&id>0?id:null,title};
+   }
+   return null;
  }
  function parseMozillaDrag(raw){
    const entries=parseJson(raw);
@@ -134,5 +165,5 @@
    if(lower.endsWith('.txt'))return parseUrlList(text);
    return [];
  }
- return {parseHtml,parseJson,parseTransfer,parseFile,parseUrlList,parseMozillaDrag,link};
+ return {parseHtml,parseJson,parseTransfer,parseFile,parseUrlList,parseMozillaDrag,mozillaFolderReference,link};
 });
