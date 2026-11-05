@@ -1194,7 +1194,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                             tab.loading=matches!(event.event(),PageLoadEvent::Started);
                             tab.checking_unload=false;
                         }
-                    }
+                    };
                 }
                 update_from_site(&for_load, id, event.url().as_str());
                 if matches!(event.event(), PageLoadEvent::Finished) {
@@ -1612,7 +1612,7 @@ fn check_idle_tabs(app:&tauri::AppHandle, minutes:u64) -> Result<(),String>{
             let split_visible=handle.state::<SplitState>().0.lock().map(|s|s.contains(&id)).unwrap_or(true);
             let released={
                 let store=handle.state::<Mutex<Browser>>();
-                if let Ok(mut b)=store.lock(){
+                let result=if let Ok(mut b)=store.lock(){
                     let is_active=b.active_id==id;
                     if let Some(tab)=b.tabs.iter_mut().find(|t|t.id==id){
                         tab.checking_unload=false;
@@ -1624,7 +1624,8 @@ fn check_idle_tabs(app:&tauri::AppHandle, minutes:u64) -> Result<(),String>{
                             tab.view.take()
                         }else{None}
                     }else{None}
-                }else{None}
+                }else{None};
+                result
             };
             if let Some(label)=released {
                 if let Some(view)=handle.get_webview(&label){let _=view.close();}
@@ -2421,7 +2422,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                     if name=="unload-tab"{view.close().map_err(|e|e.to_string())?;}
                     else{view.reload().map_err(|e|e.to_string())?;}
                 }
-            }else if name=="reload-tab" && was_active && url!=HOME{
+            }else if name=="reload-tab" && url!=HOME{
                 let dest=tauri::Url::parse(&url).map_err(|e|e.to_string())?;
                 navigate_tab(&app,id,Some(dest),false)?;
             }
