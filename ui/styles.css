@@ -1268,3 +1268,20 @@ html.minternet-overlay-active .group-editor-backdrop {
   border-radius:50%;background:#10a37f;color:white;font-size:14px;
   font-weight:600;text-shadow:none;
 }
+
+/* Completed downloads support native OS drag gestures and direct open/run. */
+.downloads-popup{width:min(350px,calc(100vw - 8px));}
+.downloads-entry.downloads-draggable{cursor:grab;user-select:none;-webkit-user-select:none;}
+.downloads-entry.downloads-draggable:active{cursor:grabbing;}
+.downloads-entry.downloads-draggable .downloads-entry-details strong{cursor:pointer;}
+.downloads-entry .downloads-entry-details{min-width:0;}
+.downloads-entry-details span{white-space:normal;line-height:1.24;}
+.downloads-actions{flex:0 0 auto;display:flex;align-items:center;gap:3px;}
+.downloads-actions button{
+  height:22px;border:1px solid #79658c;border-radius:4px;
+  background:#39314f;color:#eee5ff;cursor:pointer;font-size:10px;
+}
+.downloads-actions button:hover:not(:disabled){background:#665282;}
+.downloads-actions button:disabled{opacity:.35;cursor:default;}
+.downloads-actions .downloads-open{min-width:37px;padding:0 5px;font-weight:650;}
+.downloads-actions .downloads-reveal{width:22px;min-width:22px;display:grid;place-items:center;font-size:14px;}
