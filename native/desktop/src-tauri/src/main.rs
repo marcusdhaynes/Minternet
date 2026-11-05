@@ -3,6 +3,7 @@ mod password_vault;
 mod browsing_history;
 mod google_account;
 use base64::Engine as _;
+use rand::{rngs::OsRng,RngCore};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 use std::{sync::Mutex, collections::{HashSet, HashMap, VecDeque}, path::PathBuf, time::{Instant, Duration}};
@@ -46,6 +47,7 @@ struct Tab {
     // this to restore immediate visual adjacency within tab groups.
     opener_id: Option<u32>,
     pending_chatgpt: Option<PendingChatPrompt>,
+    sync_id: String,
 }
 
 #[derive(Clone, PartialEq, Serialize)]
@@ -63,6 +65,7 @@ struct PublicTab {
     can_forward: bool,
     suspended: bool,
     opener_id: Option<u32>,
+    sync_id:String,
     error: String,
 }
 
@@ -264,6 +267,11 @@ struct LayoutCache {
     overlay_open: bool,
 }
 
+fn new_sync_id()->String {
+    let mut random=[0u8;16];
+    OsRng.fill_bytes(&mut random);
+    random.iter().map(|c|format!("{c:02x}")).collect()
+}
 impl Browser {
     fn new() -> Self {
         Self {
@@ -291,6 +299,7 @@ impl Browser {
             view: None, history: vec![HOME.into()], at: 0,
             inactive_since: None, loading: false, checking_unload: false,
             opener_id: None, pending_chatgpt: None,
+            sync_id: new_sync_id(),
         });
         self.active_id = id;
         Ok(id)
@@ -318,7 +327,8 @@ impl Browser {
                 pinned: t.pinned, audio_playing:t.audio_playing,
                 audio_muted:t.audio_muted, loading: t.loading, can_back: t.at > 0, can_forward: t.at + 1 < t.history.len(),
                 suspended: t.view.is_none() && t.url != HOME,
-                opener_id:t.opener_id,error: String::new(),
+                opener_id:t.opener_id,sync_id:t.sync_id.clone(),
+                error: String::new(),
             }).collect(),
         }
     }
@@ -395,7 +405,7 @@ fn save_session(app: &tauri::AppHandle) -> Result<(),String> {
         let store=app.state::<Mutex<Browser>>();
         let browser=store.lock().map_err(|e|e.to_string())?;
         let tabs=browser.tabs.iter().filter(|tab|!tab.private).map(|tab|{
-            json!({"url":tab.url,"pinned":tab.pinned})
+            json!({"url":tab.url,"pinned":tab.pinned,"syncId":tab.sync_id})
         }).collect::<Vec<_>>();
         let selected=browser.active().filter(|t|!t.private).map(|t|t.id);
         let active=tabs.iter().enumerate().find_map(|(i,_)|{
@@ -440,6 +450,11 @@ fn restore_session(app: &tauri::AppHandle) {
                 tab.title=title_for(address);
                 tab.history=vec![address.to_string()];
                 tab.pinned=record.get("pinned").and_then(Value::as_bool)==Some(true);
+                if let Some(remote)=record.get("syncId").and_then(Value::as_str) {
+                    if remote.len()==32 && remote.chars().all(|c|c.is_ascii_hexdigit()){
+                        tab.sync_id=remote.to_owned();
+                    }
+                }
             }
         }
     }
