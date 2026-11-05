@@ -1778,6 +1778,18 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         return Ok(json!({"exists":true,
             "encrypted":base64::engine::general_purpose::STANDARD.encode(raw)}));
     }
+    if name=="google-vault-merge" {
+        let encoded=value.as_str().ok_or("Missing encrypted cloud vault")?;
+        if encoded.len()>2_800_000{return Err("Cloud vault exceeds safe size".into());}
+        let raw=base64::engine::general_purpose::STANDARD.decode(encoded)
+            .map_err(|_|"Invalid encrypted cloud vault encoding")?;
+        let file=password_vault::file(&app)?;
+        if !file.exists(){return Ok(json!({"ok":false,"reason":"no-local-vault"}));}
+        let state=app.state::<Mutex<password_vault::Vault>>();
+        let mut vault=state.lock().map_err(|e|e.to_string())?;
+        if !vault.unlocked(){return Ok(json!({"ok":false,"reason":"vault-locked"}));}
+        return vault.merge_encrypted_backup(&raw,&file);
+    }
     if name=="google-vault-import" {
         // An existing vault is never silently overwritten. Reconciliation of
         // conflicting vaults needs explicit, separate user action.
