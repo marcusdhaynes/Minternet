@@ -7,13 +7,13 @@ use base64::Engine as _;
 use rand::{rngs::OsRng,RngCore};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
-use std::{sync::Mutex, collections::{HashSet, HashMap, VecDeque}, path::PathBuf, time::{Instant, Duration}};
+use std::{sync::{Mutex,atomic::{AtomicU64,Ordering}}, collections::{HashSet, HashMap, VecDeque}, path::PathBuf, time::{Instant, Duration}};
 use serde::{Serialize,Deserialize};
 use zeroize::Zeroize;
 use serde_json::{json, Value};
 use tauri::{
     Emitter, Manager, WebviewUrl, LogicalPosition, LogicalSize,
-    webview::{WebviewBuilder, NewWindowResponse, PermissionResponse, PageLoadEvent, DownloadEvent},
+    webview::{WebviewBuilder, WebviewWindowBuilder, NewWindowResponse, PermissionResponse, PageLoadEvent, DownloadEvent},
     window::WindowBuilder,
 };
 
@@ -340,6 +340,62 @@ fn open_download_file(path:&std::path::Path)->Result<(),String>{
     std::process::Command::new("xdg-open").arg(path).spawn().map_err(|e|e.to_string())?;
     Ok(())
 }
+// A WebView2 popup that has been replaced by a detached tab loses the real
+// window.opener relationship. Firebase Auth and most OAuth popup handshakes
+// depend on it. Keep auth popups in a related native WebView2 window so the
+// login can send its result back to the initiating tab and close normally.
+static NEXT_AUTH_POPUP_ID: AtomicU64 = AtomicU64::new(1);
+
+fn is_auth_popup_url(url: &tauri::Url) -> bool {
+    if url.as_str() == "about:blank" { return true; }
+    if url.scheme() != "https" { return false; }
+    let Some(host) = url.host_str() else { return false };
+    let host = host.to_ascii_lowercase();
+    let path = url.path().to_ascii_lowercase();
+    // Firebase Auth's real popup starts on the app's firebaseapp.com auth
+    // handler and then redirects to accounts.google.com and back again.
+    // Support custom Firebase auth domains as well.
+    if path.starts_with("/__/auth/") { return true; }
+    if matches!(host.as_str(), "accounts.google.com"|"login.microsoftonline.com"|
+        "login.live.com"|"appleid.apple.com"|"id.apple.com"|
+        "github.com"|"login.yahoo.com"|"www.facebook.com") {
+        return host != "github.com" || path.starts_with("/login/oauth/");
+    }
+    // Common OIDC/OAuth authorization endpoints used by other websites.
+    (path.contains("/oauth/") || path.ends_with("/authorize") ||
+        path.ends_with("/authorization") || path.ends_with("/login"))
+        && url.query_pairs().any(|(key,_)| matches!(key.as_ref(),
+            "client_id"|"redirect_uri"|"response_type"|"code_challenge"))
+}
+
+#[cfg(test)]
+mod auth_popup_tests {
+    use super::*;
+    #[test]
+    fn firebase_google_sign_in_popup_keeps_native_opener() {
+        for url in [
+            "https://proseu-working-03-624365-f0705.firebaseapp.com/__/auth/handler?authType=signInViaPopup",
+            "https://accounts.google.com/o/oauth2/v2/auth?client_id=test&response_type=code",
+            "https://auth.example.org/oauth2/authorize?client_id=demo",
+            "about:blank",
+        ] {
+            assert!(is_auth_popup_url(&tauri::Url::parse(url).unwrap()),"{url}");
+        }
+    }
+    #[test]
+    fn normal_links_still_open_as_minternet_tabs() {
+        for url in [
+            "https://example.com",
+            "https://github.com/example/project",
+            "https://chatgpt.com/",
+            "http://accounts.google.com/o/oauth2/v2/auth?client_id=bad",
+            "file:///etc/passwd",
+        ] {
+            assert!(!is_auth_popup_url(&tauri::Url::parse(url).unwrap()),"{url}");
+        }
+    }
+}
+
 struct PopupDeduper(Mutex<HashMap<(u32,String),Instant>>);
 struct ZoomState(Mutex<f64>);
 #[derive(Default)]
@@ -1373,11 +1429,48 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                 _=>true
             }
         })
-        .on_new_window(move |url, _features| {
+        .on_new_window(move |url, features| {
+            if is_auth_popup_url(&url) {
+                // Create a real WebView2 popup using the opener's *same*
+                // environment. Passing the original window features is
+                // critical for window.opener, cookies, and private profiles.
+                // Do not navigate it ourselves: WebView2 attaches the new
+                // controller to the original NewWindowRequested handshake.
+                // This also handles apps that first open about:blank.
+                let open_popups = for_popup.webview_windows().keys()
+                    .filter(|name|name.starts_with("auth-popup-")).count();
+                if open_popups >= 8 { return NewWindowResponse::Deny; }
+                let label=format!("auth-popup-{}",
+                    NEXT_AUTH_POPUP_ID.fetch_add(1,Ordering::Relaxed));
+                let builder=WebviewWindowBuilder::new(
+                        &for_popup,label,WebviewUrl::External(
+                            tauri::Url::parse("about:blank").expect("valid blank URL")))
+                    .window_features(features)
+                    .title("Sign in — Minternet")
+                    .inner_size(540.0,680.0)
+                    .resizable(true)
+                    .on_navigation(|destination| {
+                        matches!(destination.scheme(),"https"|"http")
+                            && destination.host_str().is_some()
+                            || destination.as_str()=="about:blank"
+                    })
+                    // Treat remote login content like a website, not app
+                    // chrome. Never add a native bridge or read OAuth codes.
+                    .on_document_title_changed(|window,title| {
+                        let safe=title.chars().take(100).collect::<String>();
+                        if !safe.is_empty(){let _=window.set_title(&safe);}
+                    });
+                return match builder.build() {
+                    Ok(window)=>NewWindowResponse::Create{window},
+                    Err(error)=>{
+                        eprintln!("Cannot create related sign-in popup: {error}");
+                        NewWindowResponse::Deny
+                    }
+                };
+            }
             if matches!(url.scheme(),"https"|"http") && url.host_str().is_some() {
-                // WebView2 may emit both window.open and modifier-click callbacks
-                // for the same gesture. Coalesce only the identical source/URL
-                // pair within one short event burst, without blocking other URLs.
+                // Normal Ctrl-click and plain-link requests still become
+                // Minternet tabs. Only auth handshakes use a related window.
                 let key=(id,url.to_string());
                 let state=for_popup.state::<PopupDeduper>();
                 let should_open=if let Ok(mut recent)=state.0.lock(){
