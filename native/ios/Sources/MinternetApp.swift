@@ -95,6 +95,17 @@ final class BrowserState: ObservableObject {
         // Switching normal -> private NEVER erases data already saved by normal mode.
     }
 
+    func reloadActive() {
+        guard let tab = active else { return }
+        if tab.webView == nil || tab.suspended {
+            // Selecting an unloaded tab recreates its renderer and loads
+            // the last real URL; reload must never silently do nothing.
+            select(tab.id)
+        } else {
+            tab.webView?.reload()
+        }
+    }
+
     func navigate(_ input: String) {
         guard let tab = active else { return }
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -250,6 +261,50 @@ struct SecureWebView: UIViewRepresentable {
     func updateUIView(_ view: WKWebView, context: Context) {}
 }
 
+// Every tab has a visible site identity, including websites such as ChatGPT
+// that do not provide a conventional /favicon.ico. Prefer PNG icons so
+// WKWebView/SwiftUI can render them reliably on iOS.
+struct SiteFavicon: View {
+    let url: URL?
+    private var hostname: String { (url?.host ?? "").lowercased() }
+    private var chatGPT: Bool {
+        hostname == "chatgpt.com" || hostname.hasSuffix(".chatgpt.com")
+    }
+    private var glyph: String {
+        if chatGPT { return "✳" }
+        return hostname.first.map { String($0).uppercased() } ?? "◆"
+    }
+    private func candidate(_ path: String) -> URL? {
+        guard let url, url.scheme == "https" else { return nil }
+        return URL(string: path, relativeTo: url)?.absoluteURL
+    }
+    private var fallback: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: chatGPT ? 8 : 4)
+                .fill(chatGPT ? Color(red: 0.063, green: 0.639, blue: 0.498) : Color.indigo)
+            Text(glyph).font(.system(size: chatGPT ? 13 : 10, weight: .heavy))
+                .foregroundColor(.white)
+        }.frame(width: 16, height: 16)
+    }
+    var body: some View {
+        AsyncImage(url: candidate("/favicon-32x32.png")) { phase in
+            if let image = phase.image {
+                image.resizable().scaledToFit()
+            } else if phase.error != nil {
+                AsyncImage(url: candidate("/apple-touch-icon.png")) { secondary in
+                    if let image = secondary.image {
+                        image.resizable().scaledToFit()
+                    } else {
+                        fallback
+                    }
+                }
+            } else {
+                fallback
+            }
+        }.frame(width: 16, height: 16)
+    }
+}
+
 struct ContentView: View {
     @StateObject private var state = BrowserState()
     @FocusState private var focused: Bool
@@ -265,13 +320,7 @@ struct ContentView: View {
                         HStack(spacing: 2) {
                             Button(action: { state.select(tab.id) }) {
                                 ZStack(alignment: .bottomTrailing) {
-                                    AsyncImage(url: tab.url.flatMap { URL(string: "/favicon.ico", relativeTo: $0)?.absoluteURL }) { phase in
-                                        if let image = phase.image {
-                                            image.resizable().scaledToFit()
-                                        } else {
-                                            Image(systemName: "globe").resizable().scaledToFit()
-                                        }
-                                    }.frame(width: 16, height: 16)
+                                    SiteFavicon(url: tab.url)
                                     if tab.isPrivate {
                                         Image(systemName: "eye.slash.fill")
                                             .font(.system(size: 7)).foregroundStyle(.purple)
@@ -309,7 +358,7 @@ struct ContentView: View {
                     .accessibilityIdentifier("back")
                 Button(action: { state.active?.webView?.goForward() }) { Image(systemName: "chevron.right") }
                     .accessibilityIdentifier("forward")
-                Button(action: { state.active?.webView?.reload() }) { Image(systemName: "arrow.clockwise") }
+                Button(action: { state.reloadActive() }) { Image(systemName: "arrow.clockwise") }
                     .accessibilityIdentifier("reload")
                 TextField("", text: $state.address, prompt: Text("Search or HTTPS address").foregroundColor(Color(white: 0.70)))
                     .textInputAutocapitalization(.never)
