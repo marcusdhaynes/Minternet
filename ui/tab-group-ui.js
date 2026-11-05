@@ -498,14 +498,22 @@
     applySyncedGroups:(groups,tabs)=>{
       if(!Array.isArray(groups)||!Array.isArray(tabs))return false;
       const parsed=model.hydrate({groups});
-      state.groups=parsed.groups;
-      state.assignments=Object.create(null);
-      const available=latest.tabs.filter(t=>!t.private);
-      // The same URL may exist more than once; consume each local slot once.
+      // Private/Tor groups and their memberships NEVER follow cloud updates.
+      const protectedTabs=latest.tabs.filter(t=>t.private||t.tor||t.isTor);
+      const protectedIds=new Set(protectedTabs.map(t=>state.assignments[String(t.id)]).filter(Boolean));
+      const protectedGroups=state.groups.filter(g=>protectedIds.has(g.id));
+      const preserved=Object.fromEntries(protectedTabs.map(tab=>[
+        String(tab.id),state.assignments[String(tab.id)]||null
+      ]).filter(([,group])=>group));
+      state.groups=[...protectedGroups,...parsed.groups.filter(g=>!protectedIds.has(g.id))];
+      state.assignments=Object.assign(Object.create(null),preserved);
+      const available=latest.tabs.filter(t=>!t.private&&!t.tor&&!t.isTor);
       const used=new Set();
       for(const item of tabs){
         if(!item?.groupId)continue;
-        const matching=available.find(tab=>tab.url===item.url&&!used.has(tab.id));
+        const matching=available.find(tab=>
+          (item.syncId&&tab.syncId===item.syncId || (!item.syncId&&tab.url===item.url)) &&
+          !used.has(tab.id));
         if(matching&&model.get(state,item.groupId)){
           state.assignments[String(matching.id)]=item.groupId;
           used.add(matching.id);
