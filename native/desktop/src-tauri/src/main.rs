@@ -226,6 +226,31 @@ fn repair_download_extension(path:&std::path::Path)->PathBuf{
     }
     path.to_path_buf()
 }
+#[cfg(test)]
+mod download_format_tests {
+    use super::{download_signature,repair_download_extension};
+    #[test]
+    fn mislabeled_executable_becomes_real_exe_without_loading_it() {
+        let path=std::env::temp_dir().join(format!("minternet-{}-sample.exe.txt",std::process::id()));
+        let mut content=vec![0u8;256];
+        content[0..2].copy_from_slice(b"MZ");
+        content[0x3c..0x40].copy_from_slice(&128u32.to_le_bytes());
+        content[128..132].copy_from_slice(b"PE\\0\\0");
+        std::fs::write(&path,content).unwrap();
+        assert_eq!(download_signature(&path),Some("exe"));
+        let updated=repair_download_extension(&path);
+        assert_eq!(updated.extension().and_then(|x|x.to_str()),Some("exe"));
+        assert_eq!(download_signature(&updated),Some("exe"));
+        let _=std::fs::remove_file(updated);
+    }
+    #[test]
+    fn text_dressed_up_as_exe_is_not_an_executable() {
+        let path=std::env::temp_dir().join(format!("minternet-{}-fake.exe",std::process::id()));
+        std::fs::write(&path,b"<html>Error: file unavailable</html>").unwrap();
+        assert_eq!(download_signature(&path),None);
+        let _=std::fs::remove_file(&path);
+    }
+}
 fn download_update(app:&tauri::AppHandle,url:&tauri::Url,path:Option<&std::path::Path>,
                    private:bool,success:Option<bool>){
     let state=app.state::<DownloadsState>();
