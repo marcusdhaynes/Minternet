@@ -36,6 +36,8 @@ jobs:
       - name: Validate browser UI and bookmark model
         run: |
           node --check ../../ui/native-bridge.js
+          node --check ../../ui/app.js
+          node --check ../../ui/downloads-ui.js
           node --check ../../ui/bookmark-model.js
           node --check ../../ui/bookmark-ui.js
           node --check ../../ui/tab-group-model.js
