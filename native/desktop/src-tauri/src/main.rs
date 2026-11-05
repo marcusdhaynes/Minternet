@@ -1945,8 +1945,8 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                     return Err(format!("Rapid chrome invariant failed: {key}"));
                 }
             }
-            if !(70.0..=72.0).contains(&width) {
-                return Err(format!("Expected 71px tabs, found {width}"));
+            if !(25.0..=65.0).contains(&width) {
+                return Err(format!("Expected favicon-only tab width of 25-65px, found {width}"));
             }
             match phase {
                 "maximize" if maximized => {},

@@ -14,7 +14,7 @@ final class BrowserState: ObservableObject {
         var suspended = false
         var checking = false
         var inactiveSince: Date?
-        static func makeWebView(isPrivate: Bool) -> WKWebView {
+        @MainActor static func makeWebView(isPrivate: Bool) -> WKWebView {
             let configuration = WKWebViewConfiguration()
             configuration.websiteDataStore = isPrivate ? .nonPersistent() : .default()
             configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
@@ -176,7 +176,7 @@ final class BrowserState: ObservableObject {
                   Date().timeIntervalSince(since)>=Double(autoUnloadMinutes*60),
                   let view=tab.webView, !view.isLoading, tab.url?.scheme == "https" else { continue }
             tab.checking = true
-            view.evaluateJavaScript(Self.safeToUnload) { [weak self, weak view] result, error in
+            view.evaluateJavaScript(Self.safeToUnload) { [weak self] result, error in
                 Task { @MainActor in
                     guard let self else { return }
                     tab.checking = false
