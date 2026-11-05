@@ -1250,7 +1250,7 @@ fn display_active(app: &tauri::AppHandle) {
 }
 
 fn update_from_site(app: &tauri::AppHandle, id: u32, url: &str) {
-    if !url.starts_with("https://") { return; }
+    if !url.starts_with("https://") && !url.starts_with("http://") { return; }
     let mut pinned_change=false;
     {
         let state=app.state::<Mutex<Browser>>();
@@ -2906,7 +2906,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                         // Suspended/closed tabs or unsupported browser history
                         // fall back to ordinary validated HTTPS navigation.
                         let dest = tauri::Url::parse(&url).map_err(|e| e.to_string())?;
-                        if dest.scheme() != "https" { return Err("Unsafe history URL".into()); }
+                        if !matches!(dest.scheme(),"http"|"https") { return Err("Unsafe history URL".into()); }
                         navigate_tab(&app, id, Some(dest), false)?;
                     } else {
                         notify(&app);
