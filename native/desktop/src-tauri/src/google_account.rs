@@ -289,7 +289,8 @@ pub fn codes(state:&Mutex<GoogleState>,hosts:&[String])->Result<Vec<CodeResult>,
             let mut detail=tauri::Url::parse(&format!("https://gmail.googleapis.com/gmail/v1/users/me/messages/{id}"))
                 .map_err(|e|e.to_string())?;
             detail.query_pairs_mut().append_pair("format","metadata")
-                .append_pair("metadataHeaders","From").append_pair("metadataHeaders","Subject");
+                .append_pair("metadataHeaders","From").append_pair("metadataHeaders","Subject")
+                .append_pair("metadataHeaders","Authentication-Results");
             let response=ureq::get(detail.as_str()).set("Authorization",&format!("Bearer {access}"))
                 .timeout(Duration::from_secs(15)).call().map_err(|e|e.to_string())?
                 .into_json::<Value>().map_err(|e|e.to_string())?;
@@ -304,6 +305,14 @@ pub fn codes(state:&Mutex<GoogleState>,hosts:&[String])->Result<Vec<CodeResult>,
                 .is_some_and(|s|s.eq_ignore_ascii_case(name)))
                 .and_then(|v|v["value"].as_str()).unwrap_or("").to_owned();
             let Some(sender)=sender_domain(&value("From")) else{continue;};
+            // From: is user-controlled. Accept codes only after Gmail reports
+            // successful DKIM or SPF for the matching sender domain.
+            let verified=value("Authentication-Results").to_ascii_lowercase();
+            let dkim=verified.contains("dkim=pass") &&
+                verified.contains(&format!("header.d={sender}"));
+            let spf=verified.contains("spf=pass") &&
+                verified.contains(&format!("smtp.mailfrom={sender}"));
+            if !dkim&&!spf {continue;}
             let matched=hosts.iter().find(|host|*host==&sender||
                 host.ends_with(&format!(".{sender}")));
             let Some(host)=matched else{continue;};
