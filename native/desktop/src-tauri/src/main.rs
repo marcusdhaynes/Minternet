@@ -29,6 +29,10 @@ struct Tab {
     view: Option<String>,
     history: Vec<String>,
     at: usize,
+    // Renderer memory can be dropped while preserving the URL and tab identity.
+    inactive_since: Option<Instant>,
+    loading: bool,
+    checking_unload: bool,
 }
 
 #[derive(Clone, PartialEq, Serialize)]
@@ -271,6 +275,7 @@ impl Browser {
             id, title: "New Tab".into(), url: HOME.into(), private,
             pinned: false, audio_playing:false, audio_muted:false,
             view: None, history: vec![HOME.into()], at: 0,
+            inactive_since: None, loading: false, checking_unload: false,
         });
         self.active_id = id;
         Ok(id)
@@ -282,7 +287,7 @@ impl Browser {
             tabs: self.tabs.iter().map(|t| PublicTab {
                 id: t.id, title: t.title.clone(), url: t.url.clone(), private: t.private,
                 pinned: t.pinned, audio_playing:t.audio_playing,
-                audio_muted:t.audio_muted, loading: false, can_back: t.at > 0, can_forward: t.at + 1 < t.history.len(),
+                audio_muted:t.audio_muted, loading: t.loading, can_back: t.at > 0, can_forward: t.at + 1 < t.history.len(),
                 suspended: t.view.is_none() && t.url != HOME, error: String::new(),
             }).collect(),
         }
@@ -1038,7 +1043,15 @@ fn display_active(app: &tauri::AppHandle) {
         // chrome menus open. The chrome overlay is transparent outside panels.
         let split=visible_split(app);
         let browser=app.state::<Mutex<Browser>>();
-        let Ok(b)=browser.lock() else{return};
+        let Ok(mut b)=browser.lock() else{return};
+        // Arm the idle timer only when a tab is no longer selected. Merely
+        // opening the browser or rendering an updated toolbar is not idle time.
+        let active=b.active_id;
+        let now=Instant::now();
+        for tab in &mut b.tabs {
+            if tab.id==active { tab.inactive_since=None; }
+            else if tab.inactive_since.is_none(){tab.inactive_since=Some(now);}
+        }
         if split.len()>1{
             for id in split {
                 if let Some(tab)=b.tabs.iter().find(|t|t.id==id){
@@ -1174,6 +1187,15 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
         })
         .on_page_load(move |_view, event| {
             if matches!(event.event(), PageLoadEvent::Started | PageLoadEvent::Finished) {
+                {
+                    let state=for_load.state::<Mutex<Browser>>();
+                    if let Ok(mut b)=state.lock(){
+                        if let Some(tab)=b.tabs.iter_mut().find(|tab|tab.id==id){
+                            tab.loading=matches!(event.event(),PageLoadEvent::Started);
+                            tab.checking_unload=false;
+                        }
+                    }
+                }
                 update_from_site(&for_load, id, event.url().as_str());
                 if matches!(event.event(), PageLoadEvent::Finished) {
                     record_page_history(&for_load,id,event.url().as_str(),None);
@@ -1470,6 +1492,8 @@ fn navigate_tab(app: &tauri::AppHandle, id: u32, url: Option<tauri::Url>, append
         }
         tab.url = str_url.clone();
         tab.title = title_for(&str_url);
+        tab.loading=url.is_some();
+        tab.checking_unload=false;
         (tab.view.clone(), tab.private, warming, save_url)
     };
     if let Some(url) = url {
@@ -1515,6 +1539,107 @@ fn activated(app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+// A tab may only be auto-discarded when the document itself confirms that it
+// is settled. Any failed evaluation fails closed (retains the renderer). This
+// reads DOM state, never page text, credentials, or form values into Minternet.
+// No arbitrary external page is given permission to send native commands.
+const AUTO_UNLOAD_ELIGIBILITY: &str = r#"(() => {
+  try {
+    if (document.readyState !== 'complete' || document.hasFocus()) return false;
+    if (window.onbeforeunload !== null) return false;
+    if (document.pictureInPictureElement) return false;
+    if (navigator.mediaSession?.playbackState === 'playing') return false;
+    if (document.querySelector('iframe,object,embed,canvas,[aria-busy="true"],[role="progressbar"],progress,.spinner,.loading,[data-loading="true"]')) return false;
+    if ([...document.querySelectorAll('audio,video')].some(m =>
+        !m.paused || m.seeking || m.networkState === m.NETWORK_LOADING ||
+        (m.currentSrc && m.readyState < m.HAVE_FUTURE_DATA))) return false;
+    if ([...document.querySelectorAll('input,textarea,select')].some(e => {
+      if (e.type === 'hidden' || e.type === 'submit' || e.type === 'button' || e.type === 'reset') return false;
+      if (e.type === 'checkbox' || e.type === 'radio') return e.checked !== e.defaultChecked;
+      if (e.type === 'file') return e.files?.length > 0;
+      if (e.tagName === 'SELECT') return [...e.options].some(o => o.selected !== o.defaultSelected);
+      return Boolean(e.value);
+    })) return false;
+    if ([...document.querySelectorAll('[contenteditable="true"],[role="textbox"]')]
+        .some(e => e.textContent?.trim())) return false;
+    const entries=performance.getEntriesByType('resource');
+    if (entries.length) {
+      const latest=entries[entries.length-1];
+      if (performance.now()-(latest.responseEnd||latest.startTime) < 15000) return false;
+    }
+    return true;
+  } catch { return false; }
+})()"#;
+
+// The user-configured policy is checked every ten seconds by trusted chrome.
+// Page requests, media playback, entered values and split-visible tabs block
+// auto-unload; evaluation errors or unknown documents are never destroyed.
+fn check_idle_tabs(app:&tauri::AppHandle, minutes:u64) -> Result<(),String>{
+    if minutes==0 || minutes>120 {return Ok(());}
+    let idle=Duration::from_secs(minutes*60);
+    let split=app.state::<SplitState>().0.lock().map_err(|e|e.to_string())?.clone();
+    let downloads_busy=app.state::<DownloadsState>().0.lock().map_err(|e|e.to_string())?
+        .iter().any(|d|d.status=="downloading");
+    if downloads_busy {return Ok(());}
+    let candidates={
+        let store=app.state::<Mutex<Browser>>();
+        let mut b=store.lock().map_err(|e|e.to_string())?;
+        let active=b.active_id;
+        let now=Instant::now();
+        b.tabs.iter_mut().filter_map(|tab|{
+            if tab.id==active || split.contains(&tab.id) ||
+                tab.loading || tab.audio_playing || tab.checking_unload || tab.url==HOME {
+                return None;
+            }
+            let since=tab.inactive_since?;
+            if now.duration_since(since)<idle {return None;}
+            let label=tab.view.clone()?;
+            tab.checking_unload=true;
+            Some((tab.id,label,since))
+        }).collect::<Vec<_>>()
+    };
+    for (id,label,since) in candidates {
+        let handle=app.clone();
+        let captured=label.clone();
+        let Some(view)=app.get_webview(&label) else {
+            if let Ok(mut b)=app.state::<Mutex<Browser>>().lock(){
+                if let Some(tab)=b.tabs.iter_mut().find(|t|t.id==id){tab.checking_unload=false;}
+            }
+            continue;
+        };
+        let evaluation=view.eval_with_callback(AUTO_UNLOAD_ELIGIBILITY,move |response|{
+            let eligible=response.trim()=="true";
+            let split_visible=handle.state::<SplitState>().0.lock().map(|s|s.contains(&id)).unwrap_or(true);
+            let released={
+                let store=handle.state::<Mutex<Browser>>();
+                if let Ok(mut b)=store.lock(){
+                    let is_active=b.active_id==id;
+                    if let Some(tab)=b.tabs.iter_mut().find(|t|t.id==id){
+                        tab.checking_unload=false;
+                        if eligible && !is_active && !split_visible && !tab.loading &&
+                            !tab.audio_playing && tab.view.as_deref()==Some(captured.as_str()) &&
+                            tab.inactive_since==Some(since) &&
+                            Instant::now().duration_since(since)>=idle {
+                            tab.loading=false;tab.audio_playing=false;tab.audio_muted=false;
+                            tab.view.take()
+                        }else{None}
+                    }else{None}
+                }else{None}
+            };
+            if let Some(label)=released {
+                if let Some(view)=handle.get_webview(&label){let _=view.close();}
+                notify(&handle);
+            }
+        });
+        if evaluation.is_err(){
+            if let Ok(mut b)=app.state::<Mutex<Browser>>().lock(){
+                if let Some(tab)=b.tabs.iter_mut().find(|t|t.id==id){tab.checking_unload=false;}
+            }
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn browser_snapshot(app: tauri::AppHandle) -> Result<Snapshot,String> { snapshot(&app) }
 
@@ -1550,6 +1675,11 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             },
             _=>return Err("Unknown history command".into())
         }
+    }
+    if name=="auto-unload-check" {
+        let minutes=value.as_u64().unwrap_or(1);
+        check_idle_tabs(&app,minutes)?;
+        return Ok(json!({"ok":true}));
     }
     if name=="bookmark-site-icons" {
         let url=value.as_str().ok_or("Expected bookmarked HTTPS URL")?;
@@ -2260,27 +2390,42 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         }
         "reload-tab" | "unload-tab" => {
             let id=value.as_u64().ok_or("Invalid tab ID")? as u32;
-            let (label,is_active,url)={
+            let (label,was_active,url)={
                 let state=app.state::<Mutex<Browser>>();
                 let mut b=state.lock().map_err(|e|e.to_string())?;
-                let is_active=b.active_id==id;
-                if name=="unload-tab" && is_active {
-                    return Err("Select another tab before unloading this one".into());
+                let was_active=b.active_id==id;
+                if !b.tabs.iter().any(|t|t.id==id){return Err("Tab not found".into());}
+                if name=="unload-tab" && was_active {
+                    // Keep the tab itself, but select a different one (or a
+                    // tabless home). Reentering it creates a fresh renderer.
+                    b.active_id=b.tabs.iter().find(|t|t.id!=id && t.pinned).or_else(||
+                        b.tabs.iter().find(|t|t.id!=id)).map(|t|t.id).unwrap_or(0);
                 }
                 let tab=b.tabs.iter_mut().find(|t|t.id==id).ok_or("Tab not found")?;
-                let label=if name=="unload-tab"{tab.view.take()}else{tab.view.clone()};
-                (label,is_active,tab.url.clone())
+                let label=if name=="unload-tab"{
+                    tab.loading=false;tab.checking_unload=false;
+                    tab.audio_playing=false;tab.audio_muted=false;
+                    tab.view.take()
+                }else{
+                    if tab.view.is_some(){tab.loading=true;}
+                    tab.view.clone()
+                };
+                (label,was_active,tab.url.clone())
             };
+            if name=="unload-tab" {
+                app.state::<SplitState>().0.lock().map_err(|e|e.to_string())?.retain(|candidate|*candidate!=id);
+                prune_splits(&app);
+            }
             if let Some(label)=label{
                 if let Some(view)=app.get_webview(&label){
                     if name=="unload-tab"{view.close().map_err(|e|e.to_string())?;}
                     else{view.reload().map_err(|e|e.to_string())?;}
                 }
-            }else if name=="reload-tab" && is_active && url!=HOME{
+            }else if name=="reload-tab" && was_active && url!=HOME{
                 let dest=tauri::Url::parse(&url).map_err(|e|e.to_string())?;
                 navigate_tab(&app,id,Some(dest),false)?;
             }
-            notify(&app);
+            if name=="unload-tab" && was_active {activated(&app)?;} else {notify(&app);}
             return Ok(json!({"ok":true}));
         }
         "reload" => {
