@@ -69,3 +69,13 @@ test('pinned tab is preferred over hidden group and no fallback is a valid table
  assert.equal(m.visibleFallback(s,[{id:1},{id:2}],1),null);
  assert.equal(m.visibleFallback(s,[{id:1},{id:2},{id:3,pinned:true}],1),3);
 });
+
+test('Ctrl-clicked background tab inserts immediately right of opener, not the end',()=>{
+ const s=groups.blank();
+ s.order=[3,1,5,2];
+ assert.equal(groups.insertAfter(s,7,1),true);
+ assert.deepEqual(s.order,[3,1,7,5,2]);
+ assert.equal(groups.insertAfter(s,8,7),true);
+ assert.deepEqual(s.order,[3,1,7,8,5,2]);
+ assert.equal(groups.insertAfter(s,9,12345),false);
+});

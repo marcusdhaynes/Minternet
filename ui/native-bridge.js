@@ -16,7 +16,7 @@ if (window.__TAURI__ && !window.minternet) {
       if(typeof url==='string'&&url.startsWith('https://')){
         void api.core.invoke('browser_action',{
           name:privateTab?'new-private-background-url':'new-background-url',
-          value:url
+          value:{url,openerTabId:Number.isSafeInteger(detail?.openerTabId)?detail.openerTabId:null}
         }).catch(()=>{});
       }
     }).catch(()=>{popupListenerStarted=false;});

@@ -231,6 +231,19 @@
       data.tabs.filter(tab=>!tab.private).forEach((tab,index)=>{if(!tab.pinned&&model.get(state,state.restoredSlots[index]))model.assign(state,tab.id,state.restoredSlots[index]);});
       state.restoredSlots=null;
     }
+    // Ctrl-click background pages carry the actual source tab ID. Insert
+    // directly next to it in the *visual* order even after user drag-reordering,
+    // and inherit the source group so a group cannot separate the two tabs.
+    for(const tab of data.tabs){
+      if(state.order.includes(tab.id) || !Number.isSafeInteger(tab.openerId))continue;
+      if(!model.insertAfter(state,tab.id,tab.openerId))continue;
+      const parentGroup=model.findTab(state,tab.openerId);
+      if(parentGroup && !tab.pinned){
+        model.assign(state,tab.id,parentGroup.id);
+        parentGroup.visible=true;
+        parentGroup.collapsed=false;
+      }
+    }
     model.prune(state,data.tabs.map(t=>t.id));
     if(state.restoredOrder){
       const native=data.tabs.filter(t=>!t.private);

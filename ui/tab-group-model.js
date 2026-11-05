@@ -80,6 +80,14 @@
     const pos=new Map(state.order.map((id,i)=>[id,i]));
     return [...tabs].sort((a,b)=>(pos.get(a.id)??Infinity)-(pos.get(b.id)??Infinity));
   }
+  function insertAfter(state,newId,openerId) {
+    if (!Number.isSafeInteger(newId)||!Number.isSafeInteger(openerId)||
+        newId===openerId||!state.order.includes(openerId))return false;
+    const without=state.order.filter(id=>id!==newId);
+    without.splice(without.indexOf(openerId)+1,0,newId);
+    state.order=without;
+    return true;
+  }
   function moveRelative(state,movingId,targetId,after=false) {
     if(movingId===targetId||!state.order.includes(movingId)||!state.order.includes(targetId))return false;
     const next=state.order.filter(id=>id!==movingId);
@@ -104,5 +112,5 @@
       others.find(t=>isVisibleTab(state,t.id))?.id ?? null;
   }
   return { colors, MAX_GROUPS, blank, hydrate, serialize, get, findTab, create, update, remove,
-    assign, prune, sortedTabs, moveRelative, tabsIn, isVisibleTab, visibleFallback };
+    assign, prune, sortedTabs, insertAfter, moveRelative, tabsIn, isVisibleTab, visibleFallback };
 });

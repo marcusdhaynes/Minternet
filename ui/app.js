@@ -10,6 +10,13 @@ const command = async (name, value) => {
   try {
     const result = await api.command(name, value);
     if (result?.message) toast(result.message);
+    // A new tab should be immediately ready for typing, no second click.
+    if(!result?.message && (name==='new'||name==='new-private')){
+      requestAnimationFrame(()=>{
+        const field=byId('address');
+        if(field){field.focus();field.select();}
+      });
+    }
   } catch {
     toast('The action could not be completed.');
   }
@@ -207,6 +214,22 @@ if(window.__TAURI__){
     if(event.button!==0||event.target.closest(interactive))return;
     event.preventDefault();
     pendingDrag=null;
+    const strip=byId('tabs'),newButton=byId('newTab');
+    if(strip&&newButton && (event.target===strip||event.target===topRow)){
+      const bounds=strip.getBoundingClientRect();
+      const lastRight=[...strip.children].reduce((max,child)=>{
+        const rect=child.getBoundingClientRect();
+        return rect.width>0?Math.max(max,rect.right):max;
+      },bounds.left);
+      const from=Math.max(bounds.left,lastRight);
+      const to=newButton.getBoundingClientRect().left;
+      if(to>from && event.clientX>=from && event.clientX<to){
+        // Left half creates a tab; right half restores to a window (never maximizes).
+        if(event.clientX<(from+to)/2)void command('new');
+        else void api.command('restore-window').catch(()=>{});
+        return;
+      }
+    }
     void api.command('maximize').catch(()=>{});
   });
 }
