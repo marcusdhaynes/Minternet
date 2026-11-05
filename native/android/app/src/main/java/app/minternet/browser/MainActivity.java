@@ -13,6 +13,8 @@ import android.webkit.WebStorage;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Paint;
 import android.net.Uri;
 import android.webkit.CookieManager;
 import android.webkit.PermissionRequest;
@@ -50,6 +52,7 @@ public class MainActivity extends Activity {
     private static final int SURFACE=0xff1e293b;
     private static final int ACCENT=0xffb9b7ff;
     private final List<BrowserTab> tabs=new ArrayList<>();
+    private final Map<String,Bitmap> fallbackTabIcons=new HashMap<>();
     private int currentIndex=-1;
     private LinearLayout tabRow;
     private EditText address;
@@ -178,7 +181,14 @@ public class MainActivity extends Activity {
 
         back.setOnClickListener(v->{BrowserTab t=current();if(t!=null&&t.web.canGoBack())t.web.goBack();});
         forward.setOnClickListener(v->{BrowserTab t=current();if(t!=null&&t.web.canGoForward())t.web.goForward();});
-        reload.setOnClickListener(v->{BrowserTab t=current();if(t!=null)t.web.reload();});
+        reload.setOnClickListener(v->{
+            BrowserTab t=current();
+            if(t==null)return;
+            if(t.web==null||t.suspended){
+                prepareWebView(t);
+                if(t.web!=null && t.url.startsWith("https://"))t.web.loadUrl(t.url);
+            }else t.web.reload();
+        });
         go.setOnClickListener(v->navigate(address.getText().toString()));
         address.setOnEditorActionListener((v,action,event)->{
             navigate(address.getText().toString());return true;
@@ -502,12 +512,21 @@ public class MainActivity extends Activity {
             }
             @Override public void onPageStarted(WebView v,String url,Bitmap icon) {
                 if(tab.web!=v)return;
+                try{
+                    String oldHost=Uri.parse(tab.url).getHost();
+                    String newHost=Uri.parse(url).getHost();
+                    if(oldHost==null?newHost!=null:!oldHost.equalsIgnoreCase(newHost))tab.icon=null;
+                }catch(Exception ignored){tab.icon=null;}
+                if(icon!=null)tab.icon=icon;
                 tab.url=url;tab.loading=true;
                 if(current()==tab)updateUI();
             }
             @Override public void onPageFinished(WebView v,String url) {
                 if(tab.web!=v)return;
                 tab.url=url;tab.loading=false;
+                Bitmap favicon=v.getFavicon();
+                if(favicon!=null)tab.icon=favicon;
+                updateTabLabels();
                 if(current()==tab)updateUI();
                 broadcastTabs();
             }
@@ -518,6 +537,9 @@ public class MainActivity extends Activity {
         web.setWebChromeClient(new WebChromeClient(){
             @Override public void onReceivedTitle(WebView v,String title) {
                 if(title!=null&&!title.isEmpty()){tab.title=title; updateTabLabels();}
+            }
+            @Override public void onReceivedIcon(WebView v,Bitmap favicon) {
+                if(tab.web==v && favicon!=null){tab.icon=favicon;updateTabLabels();}
             }
             @Override public boolean onCreateWindow(WebView v,boolean dialog,boolean userGesture,Message resultMsg){
                 if(!userGesture)return false;
@@ -590,20 +612,39 @@ public class MainActivity extends Activity {
         flushDeferred();
     }
 
+    // Every tab has a real bitmap icon even on sites (including ChatGPT) that
+    // never notify WebChromeClient of their favicon. Cache by hostname.
+    private Bitmap fallbackTabIcon(String address){
+        String host="";
+        try{String parsed=Uri.parse(address).getHost();if(parsed!=null)host=parsed.toLowerCase(java.util.Locale.ROOT);}
+        catch(Exception ignored){}
+        Bitmap cached=fallbackTabIcons.get(host);
+        if(cached!=null)return cached;
+        final boolean chatgpt=host.equals("chatgpt.com")||host.endsWith(".chatgpt.com");
+        String glyph=chatgpt?"✳":host.isEmpty()?"◆":host.substring(0,1).toUpperCase(java.util.Locale.ROOT);
+        int size=dp(16);
+        Bitmap icon=Bitmap.createBitmap(size,size,Bitmap.Config.ARGB_8888);
+        Canvas canvas=new Canvas(icon);
+        Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
+        int color=chatgpt?0xff10a37f:Color.HSVToColor(new float[]{
+            (host.hashCode()&0x7fffffff)%360,0.48f,0.65f});
+        paint.setColor(color);
+        canvas.drawRoundRect(0,0,size,size,chatgpt?size/2f:size/4f,chatgpt?size/2f:size/4f,paint);
+        paint.setColor(Color.WHITE);paint.setTypeface(Typeface.DEFAULT_BOLD);
+        paint.setTextSize(size*(chatgpt?0.79f:0.67f));paint.setTextAlign(Paint.Align.CENTER);
+        Paint.FontMetrics metrics=paint.getFontMetrics();
+        canvas.drawText(glyph,size/2f,(size-metrics.ascent-metrics.descent)/2f,paint);
+        if(fallbackTabIcons.size()>80)fallbackTabIcons.clear();
+        fallbackTabIcons.put(host,icon);
+        return icon;
+    }
     private void updateTabLabels() {
         for(BrowserTab tab:tabs){
-            String letter="◆";
-            if(tab.url.startsWith("https://")){
-                try{String host=Uri.parse(tab.url).getHost();if(host!=null&&!host.isEmpty())letter=host.substring(0,1).toUpperCase();}catch(Exception ignored){}
-            }
-            if(tab.icon!=null){
-                Bitmap scaled=Bitmap.createScaledBitmap(tab.icon,dp(16),dp(16),true);
-                tab.button.setCompoundDrawablesWithIntrinsicBounds(new BitmapDrawable(getResources(),scaled),null,null,null);
-                tab.button.setText("");
-            }else{
-                tab.button.setCompoundDrawablesWithIntrinsicBounds(null,null,null,null);
-                tab.button.setText(letter);
-            }
+            Bitmap image=tab.icon!=null?tab.icon:fallbackTabIcon(tab.url);
+            Bitmap scaled=image.getWidth()==dp(16)&&image.getHeight()==dp(16)?image:
+                Bitmap.createScaledBitmap(image,dp(16),dp(16),true);
+            tab.button.setCompoundDrawablesWithIntrinsicBounds(new BitmapDrawable(getResources(),scaled),null,null,null);
+            tab.button.setText("");
             tab.button.setContentDescription((tab.suspended?"Unloaded · ":"")+tab.title);
             tab.button.setBackgroundTintList(android.content.res.ColorStateList.valueOf(
                 tab.suspended?0xff41434b:tab==current()?0xff474570:SURFACE));
