@@ -412,6 +412,9 @@
     const dt=event.dataTransfer;
     const plain=imported?.parseTransfer(dt)||[];
     const firefoxFolder=imported?.mozillaFolderReference(dt)||null;
+    const folderFlavor=Array.from(dt.types||[]).some(type=>
+      type==='text/x-moz-place-container'||type==='application/x-moz-place-container'
+      ||type==='application/x-bookmark-folder');
     const files=Array.from(dt.files||[]);
     const entries=Array.from(dt.items||[]).map(item=>item.webkitGetAsEntry?.()).filter(Boolean);
     clearDrop();
@@ -435,6 +438,10 @@
           toast(result?.message||'Firefox could not provide the folder contents. Export it as bookmarks HTML to import.');
           return;
         }
+      }
+      if(folderFlavor&&!firefoxFolder&&!items.some(node=>node.kind==='folder')){
+        toast('This browser did not expose the folder contents. Export bookmarks as HTML and drop the file instead.');
+        return;
       }
       if(items.some(node=>node.kind==='folder'&&Array.isArray(node.children)&&node.children.length===0)
         &&firefoxFolder&&items.length===1&&!window.__TAURI__){
