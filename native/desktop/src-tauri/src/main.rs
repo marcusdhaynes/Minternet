@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod password_vault;
 mod browsing_history;
+mod google_account;
+use base64::Engine as _;
 
 use std::{sync::Mutex, collections::{HashSet, HashMap, VecDeque}, path::PathBuf, time::{Instant, Duration}};
 use serde::{Serialize,Deserialize};
@@ -1693,6 +1695,121 @@ fn browser_snapshot(app: tauri::AppHandle) -> Result<Snapshot,String> { snapshot
 
 #[tauri::command]
 async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Result<Value, String> {
+    // OAuth, Drive and Gmail are only available to the trusted local chrome.
+    // All remote network calls run on worker threads so they never pause the
+    // native browser event loop. No Google token is returned to web content.
+    if name=="google-status"{
+        return google_account::status(&app.state::<Mutex<google_account::GoogleState>>());
+    }
+    if name=="google-login"||name=="google-gmail-login"{
+        let client=value.get("clientId").and_then(Value::as_str)
+            .ok_or("Google Desktop OAuth Client ID is required")?.to_owned();
+        let mail=name=="google-gmail-login";
+        let handle=app.clone();
+        return tauri::async_runtime::spawn_blocking(move||
+            google_account::login(&handle.state::<Mutex<google_account::GoogleState>>(),&client,mail))
+            .await.map_err(|e|e.to_string())?;
+    }
+    if name=="google-sync-enable" {
+        return google_account::set_enabled(
+            &app.state::<Mutex<google_account::GoogleState>>(),
+            value.as_bool().ok_or("Expected consent flag")?);
+    }
+    if name=="google-drive-pull" {
+        let handle=app.clone();
+        return tauri::async_runtime::spawn_blocking(move||
+            google_account::pull(&handle.state::<Mutex<google_account::GoogleState>>()))
+            .await.map_err(|e|e.to_string())?;
+    }
+    if name=="google-drive-push" {
+        let encrypted=value.as_str().ok_or("Missing encrypted sync data")?.to_owned();
+        let handle=app.clone();
+        return tauri::async_runtime::spawn_blocking(move||
+            google_account::push(&handle.state::<Mutex<google_account::GoogleState>>(),&encrypted))
+            .await.map_err(|e|e.to_string())?;
+    }
+    if name=="google-vault-export" {
+        // Upload the original authenticated, encrypted vault bytes, never PANs
+        // or plaintext passwords. No private browsing credentials enter it.
+        let path=password_vault::file(&app)?;
+        if !path.exists(){return Ok(json!({"exists":false}));}
+        let raw=std::fs::read(path).map_err(|e|e.to_string())?;
+        if raw.len()>2_000_000{return Err("Vault exceeds sync limit".into());}
+        let meta:Value=serde_json::from_slice(&raw).map_err(|_|"Invalid local vault")?;
+        if !meta["ciphertext"].is_array()||!meta["salt"].is_array()||!meta["nonce"].is_array(){
+            return Err("Refusing to sync an unencrypted vault".into());
+        }
+        return Ok(json!({"exists":true,
+            "encrypted":base64::engine::general_purpose::STANDARD.encode(raw)}));
+    }
+    if name=="google-vault-import" {
+        // An existing vault is never silently overwritten. Reconciliation of
+        // conflicting vaults needs explicit, separate user action.
+        let path=password_vault::file(&app)?;
+        if path.exists(){return Ok(json!({"ok":false,"reason":"local-vault-exists"}));}
+        let encoded=value.as_str().ok_or("Missing encrypted vault file")?;
+        if encoded.len()>2_800_000{return Err("Vault backup too large".into());}
+        let raw=base64::engine::general_purpose::STANDARD.decode(encoded)
+            .map_err(|_|"Invalid encrypted vault encoding")?;
+        let parsed:Value=serde_json::from_slice(&raw).map_err(|_|"Invalid vault backup")?;
+        if parsed["version"]!=1 || !parsed["ciphertext"].is_array() ||
+           !parsed["nonce"].is_array() || !parsed["salt"].is_array(){
+            return Err("Refusing an unencrypted or incompatible vault".into());
+        }
+        if let Some(folder)=path.parent(){std::fs::create_dir_all(folder).map_err(|e|e.to_string())?;}
+        std::fs::write(&path,raw).map_err(|e|e.to_string())?;
+        return Ok(json!({"ok":true}));
+    }
+    if name=="google-code-check" {
+        let sites={
+            let browser=app.state::<Mutex<Browser>>();
+            let b=browser.lock().map_err(|e|e.to_string())?;
+            b.tabs.iter().filter(|t|!t.private&&t.url.starts_with("https://"))
+                .map(|t|t.url.clone()).collect::<Vec<_>>()
+        };
+        if sites.is_empty(){return Ok(json!([]));}
+        let handle=app.clone();
+        let found=tauri::async_runtime::spawn_blocking(move||
+            google_account::codes(&handle.state::<Mutex<google_account::GoogleState>>(),&sites))
+            .await.map_err(|e|e.to_string())??;
+        // Enter codes into fields even in background tabs, but only at the
+        // exact originally checked HTTPS hostname. Never press submit.
+        for hit in &found {
+            let eligible={
+                let browser=app.state::<Mutex<Browser>>();
+                let b=browser.lock().map_err(|e|e.to_string())?;
+                b.tabs.iter().filter(|t|!t.private && t.view.is_some() &&
+                    tauri::Url::parse(&t.url).ok().and_then(|u|u.host_str().map(str::to_owned))
+                        .as_deref()==Some(hit.host.as_str()))
+                    .filter_map(|t|t.view.clone()).collect::<Vec<_>>()
+            };
+            let code=serde_json::to_string(&hit.code).map_err(|e|e.to_string())?;
+            let hostname=serde_json::to_string(&hit.host).map_err(|e|e.to_string())?;
+            for label in eligible {
+                if let Some(view)=app.get_webview(&label){
+                    let script=format!(r#"(function(){{
+                        if(location.protocol!=='https:'||location.hostname!=={hostname})return;
+                        const code={code};
+                        const inputs=[...document.querySelectorAll('input')];
+                        const single=inputs.find(e=>!e.disabled && !e.readOnly &&
+                          ((e.autocomplete||'').includes('one-time-code')||
+                          /(?:otp|verification|security.?code|passcode|confirm.?code)/i.test(
+                          (e.name||'')+' '+(e.id||'')+' '+(e.placeholder||'')+' '+
+                          (e.getAttribute('aria-label')||''))) && !e.value);
+                        if(single){{
+                          const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;
+                          set.call(single,code);
+                          single.dispatchEvent(new Event('input',{{bubbles:true}}));
+                          single.dispatchEvent(new Event('change',{{bubbles:true}}));
+                        }}
+                    }})();"#);
+                    let _=view.eval(&script);
+                }
+            }
+        }
+        return serde_json::to_value(found).map_err(|e|e.to_string());
+    }
+
     if name.starts_with("history-"){
         // Private browsing intentionally does not consult saved history,
         // including for address-bar suggestions.
@@ -2594,6 +2711,7 @@ fn main() {
         .manage(UndoHistory(Mutex::new(VecDeque::new())))
         .manage(Mutex::new(Browser::new()))
         .manage(Mutex::new(password_vault::Vault::default()))
+        .manage(Mutex::new(google_account::GoogleState::default()))
         .manage(Mutex::new(LayoutCache::default()))
         .invoke_handler(tauri::generate_handler![browser_action, browser_snapshot])
         .setup(|app| {
