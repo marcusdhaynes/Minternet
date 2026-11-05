@@ -1756,6 +1756,27 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             google_account::push(&handle.state::<Mutex<google_account::GoogleState>>(),&encrypted))
             .await.map_err(|e|e.to_string())?;
     }
+    if name=="live-sync-vault-export" {
+        // Sensitive plaintext is returned only to the LOCAL trusted chrome,
+        // which immediately wraps each record in AES-GCM for server storage.
+        let state=app.state::<Mutex<password_vault::Vault>>();
+        let vault=state.lock().map_err(|e|e.to_string())?;
+        if !vault.unlocked(){return Ok(json!({"locked":true}));}
+        return vault.sync_snapshot();
+    }
+    if name=="live-sync-vault-apply" {
+        let kind=value.get("kind").and_then(Value::as_str)
+            .ok_or("Missing sync category")?;
+        let entry=value.get("entry").ok_or("Missing decrypted sync entry")?;
+        let deleted=value.get("deleted").and_then(Value::as_bool)==Some(true);
+        if !matches!(kind,"login"|"payment") {return Err("Not a vault record".into());}
+        let state=app.state::<Mutex<password_vault::Vault>>();
+        let mut vault=state.lock().map_err(|e|e.to_string())?;
+        if !vault.unlocked(){return Ok(json!({"ok":false,"locked":true}));}
+        let changed=vault.sync_apply(kind,entry,deleted)?;
+        if changed{vault.save(&password_vault::file(&app)?)?;}
+        return Ok(json!({"ok":true,"changed":changed}));
+    }
     if name=="live-sync-apply-tab" {
         // Remote changes never create private/Tor tabs, switch focus, or steal
         // typed page data. Existing active pages are not silently destroyed.
@@ -2070,6 +2091,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             state.lock().map_err(|e|e.to_string())?.unlock(
                 &password_vault::file(&app)?,password,name=="vault-create"
             )?;
+            let _=app.emit_to("chrome","minternet:vault-unlocked",());
             return Ok(json!({"ok":true}));
         }
         "vault-lock" => {
@@ -2091,6 +2113,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             let mut vault=state.lock().map_err(|e|e.to_string())?;
             let id=vault.put_card(label,holder,number,month,year,postal)?;
             vault.save(&password_vault::file(&app)?)?;
+            let _=app.emit_to("chrome","minternet:vault-changed",());
             return Ok(json!({"ok":true,"id":id}));
         }
         "vault-card-update" => {
@@ -2104,6 +2127,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             let mut vault=state.lock().map_err(|e|e.to_string())?;
             vault.update_card(id,label,holder,month,year,postal)?;
             vault.save(&password_vault::file(&app)?)?;
+            let _=app.emit_to("chrome","minternet:vault-changed",());
             return Ok(json!({"ok":true}));
         }
         "vault-card-remove" => {
@@ -2112,6 +2136,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             let mut vault=state.lock().map_err(|e|e.to_string())?;
             vault.remove_card(id)?;
             vault.save(&password_vault::file(&app)?)?;
+            let _=app.emit_to("chrome","minternet:vault-changed",());
             return Ok(json!({"ok":true}));
         }
         "vault-card-fill" => {
@@ -2132,6 +2157,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             let mut vault=state.lock().map_err(|e|e.to_string())?;
             vault.put(origin,username.to_string(),password.to_string(),autofill)?;
             vault.save(&password_vault::file(&app)?)?;
+            let _=app.emit_to("chrome","minternet:vault-changed",());
             return Ok(json!({"ok":true}));
         }
         "vault-remove" => {
@@ -2142,6 +2168,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             let mut vault=state.lock().map_err(|e|e.to_string())?;
             vault.remove(&origin,username)?;
             vault.save(&password_vault::file(&app)?)?;
+            let _=app.emit_to("chrome","minternet:vault-changed",());
             return Ok(json!({"ok":true}));
         }
         "vault-fill" => {
