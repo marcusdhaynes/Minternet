@@ -1,0 +1,51 @@
+name: Normalize Minternet transparent source icon
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/normalize-brand.yml'
+      - 'native/desktop/scripts/generate_icons.py'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: minternet-normalize-brand
+  cancel-in-progress: false
+jobs:
+  transparent-master:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Repair transparency in shared source image
+        run: |
+          python -m pip install --quiet pillow
+          python native/desktop/scripts/generate_icons.py --normalize-source
+          python - <<'PY'
+          from PIL import Image
+          from pathlib import Path
+          source = Image.open("ui/minternet-brand.png").convert("RGBA")
+          for point in [(0,0),(source.width-1,0),(0,source.height-1),(source.width-1,source.height-1)]:
+              assert source.getpixel(point)[3] == 0, f"Opaque corner remains: {point}"
+          for filename in ["native/desktop/src-tauri/icons/icon.png",
+                           "native/android/app/src/main/res/mipmap-mdpi/ic_launcher.png"]:
+              asset = Image.open(filename).convert("RGBA")
+              assert asset.getpixel((0,0))[3] == 0, f"Nontransparent icon: {filename}"
+          print("Verified RGBA transparent corners across shared icons.")
+          PY
+      - name: Commit corrected canonical PNG if source changed
+        run: |
+          git add ui/minternet-brand.png
+          if git diff --cached --quiet; then
+            echo "Source artwork already had transparent corners."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Normalize transparent Minternet jade rabbit source PNG"
+          git push origin HEAD:main
