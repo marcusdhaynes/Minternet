@@ -106,7 +106,7 @@ test('Complete drag keeps folder with children; no unrelated flattened links',()
     ]}
   ]});
  const items=imp.parseTransfer({types:['text/x-moz-place','text/uri-list'],
-   getData:type=>type==='text/x-moz-place'?record:'https://wrong.example.org/'});
+   getData:type=>type==='text/x-moz-place'?record:type==='text/uri-list'?'https://wrong.example.org/':''});
  assert.equal(items.length,1);
  assert.equal(items[0].name,'Recipes');
  assert.equal(items[0].children[1].name,'Rice');
