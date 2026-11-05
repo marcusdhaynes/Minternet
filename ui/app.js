@@ -70,7 +70,8 @@ function discoverSiteIcon(host,page){
     if(index>=candidates.length){
       // Reuse native site-declared icon discovery for sites such as ChatGPT
       // with app-specific favicon paths rather than /favicon.ico.
-      if(!window.__TAURI__||!page)return;
+      if(!window.__TAURI__||!page||state.discovered)return;
+      state.discovered=true;
       void api.command('bookmark-site-icons',page).then(found=>{
         if(!Array.isArray(found))return;
         const extras=found.filter(url=>typeof url==='string'&&url.startsWith('https://')).slice(0,5);
