@@ -275,6 +275,23 @@
   const imported=window.MinternetBookmarkImport;
   function appendImported(items,parentId=null){
     if(!imported||!Array.isArray(items)||!items.length)return 0;
+    // All-or-nothing capacity check: never create an empty or half-imported
+    // folder when Firefox supplied a large nested tree.
+    let total=0,maxDepth=0;
+    const measure=(nodes,depth)=>{
+      for(const node of nodes||[]){
+        if(!node||!['folder','link'].includes(node.kind))continue;
+        if(node.kind==='link'&&!model.url(node.url))continue;
+        total++;maxDepth=Math.max(maxDepth,depth);
+        if(node.kind==='folder')measure(node.children,depth+1);
+      }
+    };
+    const destinationDepth=parentId==null?0:(model.location(data,parentId)?.depth??0)+1;
+    measure(items,destinationDepth);
+    if(model.count(data)+total>model.MAX_ITEMS||maxDepth>=12){
+      toast('Folder cannot fit: too many bookmarks or nested folder levels.');
+      return 0;
+    }
     const draftState=model.hydrate(JSON.stringify(data));
     let added=0;
     const limit=2000;
@@ -358,8 +375,9 @@
   function externalTransfer(dt){
     const types=Array.from(dt?.types||[]);
     return types.some(type=>['Files','text/uri-list','text/html','text/plain',
-      'text/x-moz-url','text/x-moz-place','application/x-moz-place-container',
-      'text/x-moz-place-container'].includes(type));
+      'text/x-moz-url','text/x-moz-place','application/x-moz-place',
+      'application/x-moz-place-container','text/x-moz-place-container',
+      'application/x-bookmark-folder','application/json'].includes(type));
   }
   let hoverTarget=null;
   function clearDrop(){
@@ -389,6 +407,7 @@
     // the drop event finishes, even while files are read asynchronously.
     const dt=event.dataTransfer;
     const plain=imported?.parseTransfer(dt)||[];
+    const firefoxFolder=imported?.mozillaFolderReference(dt)||null;
     const files=Array.from(dt.files||[]);
     const entries=Array.from(dt.items||[]).map(item=>item.webkitGetAsEntry?.()).filter(Boolean);
     clearDrop();
@@ -401,10 +420,29 @@
         items=[];
         for(const file of files.slice(0,100))items.push(...await readImportedFile(file));
         if(!items.length)items=plain;
+      }else if(firefoxFolder&&window.__TAURI__){
+        // Firefox's native drag data normally contains the GUID of the folder
+        // but NOT its children. Resolve that exact subtree from local Firefox
+        // Places on drop. Prefer it to a flattened URI list or empty folder.
+        const result=await api.command('firefox-folder-import',firefoxFolder);
+        if(result?.kind==='folder'){
+          items=[result];
+        }else if(!items.some(node=>node.kind==='folder'&&node.children?.length)){
+          toast(result?.message||'Firefox could not provide the folder contents. Export it as bookmarks HTML to import.');
+          return;
+        }
+      }
+      if(items.some(node=>node.kind==='folder'&&Array.isArray(node.children)&&node.children.length===0)
+        &&firefoxFolder&&items.length===1&&!window.__TAURI__){
+        toast('Firefox only supplied the folder name; import a bookmarks HTML export to preserve its contents.');
+        return;
       }
       const added=appendImported(items,parent||null);
-      toast(added?'Imported '+added+' bookmark'+(added===1?'':'s')+' / folders':
-        'No transferable bookmarks found. Export bookmarks as HTML and drop that file here.');
+      if(added){
+        toast('Imported '+added+' bookmark'+(added===1?'':'s')+' / folders');
+      }else if(!items.length){
+        toast('No transferable bookmarks found. Export bookmarks as HTML and drop that file here.');
+      }
     })();
   },true);
   document.addEventListener('dragend',clearDrop,true);
