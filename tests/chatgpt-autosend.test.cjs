@@ -23,7 +23,7 @@ function simulate({prompt='Explain stars',temporary=false,body='',host='chatgpt.
     execCommand:()=>true
   };
   const context={document,location:{hostname:host,protocol:'https:'},
-    window:{},Date,HTMLTextAreaElement,Event,MutationObserver:class{observe(){}disconnect(){}},
+    window:{},Date,HTMLTextAreaElement:class {},Event,MutationObserver:class{observe(){}disconnect(){}},
     setInterval(){return 1;},clearInterval(){}};
   context.minternetChatRequest={text:prompt,temporary};
   vm.runInNewContext(source,context);
