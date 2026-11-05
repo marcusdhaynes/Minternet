@@ -181,17 +181,17 @@ fn download_signature(path:&std::path::Path)->Option<&'static str>{
         if offset<4_000_000 {
             let mut marker=[0u8;4];
             if f.seek(SeekFrom::Start(offset)).is_ok()
-                && f.read_exact(&mut marker).is_ok() && &marker==b"PE\\0\\0" {
+                && f.read_exact(&mut marker).is_ok() && &marker==b"PE\0\0" {
                 return Some("exe");
             }
         }
     }
     if h.starts_with(b"%PDF-"){return Some("pdf");}
-    if h.starts_with(b"PK\\x03\\x04") || h.starts_with(b"PK\\x05\\x06"){return Some("zip");}
-    if h.starts_with(b"\\x89PNG\\r\\n\\x1a\\n"){return Some("png");}
-    if h.starts_with(b"\\xff\\xd8\\xff"){return Some("jpg");}
-    if h.starts_with(b"7z\\xbc\\xaf\\x27\\x1c"){return Some("7z");}
-    if h.starts_with(b"Rar!\\x1a\\x07"){return Some("rar");}
+    if h.starts_with(b"PK\x03\x04") || h.starts_with(b"PK\x05\x06"){return Some("zip");}
+    if h.starts_with(b"\x89PNG\r\n\x1a\n"){return Some("png");}
+    if h.starts_with(b"\xff\xd8\xff"){return Some("jpg");}
+    if h.starts_with(b"7z\xbc\xaf\x27\x1c"){return Some("7z");}
+    if h.starts_with(b"Rar!\x1a\x07"){return Some("rar");}
     None
 }
 fn repair_download_extension(path:&std::path::Path)->PathBuf{
