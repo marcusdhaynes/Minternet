@@ -2227,7 +2227,8 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                     if let Some(window)=handle.get_window("main"){
                         let item=drag::DragItem::Files(vec![path]);
                         let preview=drag::Image::Raw(include_bytes!("../icons/icon.png").to_vec());
-                        let _=drag::start_drag(&window,item,preview);
+                        let _=drag::start_drag(&window,item,preview,
+                            |_result,_position|{},drag::Options::default());
                     }
                 }).map_err(|e|e.to_string())?;
                 return Ok(json!({"ok":true}));
