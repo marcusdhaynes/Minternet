@@ -191,6 +191,93 @@ impl Vault {
             "addedCards":new_cards,"conflicts":conflicts}))
     }
 
+    // Trusted-local-chrome export: records are encrypted individually with the
+    // user's cross-device sync key before leaving the app. Never for websites.
+    pub fn sync_snapshot(&self)->Result<serde_json::Value,String>{
+        if !self.unlocked(){return Err("Unlock the local vault to sync secrets".into());}
+        Ok(serde_json::json!({"logins":self.entries,"cards":self.cards}))
+    }
+    pub fn sync_apply(&mut self,kind:&str,value:&serde_json::Value,deleted:bool)
+        ->Result<bool,String>{
+        if !self.unlocked(){return Err("Unlock the local vault before applying encrypted sync".into());}
+        match kind {
+            "login"=>{
+                let address=value.get("origin").and_then(serde_json::Value::as_str)
+                    .ok_or("Missing synced origin")?;
+                let domain=origin(address)?;
+                let username=value.get("username").and_then(serde_json::Value::as_str)
+                    .ok_or("Missing synced username")?;
+                if username.len()>320{return Err("Invalid login identity".into());}
+                if deleted {
+                    let old=self.entries.iter().position(|e|e.origin==domain&&e.username==username);
+                    if let Some(index)=old {
+                        let mut removed=self.entries.remove(index);
+                        removed.password.zeroize();removed.username.zeroize();
+                        return Ok(true);
+                    }
+                    return Ok(false);
+                }
+                let pass=value.get("password").and_then(serde_json::Value::as_str)
+                    .ok_or("Missing synced password")?;
+                if pass.is_empty()||pass.len()>4096{return Err("Invalid synced password".into());}
+                let autofill=value.get("autofill").and_then(serde_json::Value::as_bool)!=Some(false);
+                if let Some(entry)=self.entries.iter_mut().find(|e|e.origin==domain&&e.username==username){
+                    if entry.password==pass&&entry.autofill==autofill{return Ok(false);}
+                    entry.password.zeroize();entry.password=pass.to_owned();entry.autofill=autofill;
+                    Ok(true)
+                }else{
+                    if self.entries.len()>=MAX_ENTRIES{return Err("Credential capacity exceeded".into());}
+                    self.entries.push(Entry{origin:domain,username:username.to_owned(),
+                        password:pass.to_owned(),autofill});
+                    Ok(true)
+                }
+            }
+            "payment"=>{
+                let id=value.get("id").and_then(serde_json::Value::as_str)
+                    .ok_or("Missing synced payment ID")?;
+                if id.len()!=24||!id.chars().all(|c|c.is_ascii_hexdigit()){
+                    return Err("Invalid synced payment identity".into());
+                }
+                if deleted {
+                    if let Some(i)=self.cards.iter().position(|c|c.id==id){
+                        self.cards.remove(i);
+                        return Ok(true);
+                    }
+                    return Ok(false);
+                }
+                let number=value.get("number").and_then(serde_json::Value::as_str)
+                    .and_then(valid_pan).ok_or("Invalid synced payment card number")?;
+                let name=value.get("name").and_then(serde_json::Value::as_str)
+                    .ok_or("Missing cardholder")?;
+                let label=value.get("label").and_then(serde_json::Value::as_str).unwrap_or("");
+                let month=value.get("month").and_then(serde_json::Value::as_u64)
+                    .ok_or("Missing expiry month")?;
+                let year=value.get("year").and_then(serde_json::Value::as_u64)
+                    .ok_or("Missing expiry year")?;
+                let postal=value.get("postal").and_then(serde_json::Value::as_str).unwrap_or("");
+                if !(1..=12).contains(&month)||!(2020..=2100).contains(&year)||
+                   name.is_empty()||name.len()>120||label.len()>80||postal.len()>40{
+                    return Err("Invalid synced payment details".into());
+                }
+                let incoming=PaymentCard{id:id.to_owned(),label:label.to_owned(),
+                    name:name.to_owned(),number,month:month as u8,year:year as u16,
+                    postal:postal.to_owned()};
+                if let Some(existing)=self.cards.iter_mut().find(|c|c.id==id){
+                    if existing.name==incoming.name&&existing.number==incoming.number&&
+                       existing.month==incoming.month&&existing.year==incoming.year&&
+                       existing.label==incoming.label&&existing.postal==incoming.postal{
+                        return Ok(false);
+                    }
+                    *existing=incoming;Ok(true)
+                }else{
+                    if self.cards.len()>=50{return Err("Payment capacity exceeded".into());}
+                    self.cards.push(incoming);Ok(true)
+                }
+            }
+            _=>Err("Unsupported synced vault category".into())
+        }
+    }
+
     pub fn put(&mut self,origin:String,username:String,password:String,autofill:bool)->Result<(),String>{
         if !self.unlocked(){return Err("Vault locked".into());}
         if username.len()>320||password.is_empty()||password.len()>4096{return Err("Invalid credential length".into());}
