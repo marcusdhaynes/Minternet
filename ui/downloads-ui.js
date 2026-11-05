@@ -57,7 +57,7 @@
       const actions=document.createElement('div');actions.className='downloads-actions';
       const openFile=document.createElement('button');openFile.type='button';
       openFile.className='downloads-open';
-      openFile.textContent=/\\.(exe|msi)$/i.test(entry.name)?'Run':'Open';
+      openFile.textContent=/\.(exe|msi)$/i.test(entry.name)?'Run':'Open';
       openFile.title='Open '+entry.name+' using the operating system';
       openFile.setAttribute('aria-label',openFile.title);
       openFile.disabled=!completed;
