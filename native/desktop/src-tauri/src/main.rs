@@ -18,6 +18,12 @@ const MAX_TABS: usize = 35;
 const HOME: &str = "about:blank";
 
 #[derive(Clone)]
+struct PendingChatPrompt {
+    text: String,
+    temporary: bool,
+}
+
+#[derive(Clone)]
 struct Tab {
     id: u32,
     title: String,
@@ -33,6 +39,10 @@ struct Tab {
     inactive_since: Option<Instant>,
     loading: bool,
     checking_unload: bool,
+    // Only Ctrl-click-created tabs have an explicit source; the frontend uses
+    // this to restore immediate visual adjacency within tab groups.
+    opener_id: Option<u32>,
+    pending_chatgpt: Option<PendingChatPrompt>,
 }
 
 #[derive(Clone, PartialEq, Serialize)]
@@ -49,6 +59,7 @@ struct PublicTab {
     can_back: bool,
     can_forward: bool,
     suspended: bool,
+    opener_id: Option<u32>,
     error: String,
 }
 
@@ -276,8 +287,23 @@ impl Browser {
             pinned: false, audio_playing:false, audio_muted:false,
             view: None, history: vec![HOME.into()], at: 0,
             inactive_since: None, loading: false, checking_unload: false,
+            opener_id: None, pending_chatgpt: None,
         });
         self.active_id = id;
+        Ok(id)
+    }
+    // Preserve logical order in the native session and source-tab identity.
+    // The active page remains selected for background link openings.
+    fn add_after(&mut self, private: bool, opener: u32, background: bool) -> Result<u32,String> {
+        let selected=self.active_id;
+        let id=self.add(private)?;
+        if let Some(index)=self.tabs.iter().position(|tab|tab.id==opener) {
+            if let Some(mut created)=self.tabs.pop(){
+                created.opener_id=Some(opener);
+                self.tabs.insert(index+1,created);
+            }
+        }
+        if background {self.active_id=selected;}
         Ok(id)
     }
     fn snapshot(&self) -> Snapshot {
@@ -288,7 +314,8 @@ impl Browser {
                 id: t.id, title: t.title.clone(), url: t.url.clone(), private: t.private,
                 pinned: t.pinned, audio_playing:t.audio_playing,
                 audio_muted:t.audio_muted, loading: t.loading, can_back: t.at > 0, can_forward: t.at + 1 < t.history.len(),
-                suspended: t.view.is_none() && t.url != HOME, error: String::new(),
+                suspended: t.view.is_none() && t.url != HOME,
+                opener_id:t.opener_id,error: String::new(),
             }).collect(),
         }
     }
@@ -475,8 +502,8 @@ fn parse_address_with_engine(text: &str, engine: &str) -> Result<Option<tauri::U
             "brave" => ("https://search.brave.com/search?q=", ""),
             "startpage" => ("https://www.startpage.com/sp/search?query=", ""),
             "ecosia" => ("https://www.ecosia.org/search?q=", ""),
-            "chatgpt" => ("https://chatgpt.com/?q=", "&hints=search"),
-            "chatgpt-private" => ("https://chatgpt.com/?temporary-chat=true&q=", "&hints=search"),
+            "chatgpt" => ("https://chatgpt.com/?q=", ""),
+            "chatgpt-private" => ("https://chatgpt.com/?temporary-chat=true&q=", ""),
             _ => ("https://www.google.com/search?q=", ""),
         };
         format!("{base}{}{query_param}", percent_encode_search(s))
@@ -499,14 +526,15 @@ mod search_provider_tests {
         assert_eq!(parse_address_with_engine("hello", "invalid").unwrap().unwrap().host_str(),Some("www.google.com"));
     }
     #[test]
-    fn chatgpt_routes_prompts_with_search_hint() {
+    fn chatgpt_routes_prompts_to_chat_not_web_search() {
         let url=parse_address_with_engine("science & history", "chatgpt").unwrap().unwrap();
-        assert_eq!(url.as_str(),"https://chatgpt.com/?q=science%20%26%20history&hints=search");
+        assert_eq!(url.as_str(),"https://chatgpt.com/?q=science%20%26%20history");
+        assert!(!url.as_str().contains("search"));
     }
     #[test]
     fn private_chatgpt_adds_temporary_flag_and_escapes_input() {
         let url=parse_address_with_engine("cats & dogs", "chatgpt-private").unwrap().unwrap();
-        assert_eq!(url.as_str(),"https://chatgpt.com/?temporary-chat=true&q=cats%20%26%20dogs&hints=search");
+        assert_eq!(url.as_str(),"https://chatgpt.com/?temporary-chat=true&q=cats%20%26%20dogs");
     }
     #[test]
     fn explicit_secure_urls_ignore_engine_preference() {
@@ -1180,12 +1208,12 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                     }else{recent.insert(key,now);true}
                 }else{false};
                 if should_open{
-                    let _=for_popup.emit_to("chrome","minternet:open-tab",json!({"url":url.to_string(),"private":private}));
+                    let _=for_popup.emit_to("chrome","minternet:open-tab",json!({"url":url.to_string(),"private":private,"openerTabId":id}));
                 }
             }
             NewWindowResponse::Deny
         })
-        .on_page_load(move |_view, event| {
+        .on_page_load(move |view, event| {
             if matches!(event.event(), PageLoadEvent::Started | PageLoadEvent::Finished) {
                 {
                     let state=for_load.state::<Mutex<Browser>>();
@@ -1200,6 +1228,25 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                 if matches!(event.event(), PageLoadEvent::Finished) {
                     record_page_history(&for_load,id,event.url().as_str(),None);
                     let _=fill_saved_credential(&for_load,id,false,None);
+                    // Only a prompt typed into the trusted browser address bar
+                    // can enable ChatGPT auto-submit. External URLs never do.
+                    if event.url().host_str()==Some("chatgpt.com"){
+                        let pending={
+                            let state=for_load.state::<Mutex<Browser>>();
+                            let result=state.lock().ok().and_then(|mut b|
+                                b.tabs.iter_mut().find(|tab|tab.id==id)
+                                    .and_then(|tab|tab.pending_chatgpt.take()));
+                            result
+                        };
+                        if let Some(request)=pending {
+                            let safe=serde_json::to_string(&json!({
+                                "text":request.text,"temporary":request.temporary
+                            })).unwrap_or_else(|_|"null".into());
+                            let script=format!("(function(){{const minternetChatRequest={safe};\n{}\n}})();",
+                                include_str!("../../../../ui/chatgpt-autosend.js"));
+                            let _=view.eval(&script);
+                        }
+                    }
                 }
             }
         })
@@ -2195,25 +2242,29 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         "prepare-tab" => { prepare_active(&app)?; }
         "new" | "new-private" | "new-url" | "new-background-url" | "new-private-background-url" => {
             let private = name == "new-private" || name == "new-private-background-url";
-            // A Ctrl-click creates a new tab and starts loading its page, but
-            // never changes the active tab or steals keyboard focus.
             let background = name == "new-background-url" || name == "new-private-background-url";
             let address = if name == "new-url" || background {
-                let raw = value.as_str().ok_or("Missing URL")?;
+                let raw=value.as_str().or_else(||value.get("url").and_then(Value::as_str))
+                    .ok_or("Missing URL")?;
                 Some(tauri::Url::parse(raw).map_err(|_|"Invalid URL".to_string())?)
             }else{None};
             if let Some(ref url)=address {
-                if url.scheme()!="https" || url.host_str().is_none() || !url.username().is_empty() || url.password().is_some() {
+                if url.scheme()!="https" || url.host_str().is_none() ||
+                   !url.username().is_empty() || url.password().is_some() {
                     return Err("Only secure HTTPS pages may open in a new tab".into());
                 }
             }
-            let id = {
-                let state = app.state::<Mutex<Browser>>();
-                let mut b = state.lock().map_err(|e| e.to_string())?;
-                let selected=b.active_id;
-                let id=b.add(private)?;
-                if background { b.active_id=selected; }
-                id
+            let id={
+                let state=app.state::<Mutex<Browser>>();
+                let mut b=state.lock().map_err(|e|e.to_string())?;
+                if background {
+                    // Prefer the actual source WebView (split views included).
+                    // A stale or malicious source ID cannot insert across tabs.
+                    let claimed=value.get("openerTabId").and_then(Value::as_u64).map(|id|id as u32);
+                    let opener=claimed.filter(|id|b.tabs.iter().any(|t|t.id==*id))
+                        .unwrap_or(b.active_id);
+                    b.add_after(private,opener,true)?
+                }else{b.add(private)?}
             };
             if let Some(url)=address {
                 navigate_tab(&app,id,Some(url),true)?;
@@ -2274,13 +2325,26 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             activated(&app)?;
         }
         "navigate" | "home" => {
+            let mut pending:Option<PendingChatPrompt>=None;
             let url = if name=="home" { None } else {
                 let address=value.as_str()
                     .or_else(||value.get("address").and_then(Value::as_str))
                     .ok_or("Missing address")?;
                 let engine=value.get("searchEngine").and_then(Value::as_str).unwrap_or("google");
                 let target=parse_address_with_engine(address,engine)?;
-                if std::env::args().any(|a|a=="--minternet-search-smoke") && 
+                // A plain text address entry intentionally starts a new ChatGPT
+                // conversation. Explicit website URLs never auto-submit.
+                if let Some(ref target_url)=target {
+                    if matches!(engine,"chatgpt"|"chatgpt-private") &&
+                       target_url.host_str()==Some("chatgpt.com") &&
+                       target_url.query_pairs().any(|(key,val)|key=="q"&&val==address.trim()) {
+                        pending=Some(PendingChatPrompt{
+                            text:address.trim().to_owned(),
+                            temporary:engine=="chatgpt-private",
+                        });
+                    }
+                }
+                if std::env::args().any(|a|a=="--minternet-search-smoke") &&
                     matches!(engine,"google"|"brave") {
                     if let Some(ref target_url)=target {
                         let path=std::env::temp_dir()
@@ -2291,11 +2355,20 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 target
             };
             let id = {
-                let state = app.state::<Mutex<Browser>>();
-                let mut b = state.lock().map_err(|e| e.to_string())?;
-                if b.active().is_none(){b.add(false)?} else {b.active_id}
+                let state=app.state::<Mutex<Browser>>();
+                let mut b=state.lock().map_err(|e|e.to_string())?;
+                let should_isolate=pending.as_ref().map(|p|p.temporary).unwrap_or(false)
+                    && b.active().map(|t|!t.private).unwrap_or(true);
+                let id=if should_isolate {
+                    let opener=b.active_id;
+                    b.add_after(true,opener,false)?
+                }else if b.active().is_none(){b.add(false)?}else{b.active_id};
+                if let Some(tab)=b.tabs.iter_mut().find(|tab|tab.id==id){
+                    tab.pending_chatgpt=pending;
+                }
+                id
             };
-            navigate_tab(&app, id, url, true)?;
+            navigate_tab(&app,id,url,true)?;
         }
         "close-many" => {
             let ids=value.as_array().ok_or("Expected tab ID array")?;
@@ -2481,6 +2554,16 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         }
         "tor" => {
             return Ok(json!({"message": "Tor is not integrated. Do not treat this native-webview prototype as Tor Browser."}));
+        }
+        "restore-window" => {
+            let window=app.get_window("main").ok_or("Window unavailable")?;
+            if window.is_fullscreen().map_err(|e|e.to_string())?{
+                window.set_fullscreen(false).map_err(|e|e.to_string())?;
+            }
+            if window.is_maximized().map_err(|e|e.to_string())?{
+                window.unmaximize().map_err(|e|e.to_string())?;
+            }
+            return Ok(json!({"ok":true}));
         }
         "minimize" | "maximize" | "quit" => {
             let window=app.get_window("main").ok_or("Window unavailable")?;
