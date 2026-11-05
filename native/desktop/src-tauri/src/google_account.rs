@@ -278,13 +278,13 @@ pub fn codes(state:&Mutex<GoogleState>,hosts:&[String])->Result<Vec<CodeResult>,
         // "all mail" download.
         let mut list=tauri::Url::parse("https://gmail.googleapis.com/gmail/v1/users/me/messages")
             .map_err(|e|e.to_string())?;
-        list.query_pairs_mut().append_pair("maxResults","12")
-            .append_pair("q","newer_than:1d {verification confirmation otp passcode}")
+        list.query_pairs_mut().append_pair("maxResults","6")
+            .append_pair("q","newer_than:5m {verification confirmation otp passcode}")
             .append_pair("includeSpamTrash","true");
         let response=ureq::get(list.as_str()).set("Authorization",&format!("Bearer {access}"))
             .timeout(Duration::from_secs(20)).call().map_err(|e|e.to_string())?
             .into_json::<Value>().map_err(|e|e.to_string())?;
-        for msg in response["messages"].as_array().into_iter().flatten().take(12){
+        for msg in response["messages"].as_array().into_iter().flatten().take(6){
             let Some(id)=msg["id"].as_str() else{continue;};
             let mut detail=tauri::Url::parse(&format!("https://gmail.googleapis.com/gmail/v1/users/me/messages/{id}"))
                 .map_err(|e|e.to_string())?;
