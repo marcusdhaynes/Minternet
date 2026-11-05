@@ -420,17 +420,10 @@
     clearDrop();
     void (async()=>{
       let items=plain;
-      if(entries.some(entry=>entry.isDirectory)){
-        items=[];
-        for(const entry of entries.slice(0,50))items.push(...await readDirectory(entry));
-      }else if(files.length){
-        items=[];
-        for(const file of files.slice(0,100))items.push(...await readImportedFile(file));
-        if(!items.length)items=plain;
-      }else if(firefoxFolder&&window.__TAURI__){
-        // Firefox's native drag data normally contains the GUID of the folder
-        // but NOT its children. Resolve that exact subtree from local Firefox
-        // Places on drop. Prefer it to a flattened URI list or empty folder.
+      if(firefoxFolder&&window.__TAURI__){
+        // Prioritize the actual Firefox Places folder over any generic .url
+        // files or text/uri-list representations the OS supplies in parallel.
+        // A Firefox reference identifies precisely the dropped folder.
         const result=await api.command('firefox-folder-import',firefoxFolder);
         if(result?.kind==='folder'){
           items=[result];
@@ -438,6 +431,13 @@
           toast(result?.message||'Firefox could not provide the folder contents. Export it as bookmarks HTML to import.');
           return;
         }
+      }else if(entries.some(entry=>entry.isDirectory)){
+        items=[];
+        for(const entry of entries.slice(0,50))items.push(...await readDirectory(entry));
+      }else if(files.length){
+        items=[];
+        for(const file of files.slice(0,100))items.push(...await readImportedFile(file));
+        if(!items.length)items=plain;
       }
       if(folderFlavor&&!firefoxFolder&&!items.some(node=>node.kind==='folder')){
         toast('This browser did not expose the folder contents. Export bookmarks as HTML and drop the file instead.');
