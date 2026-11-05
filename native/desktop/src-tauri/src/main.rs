@@ -262,6 +262,50 @@ fn download_update(app:&tauri::AppHandle,url:&tauri::Url,path:Option<&std::path:
     let _=app.emit_to("chrome","minternet:downloads",summary);
     if !private {save_recent_downloads(app);}
 }
+// Download actions accept only IDs previously created by Minternet. The
+// resolved file must still be inside the user's real Downloads directory.
+fn checked_download_path(app:&tauri::AppHandle,id:u64)->Result<PathBuf,String>{
+    let saved={
+        let state=app.state::<DownloadsState>();
+        let downloads=state.0.lock().map_err(|e|e.to_string())?;
+        let item=downloads.iter().find(|d|d.id==id&&d.status=="completed")
+            .ok_or("Completed download not found")?;
+        (item.path.clone(),item.name.clone())
+    };
+    let root=std::fs::canonicalize(app.path().download_dir().map_err(|e|e.to_string())?)
+        .map_err(|e|e.to_string())?;
+    let path=std::fs::canonicalize(&saved.0).map_err(|_|"Downloaded file no longer exists")?;
+    if !path.is_file() || !path.starts_with(&root)
+        || path.file_name().and_then(|n|n.to_str())!=Some(saved.1.as_str()){
+        return Err("Download path is no longer valid".into());
+    }
+    Ok(path)
+}
+#[cfg(windows)]
+fn open_download_file(path:&std::path::Path)->Result<(),String>{
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::{w,PCWSTR};
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    let wide=path.as_os_str().encode_wide().chain(std::iter::once(0))
+        .collect::<Vec<u16>>();
+    // A deliberate user click invokes the normal Windows security prompts
+    // and registered application; no cmd.exe or shell string interpolation.
+    let instance=unsafe{ShellExecuteW(None,w!("open"),PCWSTR(wide.as_ptr()),
+        PCWSTR::null(),PCWSTR::null(),SW_SHOWNORMAL)};
+    if instance.0 as isize<=32{return Err("Windows could not open this file".into());}
+    Ok(())
+}
+#[cfg(target_os="macos")]
+fn open_download_file(path:&std::path::Path)->Result<(),String>{
+    std::process::Command::new("open").arg(path).spawn().map_err(|e|e.to_string())?;
+    Ok(())
+}
+#[cfg(target_os="linux")]
+fn open_download_file(path:&std::path::Path)->Result<(),String>{
+    std::process::Command::new("xdg-open").arg(path).spawn().map_err(|e|e.to_string())?;
+    Ok(())
+}
 struct PopupDeduper(Mutex<HashMap<(u32,String),Instant>>);
 struct ZoomState(Mutex<f64>);
 #[derive(Default)]
@@ -2146,22 +2190,28 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             save_recent_downloads(&app);
             return Ok(json!({"ok":true}));
         }
-        "downloads-reveal" => {
+        "downloads-open" | "downloads-reveal" | "downloads-drag-info" => {
             let id=value.as_u64().ok_or("Invalid download ID")?;
-            let path={
-                let state=app.state::<DownloadsState>();
-                let downloads=state.0.lock().map_err(|e|e.to_string())?;
-                let item=downloads.iter().find(|d|d.id==id&&d.status=="completed")
-                    .ok_or("Completed download not found")?;
-                PathBuf::from(&item.path)
-            };
-            if !path.is_file(){return Err("Downloaded file no longer exists".into());}
+            let path=checked_download_path(&app,id)?;
+            if name=="downloads-drag-info" {
+                let uri=tauri::Url::from_file_path(&path)
+                    .map_err(|_|"Cannot create file drag URI")?.to_string();
+                return Ok(json!({"uri":uri,"name":path.file_name().and_then(|n|n.to_str()).unwrap_or("Download")}));
+            }
+            if name=="downloads-open" {
+                open_download_file(&path)?;
+                return Ok(json!({"ok":true}));
+            }
             #[cfg(windows)]
             std::process::Command::new("explorer.exe")
                 .arg(format!("/select,{}",path.to_string_lossy()))
                 .spawn().map_err(|e|e.to_string())?;
-            #[cfg(not(windows))]
-            {let _=path;return Err("Reveal in folder is currently supported on Windows".into());}
+            #[cfg(target_os="macos")]
+            std::process::Command::new("open").arg("-R").arg(&path)
+                .spawn().map_err(|e|e.to_string())?;
+            #[cfg(target_os="linux")]
+            std::process::Command::new("xdg-open").arg(path.parent().ok_or("No parent folder")?)
+                .spawn().map_err(|e|e.to_string())?;
             return Ok(json!({"ok":true}));
         }
         "vault-status" => {
