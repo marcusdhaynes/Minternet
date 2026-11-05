@@ -147,10 +147,18 @@ fn download_name(url:&tauri::Url)->String{
     let name=cleaned.trim_matches(|c:char|c=='.'||c==' ').chars().take(120).collect::<String>();
     if name.is_empty() {"download".into()}else{name}
 }
-fn download_path(app:&tauri::AppHandle,url:&tauri::Url)->Result<PathBuf,String>{
+fn download_path(app:&tauri::AppHandle,url:&tauri::Url,suggested:&std::path::Path)->Result<PathBuf,String>{
     let dir=app.path().download_dir().map_err(|_|"Downloads directory is unavailable".to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e|e.to_string())?;
-    let original=download_name(url);
+    // WebView2 supplies the server Content-Disposition suggested filename in
+    // destination. Prefer that over a generic /download URL, but never trust
+    // its directory or any unsafe filename characters.
+    let supplied=suggested.file_name().and_then(|v|v.to_str()).unwrap_or("");
+    let safe=supplied.chars().map(|c|{
+        if c.is_ascii_alphanumeric() || matches!(c,'.'|'-'|'_'|'('|')'|' ') {c} else {'_'}
+    }).collect::<String>();
+    let safe=safe.trim_matches(|c:char|c=='.'||c==' ').chars().take(120).collect::<String>();
+    let original=if safe.is_empty(){download_name(url)}else{safe};
     let candidate=std::path::Path::new(&original);
     let stem=candidate.file_stem().and_then(|n|n.to_str()).unwrap_or("download");
     let extension=candidate.extension().and_then(|n|n.to_str()).unwrap_or("");
@@ -1348,7 +1356,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
             match event {
                 DownloadEvent::Requested{url,destination}=>{
                     if url.scheme()!="https" {return false;}
-                    match download_path(&for_download,&url){
+                    match download_path(&for_download,&url,destination.as_path()){
                         Ok(path)=>{
                             *destination=path.clone();
                             download_update(&for_download,&url,Some(&path),private,None);
