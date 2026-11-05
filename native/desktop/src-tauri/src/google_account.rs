@@ -221,7 +221,7 @@ pub fn push(state:&Mutex<GoogleState>,data:&str)->Result<Value,String>{
         }
     };
     let url=format!("https://www.googleapis.com/upload/drive/v3/files/{id}?uploadType=media");
-    let result=ureq::put(&url).set("Authorization",&format!("Bearer {access}"))
+    let result=ureq::request("PATCH",&url).set("Authorization",&format!("Bearer {access}"))
         .set("Content-Type","application/octet-stream")
         .timeout(Duration::from_secs(30)).send_string(data)
         .map_err(|e|e.to_string())?;
