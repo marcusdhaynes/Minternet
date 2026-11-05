@@ -1699,6 +1699,18 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
     // OAuth, Drive and Gmail are only available to the trusted local chrome.
     // All remote network calls run on worker threads so they never pause the
     // native browser event loop. No Google token is returned to web content.
+    if name=="live-sync-auth" {
+        let url=value.get("url").and_then(Value::as_str)
+            .ok_or("Supabase project URL is required")?.to_owned();
+        let key=value.get("publishableKey").and_then(Value::as_str)
+            .ok_or("Supabase publishable key is required")?.to_owned();
+        let handle=app.clone();
+        return tauri::async_runtime::spawn_blocking(move||
+            google_account::live_auth(
+                &handle.state::<Mutex<google_account::GoogleState>>(),
+                &url,&key))
+            .await.map_err(|e|e.to_string())?;
+    }
     if name=="google-status"{
         return google_account::status(&app.state::<Mutex<google_account::GoogleState>>());
     }
