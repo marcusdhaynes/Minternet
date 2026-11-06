@@ -189,12 +189,24 @@
       </div>
       <p id="secretMessage" class="secret-description">A separate encrypted vault. Site addresses and real titles never appear in the bookmark list.</p>
       <form id="secretAuthForm" class="secret-auth" autocomplete="off">
-        <label>Secret Code <small>(1–16 characters, including symbols)</small>
+        <label>Secret Folder Password <small>(1–16 characters, separate from the master password)</small>
           <input id="secretCode" type="password" autocomplete="new-password" spellcheck="false"
             autocapitalize="none" maxlength="32" required placeholder="Your separate secret code">
         </label>
-        <p class="secret-advice">Use a random 16-character code. Short codes are vulnerable to offline guessing even with strong encryption. Losing this code means losing access to the vault.</p>
+        <p class="secret-advice">Use a random 16-character folder password. Each individual bookmark also requires a different, independently derived entry code. Losing either code can make the protected data unrecoverable.</p>
         <button type="submit" id="secretAuthButton">Unlock Secret Bookmarks</button>
+      </form>
+      <form id="secretAccessForm" class="secret-auth secret-access" autocomplete="off" hidden>
+        <strong id="secretAccessTitle">Bookmark Entry Code</strong>
+        <p id="secretAccessMessage" class="secret-advice">Each bookmark is encrypted with its own separate entry code. One entry can unlock a batch sharing the same code.</p>
+        <label>Bookmark Entry Code <small>(1–16 characters; independent from folder password)</small>
+          <input id="secretAccessCode" type="password" autocomplete="off" spellcheck="false"
+            autocapitalize="none" maxlength="64" required placeholder="Your independent bookmark code">
+        </label>
+        <div class="secret-form-actions">
+          <button id="secretAccessCancel" type="button">Cancel</button>
+          <button id="secretAccessSubmit" type="submit">Authorize Bookmarks</button>
+        </div>
       </form>
       <div id="secretUnlocked" hidden>
         <div class="secret-toolbar">
@@ -214,9 +226,13 @@
         <label id="secretUrlLabel">Website URL
           <input id="secretUrl" type="password" inputmode="url" spellcheck="false" autocomplete="off" placeholder="Enter HTTP(S) address (masked)">
         </label>
+        <label id="secretEntryCodeLabel">Independent Bookmark Entry Code <small>(Required, different from the folder password)</small>
+          <input id="secretEntryCode" type="password" spellcheck="false" autocomplete="new-password"
+            autocapitalize="none" maxlength="64" placeholder="1–16 characters, including any symbol">
+        </label>
         <div class="secret-scrambled">Scrambled Name <code id="secretScrambledName"></code></div>
         <div class="secret-scrambled">Scrambled Link <code id="secretScrambledLink"></code></div>
-        <small class="secret-crypto-note">These are short previews of actual authenticated ciphertext, generated with a fresh nonce. Final ciphertext is independently generated on save. Your secret code is never stored.</small>
+        <small class="secret-crypto-note">These previews use the separate bookmark entry code to produce authenticated ciphertext. Each bookmark is independently encrypted again when saved; the codes are never stored.</small>
         <div class="secret-form-actions">
           <button id="secretDiscard" type="button">Discard</button>
           <button id="secretSave" type="submit">Encrypt &amp; Save</button>
