@@ -1,3 +1,7 @@
+# Mandatory: Supabase-only backend target
+
+For all **new and migrated persistent storage, authentication, cloud file storage, and realtime backend functions**, use ONLY the existing Supabase PostgreSQL project `tbrqqjrzknhdnwcpkqro` and this repository's dedicated schema `app_minternet`. Do **not** introduce Firebase Auth, Firestore, Firebase Storage, or other Firebase services in new work. When existing code still uses Firebase, treat it as **legacy requiring migration**, not an acceptable permanent backend. Never silently fall back to Firebase on Supabase errors. The app schema is private: build and verify appropriate scoped authorization/API/RLS before use; do not expose privileged credentials or make broad public grants. Preserve existing live behavior and source data until a verified non-destructive import, identity mapping and tested Supabase cutover are complete. The `database-contract.json` file is the machine-readable target. This rule does not claim the live migration is already complete.
+
 # Database routing for ChatGPT and coding agents
 
 **Repository:** `marcusdhaynes/Minternet`
