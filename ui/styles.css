@@ -1386,6 +1386,30 @@ html.minternet-overlay-active .group-editor-backdrop {
 }
 .bookmark-emoji img{filter:drop-shadow(0 1px 1px #070c1755);}
 .bookmark-item .bookmark-emoji.bookmark-site-fallback{background:transparent!important;}
+
+/* Folder-only visual treatment: exactly centered artwork, 10% larger than
+   the previous 15px icon, with a restrained outline and inset bevel.
+   Ordinary site favicons keep their transparent, borderless silhouette. */
+.bookmark-bar .bookmark-item[data-bookmark-kind="folder"] .bookmark-emoji{
+  display:grid;place-items:center;justify-items:center;align-items:center;
+  flex:0 0 19px;width:19px;height:19px;min-width:19px;
+  margin:0;padding:0;box-sizing:border-box;line-height:1;
+  font-size:14.3px; /* Previous 13px folder glyph, enlarged by 10%. */
+  border:1px solid #8b9abd77!important;
+  border-radius:4px;
+  background:transparent!important;
+  box-shadow:inset 0 1px 0 #dbe6ff2e,inset 0 -1px 0 #03071648,0 0 0 .3px #e4edff24!important;
+  text-align:center;
+}
+.bookmark-bar .bookmark-item[data-bookmark-kind="folder"] .bookmark-emoji img{
+  display:block;width:16.5px;height:16.5px;object-fit:contain;
+  margin:auto;flex:none;
+}
+.bookmark-bar .bookmark-item[data-bookmark-kind="folder"]:hover .bookmark-emoji{
+  border-color:#b9c7e49c!important;
+  box-shadow:inset 0 1px 0 #f0f6ff42,inset 0 -1px 0 #03071654,0 0 0 .3px #e4edff34!important;
+}
+
 .tab-symbol.secret-tab-icon{color:#c7a5f8;font-size:14px}
 #secretGroupNameSettings{width:92px;max-width:34%;height:25px;border:1px solid #766b93;
  border-radius:5px;background:#161b2b;color:#e7dcff;font-size:11px;padding:3px 6px}

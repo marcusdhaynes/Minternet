@@ -3,6 +3,8 @@
 use std::{collections::{HashMap,HashSet},io::{Read,Write},net::TcpListener,process::Command,
           sync::Mutex,time::{Duration,Instant,SystemTime,UNIX_EPOCH}};
 use serde_json::{json,Value};
+use serde::{Serialize,Deserialize};
+use zeroize::Zeroize;
 use rand::{rngs::OsRng,RngCore};
 use base64::{Engine as _,engine::general_purpose::URL_SAFE_NO_PAD};
 use sha2::{Sha256,Digest};
@@ -11,6 +13,132 @@ const DRIVE_SCOPE:&str="https://www.googleapis.com/auth/drive.appdata";
 const MAIL_SCOPE:&str="https://www.googleapis.com/auth/gmail.readonly";
 const FILE_NAME:&str="minternet-sync.v1.enc";
 const MAX_SYNC:usize=6_000_000;
+const ACCOUNT_INDEX_KEY:&str="Minternet.GoogleOAuth.AccountIndex.v1";
+const ACCOUNT_KEY_PREFIX:&str="Minternet.GoogleOAuth.Refresh.v1:";
+
+// Persist only OAuth refresh credentials, and only in the current OS user's
+// protected Credential Manager. Never put access/ID tokens, refresh tokens,
+// passwords or the Secret Bookmarks vault in localStorage or a plaintext file.
+#[cfg(target_os="windows")]
+mod secure_store {
+    use windows::core::{PCWSTR,PWSTR};
+    use windows::Win32::Security::Credentials::{
+        CREDENTIALW,CRED_TYPE_GENERIC,CRED_PERSIST_LOCAL_MACHINE,
+        CredWriteW,CredReadW,CredFree
+    };
+    use zeroize::Zeroize;
+    fn wide(text:&str)->Vec<u16>{
+        text.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+    pub fn write(name:&str,value:&[u8])->Result<(),String>{
+        if value.is_empty()||value.len()>2300{return Err("Google session exceeds secure storage limit".into());}
+        let mut target=wide(name);
+        let mut bytes=value.to_vec();
+        let credential=CREDENTIALW{
+            Type:CRED_TYPE_GENERIC,
+            TargetName:PWSTR(target.as_mut_ptr()),
+            CredentialBlobSize:bytes.len() as u32,
+            CredentialBlob:bytes.as_mut_ptr(),
+            Persist:CRED_PERSIST_LOCAL_MACHINE,
+            ..Default::default()
+        };
+        let result=unsafe{CredWriteW(&credential,0)}
+            .map_err(|_|"Windows Credential Manager could not save Google session".to_string());
+        bytes.zeroize();
+        result
+    }
+    pub fn read(name:&str)->Option<Vec<u8>>{
+        let target=wide(name);
+        let mut credential:*mut CREDENTIALW=std::ptr::null_mut();
+        if unsafe{CredReadW(PCWSTR(target.as_ptr()),CRED_TYPE_GENERIC,None,&mut credential)}.is_err(){
+            return None;
+        }
+        if credential.is_null(){return None;}
+        let result=unsafe{
+            let saved=&*credential;
+            let len=saved.CredentialBlobSize as usize;
+            let bytes=if len>0&&len<=2300&&!saved.CredentialBlob.is_null(){
+                Some(std::slice::from_raw_parts(saved.CredentialBlob,len).to_vec())
+            }else{None};
+            CredFree(credential.cast());
+            bytes
+        };
+        result
+    }
+}
+#[cfg(not(target_os="windows"))]
+mod secure_store {
+    pub fn write(_name:&str,_value:&[u8])->Result<(),String>{
+        Err("Persistent Google tokens require an OS secure credential store".into())
+    }
+    pub fn read(_name:&str)->Option<Vec<u8>>{None}
+}
+#[derive(Serialize,Deserialize)]
+struct StoredAccount{email:String,gmail:bool}
+#[derive(Serialize,Deserialize)]
+struct StoredIndex{version:u8,primary:Option<String>,accounts:Vec<StoredAccount>}
+#[derive(Serialize,Deserialize)]
+struct StoredRefresh{version:u8,client_id:String,refresh:String}
+
+fn session_key(email:&str,gmail:bool)->String{
+    format!("{}:{email}",if gmail{"gmail"}else{"drive"})
+}
+fn saved_credential_key(email:&str,gmail:bool)->String{
+    format!("{ACCOUNT_KEY_PREFIX}{}",session_key(email,gmail))
+}
+fn valid_email(email:&str)->bool{
+    email.len()<=254&&email.contains('@')&&!email.bytes().any(|c|
+        c<=32||c==127||c==b'/'||c==b'\\')
+}
+fn persist_sessions(state:&GoogleState)->Result<(),String>{
+    let mut accounts=Vec::new();
+    for (key,session) in &state.sessions {
+        if session.refresh.is_empty()||!valid_client_id(&session.client_id){continue;}
+        let Some((kind,email))=key.split_once(':') else{continue};
+        let gmail=kind=="gmail";
+        if (!gmail&&kind!="drive")||!valid_email(email)||accounts.len()>=10{continue;}
+        let refresh=StoredRefresh{version:1,client_id:session.client_id.clone(),
+            refresh:session.refresh.clone()};
+        let mut bytes=serde_json::to_vec(&refresh).map_err(|e|e.to_string())?;
+        let outcome=secure_store::write(&saved_credential_key(email,gmail),&bytes);
+        bytes.zeroize();
+        outcome?;
+        accounts.push(StoredAccount{email:email.to_owned(),gmail});
+    }
+    if accounts.is_empty(){return Err("Google did not issue a renewable authorization".into());}
+    let index=StoredIndex{version:1,primary:state.primary.clone(),accounts};
+    let mut bytes=serde_json::to_vec(&index).map_err(|e|e.to_string())?;
+    let result=secure_store::write(ACCOUNT_INDEX_KEY,&bytes);
+    bytes.zeroize();
+    result
+}
+pub fn restore()->GoogleState{
+    let mut state=GoogleState::default();
+    let Some(mut index_bytes)=secure_store::read(ACCOUNT_INDEX_KEY) else{return state};
+    let decoded=serde_json::from_slice::<StoredIndex>(&index_bytes);
+    index_bytes.zeroize();
+    let Ok(index)=decoded else{return state};
+    if index.version!=1{return state;}
+    for account in index.accounts.into_iter().take(10){
+        if !valid_email(&account.email){continue;}
+        let Some(mut bytes)=secure_store::read(&saved_credential_key(&account.email,account.gmail))
+            else{continue};
+        let decoded=serde_json::from_slice::<StoredRefresh>(&bytes);
+        bytes.zeroize();
+        let Ok(saved)=decoded else{continue};
+        if saved.version!=1||!valid_client_id(&saved.client_id)||
+           saved.refresh.is_empty()||saved.refresh.len()>2048{continue;}
+        state.sessions.insert(session_key(&account.email,account.gmail),Session{
+            access:String::new(),refresh:saved.refresh,
+            expires:Instant::now(),gmail:account.gmail,client_id:saved.client_id,
+            id_token:String::new()
+        });
+    }
+    state.primary=index.primary.filter(|email|
+        state.sessions.contains_key(&session_key(email,false)));
+    state
+}
+
 
 #[derive(Clone)]
 struct Session {
@@ -90,6 +218,11 @@ pub fn login(state:&Mutex<GoogleState>,client_id:&str,mail:bool)->Result<Value,S
     } else {
         format!("openid email {DRIVE_SCOPE}")
     };
+    // Existing authorization is renewed via the stored refresh credential;
+    // do not force a new consent and invalidate older grants on every login.
+    let existing_grant=state.lock().ok().is_some_and(|b|
+        !mail&&b.sessions.values().any(|s|!s.gmail&&s.client_id==client_id&&!s.refresh.is_empty()));
+    let prompt=if existing_grant{"select_account"}else{"consent select_account"};
     let mut authorize=tauri::Url::parse("https://accounts.google.com/o/oauth2/v2/auth")
         .map_err(|e|e.to_string())?;
     authorize.query_pairs_mut()
@@ -97,7 +230,7 @@ pub fn login(state:&Mutex<GoogleState>,client_id:&str,mail:bool)->Result<Value,S
         .append_pair("response_type","code").append_pair("scope",&scopes)
         .append_pair("state",&nonce).append_pair("code_challenge",&challenge)
         .append_pair("code_challenge_method","S256")
-        .append_pair("access_type","offline").append_pair("prompt","consent select_account");
+         .append_pair("access_type","offline").append_pair("prompt",prompt);
     browser_open(authorize.as_str())?;
     let started=Instant::now();
     let code=loop {
@@ -144,15 +277,23 @@ pub fn login(state:&Mutex<GoogleState>,client_id:&str,mail:bool)->Result<Value,S
     if !granted.split_whitespace().any(|s|s==required){
         return Err("Google did not grant the requested permission".into());
     }
-    let token=Session{access:access.to_owned(),refresh:refresh.to_owned(),
+    let mut b=state.lock().map_err(|e|e.to_string())?;
+    let old=b.sessions.get(&session_key(&verified,mail));
+    let retained=if refresh.is_empty(){
+        old.filter(|s|s.client_id==client_id).map(|s|s.refresh.clone()).unwrap_or_default()
+    }else{refresh.to_owned()};
+    let token=Session{access:access.to_owned(),refresh:retained,
         expires:Instant::now()+Duration::from_secs(auth.get("expires_in").and_then(Value::as_u64)
             .unwrap_or(3600).saturating_sub(60)),
         gmail:mail,client_id:client_id.to_owned(),
         id_token:auth.get("id_token").and_then(Value::as_str).unwrap_or("").to_owned()};
-    let mut b=state.lock().map_err(|e|e.to_string())?;
     if !mail {b.primary=Some(verified.clone());b.sync_enabled=false;}
-    b.sessions.insert(format!("{}:{verified}",if mail{"gmail"}else{"drive"}),token);
-    Ok(json!({"email":verified,"gmail":mail,"authorized":true}))
+    b.sessions.insert(session_key(&verified,mail),token);
+    // If the OS secure store is unavailable, keep this login only in RAM
+    // rather than silently writing a plaintext refresh token to disk.
+    let session_saved=persist_sessions(&b).is_ok();
+    Ok(json!({"email":verified,"gmail":mail,"authorized":true,
+        "sessionSaved":session_saved}))
 }
 /// Trade a Google ID token for an app-specific, short-lived Supabase Auth JWT.
 /// This does not grant access to any other user's records; the database RLS
@@ -170,6 +311,9 @@ pub fn live_auth(state:&Mutex<GoogleState>,project:&str,publishable:&str)
     if !publishable.starts_with("sb_publishable_") || publishable.len()>256 {
         return Err("Enter the Supabase project's publishable client key, never the secret key".into());
     }
+    // ID tokens expire too. Renew the Google grant before exchanging the ID
+    // token for Supabase auth; never reuse an hour-old token.
+    let _=bearer(state,None)?;
     let token={
         let state=state.lock().map_err(|e|e.to_string())?;
         let email=state.primary.as_ref().ok_or("Sign in to Google first")?;
@@ -209,9 +353,18 @@ fn bearer(state:&Mutex<GoogleState>,mail_for:Option<&str>)->Result<String,String
     ])?;
     token.access=reply.get("access_token").and_then(Value::as_str)
         .ok_or("Could not refresh Google access")?.to_owned();
+    if let Some(new_id)=reply.get("id_token").and_then(Value::as_str){
+        token.id_token=new_id.to_owned();
+    }
+    if let Some(next)=reply.get("refresh_token").and_then(Value::as_str){
+        if !next.is_empty(){token.refresh=next.to_owned();}
+    }
     token.expires=Instant::now()+Duration::from_secs(
         reply.get("expires_in").and_then(Value::as_u64).unwrap_or(3600).saturating_sub(60));
-    Ok(token.access.clone())
+    let access=token.access.clone();
+    // Preserve rotated refresh grants in Windows Credential Manager.
+    let _=persist_sessions(&b);
+    Ok(access)
 }
 fn drive_file(access:&str)->Result<Option<String>,String>{
     let mut url=tauri::Url::parse("https://www.googleapis.com/drive/v3/files")
