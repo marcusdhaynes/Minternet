@@ -2118,7 +2118,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         let mut next=value.get("next").and_then(Value::as_str)
             .ok_or("Enter a new Secret Folder password")?.to_owned();
         let handle=app.clone();
-        return tauri::async_runtime::spawn_blocking(move||{
+        let result=tauri::async_runtime::spawn_blocking(move||{
             let path=secret_bookmarks::file(&handle)?;
             let vault=handle.state::<Mutex<secret_bookmarks::SecretVault>>();
             let result=vault.lock().map_err(|e|e.to_string())?
@@ -2126,6 +2126,30 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             current.zeroize();next.zeroize();
             result
         }).await.map_err(|e|e.to_string())?;
+        if result.is_ok(){
+            // Password rotation revokes every old secret browsing session,
+            // including already-loaded sites and unused entry-code tickets.
+            let labels={
+                let browser=app.state::<Mutex<Browser>>();
+                let mut state=browser.lock().map_err(|e|e.to_string())?;
+                let mut labels=Vec::new();
+                for tab in &mut state.tabs{
+                    if tab.secret_id.is_some(){
+                        if let Some(label)=tab.view.take(){labels.push(label);}
+                        scrub_secret_tab(tab);
+                    }
+                }
+                labels
+            };
+            for label in labels{
+                if let Some(view)=app.get_webview(&label){let _=view.close();}
+            }
+            app.state::<AuthorizedSecrets>().items.lock()
+                .map_err(|e|e.to_string())?.clear();
+            display_active(&app);
+            notify(&app);
+        }
+        return result;
     }
     if name=="secret-reset"{
         // A forgotten password is not bypassed. Only complete deletion is
