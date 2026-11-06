@@ -2012,7 +2012,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         return vault.lock().map_err(|e|e.to_string())?.status(&path);
     }
     if name=="secret-auth"{
-        let code=value.get("code").and_then(Value::as_str)
+        let mut code=value.get("code").and_then(Value::as_str)
             .ok_or("Enter the Secret Bookmarks code")?.to_owned();
         let create=value.get("create").and_then(Value::as_bool)==Some(true);
         let handle=app.clone();
@@ -2020,12 +2020,37 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             let path=secret_bookmarks::file(&handle)?;
             let state=handle.state::<Mutex<secret_bookmarks::SecretVault>>();
             let result=state.lock().map_err(|e|e.to_string())?.open(&path,&code,create);
+            code.zeroize(); // discard raw code immediately after Argon2id
             result
         }).await.map_err(|e|e.to_string())?;
     }
     if name=="secret-lock"{
+        // Locking must also conceal already-open secrets, not just erase the
+        // encryption key. Keep only opaque secret IDs for a later unlock.
+        let labels={
+            let store=app.state::<Mutex<Browser>>();
+            let mut b=store.lock().map_err(|e|e.to_string())?;
+            let mut labels=Vec::new();
+            for tab in b.tabs.iter_mut().filter(|tab|tab.secret_id.is_some()){
+                if let Some(label)=tab.view.take(){labels.push(label);}
+                tab.secret_revealed=false;
+                tab.url=HOME.into();
+                tab.history=vec![HOME.into()];
+                tab.at=0;
+                tab.title="Secret Tab".into();
+                tab.loading=false;
+                tab.audio_playing=false;
+                tab.audio_muted=false;
+            }
+            labels
+        };
+        for label in labels{
+            if let Some(view)=app.get_webview(&label){let _=view.close();}
+        }
         let vault=app.state::<Mutex<secret_bookmarks::SecretVault>>();
         vault.lock().map_err(|e|e.to_string())?.lock();
+        display_active(&app);
+        notify(&app);
         return Ok(json!({"ok":true}));
     }
     if matches!(name.as_str(),"secret-put"|"secret-delete"|"secret-edit"|"secret-move"){
