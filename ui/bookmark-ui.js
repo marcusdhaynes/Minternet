@@ -20,11 +20,12 @@
     if(!model.url(address)||typeof png!=='string'||png.length>10000||
        !/^data:image\/png;base64,[a-z0-9+/=]+$/i.test(png))return;
     thumbs.delete(address);thumbs.set(address,png);
-    while(thumbs.size>170)thumbs.delete(thumbs.keys().next().value);
+    while(thumbs.size>240)thumbs.delete(thumbs.keys().next().value);
     try{localStorage.setItem(ICON_STORE,JSON.stringify(Object.fromEntries(thumbs)));}catch{}
   }
   async function cacheIconThumbnail(address,source){
     if(!window.__TAURI__||thumbs.has(address)||thumbnailJobs.has(address))return;
+    if(thumbs.has(source)){rememberThumb(address,thumbs.get(source));return;}
     thumbnailJobs.add(address);
     try{
       const data=await api.command('bookmark-icon-data',source);
@@ -38,7 +39,9 @@
       ctx.clearRect(0,0,24,24);
       ctx.drawImage(image,(24-image.naturalWidth*scale)/2,
         (24-image.naturalHeight*scale)/2,image.naturalWidth*scale,image.naturalHeight*scale);
-      rememberThumb(address,canvas.toDataURL('image/png'));
+      const thumb=canvas.toDataURL('image/png');
+      rememberThumb(address,thumb);
+      if(source!==address)rememberThumb(source,thumb);
     }catch{}finally{thumbnailJobs.delete(address);}
   }
   let data;
@@ -247,7 +250,14 @@
       slot.textContent=value;
     }else if(!isFolder && model.url(item?.url)){
       const safe=model.url(item.url);
-      const thumbnail=thumbs.get(safe);
+      // One origin's favicon is reused for other bookmarked pages on that
+      // origin (especially multiple YouTube videos), without waiting for a
+      // second fetch or causing duplicate requests on shared network IPs.
+      const faviconHost=new URL(safe).hostname.toLowerCase();
+      const likelySource=['youtube.com','www.youtube.com','m.youtube.com','youtu.be'].includes(faviconHost)
+        ?'https://www.youtube.com/favicon.ico'
+        :(currentGoogleIcons(safe)[0]||model.favicon(safe));
+      const thumbnail=thumbs.get(safe)||thumbs.get(likelySource);
       if(thumbnail){
         const img=document.createElement('img');img.alt='';img.decoding='sync';img.src=thumbnail;
         slot.append(img);return slot;
