@@ -86,6 +86,18 @@ struct Snapshot {
 // Opening the folder alone never authorizes opening individual sites.
 // Successful per-bookmark code entry produces an item-specific, short-lived
 // one-time decryption ticket, usable only by the corresponding Secret Tab.
+// Best-effort plaintext scrubbing when a revealed secret page is concealed,
+// unloaded or closed. The site WebView is separately destroyed by the caller.
+fn scrub_secret_tab(tab:&mut Tab){
+    if tab.secret_id.is_none(){return;}
+    tab.url.zeroize();tab.url=HOME.into();
+    for page in &mut tab.history{page.zeroize();}
+    tab.history=vec![HOME.into()];
+    tab.title.zeroize();tab.title="Secret Tab".into();
+    tab.at=0;tab.secret_revealed=false;tab.loading=false;
+    tab.audio_playing=false;tab.audio_muted=false;
+}
+
 struct AuthorizedSecret {
     id:String,
     key:[u8;32],
@@ -2109,14 +2121,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             let mut labels=Vec::new();
             for tab in b.tabs.iter_mut().filter(|tab|tab.secret_id.is_some()){
                 if let Some(label)=tab.view.take(){labels.push(label);}
-                tab.secret_revealed=false;
-                tab.url=HOME.into();
-                tab.history=vec![HOME.into()];
-                tab.at=0;
-                tab.title="Secret Tab".into();
-                tab.loading=false;
-                tab.audio_playing=false;
-                tab.audio_muted=false;
+                scrub_secret_tab(tab);
             }
             labels
         };
@@ -3323,6 +3328,9 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 let state=app.state::<Mutex<Browser>>();
                 let mut b=state.lock().map_err(|e|e.to_string())?;
                 let mut labels=Vec::new();
+                for tab in b.tabs.iter_mut().filter(|t|wanted.contains(&t.id)){
+                    scrub_secret_tab(tab);
+                }
                 b.tabs.retain(|t|{
                     if wanted.contains(&t.id){if let Some(label)=&t.view{labels.push(label.clone());}false}
                     else{true}
@@ -3346,14 +3354,16 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 let state = app.state::<Mutex<Browser>>();
                 let mut b = state.lock().map_err(|e| e.to_string())?;
                 let ix = b.tabs.iter().position(|t|t.id==id).ok_or("Unknown tab")?;
-                let tab = b.tabs.remove(ix);
+                let mut tab = b.tabs.remove(ix);
+                let closed_view=tab.view.take();
+                scrub_secret_tab(&mut tab);
                 if b.active_id==id {
                     // Prefer an existing pinned page; never synthesize a new tab.
                     b.active_id = b.tabs.iter().find(|t|t.pinned).map(|t|t.id)
                         .or_else(||b.tabs.get(ix.min(b.tabs.len().saturating_sub(1))).map(|t|t.id))
                         .unwrap_or(0);
                 }
-                tab.view
+                closed_view
             };
             app.state::<AuthorizedSecrets>().items.lock().map_err(|e|e.to_string())?
                 .remove(&id);
@@ -3430,12 +3440,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 let label=if name=="unload-tab"{
                     tab.loading=false;tab.checking_unload=false;
                     tab.audio_playing=false;tab.audio_muted=false;
-                    if tab.secret_id.is_some(){
-                        tab.secret_revealed=false;
-                        tab.url=HOME.into();
-                        tab.history=vec![HOME.into()];
-                        tab.at=0;
-                    }
+                    if tab.secret_id.is_some(){scrub_secret_tab(tab);}
                     tab.view.take()
                 }else{
                     if tab.view.is_some(){tab.loading=true;}
