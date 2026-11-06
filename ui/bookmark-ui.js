@@ -665,6 +665,7 @@
   document.addEventListener('dragend',finishBarDrag,true);
 
   document.addEventListener('dragover',event=>{
+    if(draggedBarId)return;
     // Secret Bookmarks drop targets belong exclusively to the encrypted
     // importer. Never copy their dropped URL into normal bookmark storage.
     if(event.target?.closest?.('[data-secret-target],#secretBookmarksBar,#secretTree'))return;
@@ -681,6 +682,7 @@
     document.documentElement.classList.add('bookmark-drag-over');
   },true);
   document.addEventListener('drop',event=>{
+    if(draggedBarId)return;
     if(event.target?.closest?.('[data-secret-target],#secretBookmarksBar,#secretTree'))return;
     const parent=dropTarget(event);
     if(!externalTransfer(event.dataTransfer))return;
@@ -790,6 +792,10 @@
     const row = document.createElement('div');
     row.className = 'bookmark-folder-row';
     row.dataset.bookmarkId=item.id;
+    row.draggable=true;
+    row.classList.toggle('bookmark-multi-selected',selectedBookmarks.has(item.id));
+    row.addEventListener('dragstart',event=>beginBookmarkDrag(item,row,event));
+    bindHoldSelect(row,item);
     const open = document.createElement('button');
     open.className = 'bookmark-folder-entry';
     open.type = 'button';
@@ -1037,6 +1043,14 @@
   }
   $('bookmarkSettingsManage').addEventListener('click', () => { renderManager(); setMode('manager'); });
   $('bookmarkBarManage').addEventListener('click', () => { renderManager(); setMode('manager'); });
+  $('bookmarkSelectionCount').addEventListener('click',()=>{
+    selectedBookmarks.clear();refreshSelections();
+  });
+  $('bookmarkTree').addEventListener('click',event=>{
+    if(event.target===$('bookmarkTree')&&selectionMode()){
+      selectedBookmarks.clear();refreshSelections();
+    }
+  });
   $('bookmarkManageNewFolder').addEventListener('click', () => openEditor('folder'));
   $('bookmarkManageNewLink').addEventListener('click', () => openEditor('link'));
   $('bookmarkFolderBack').addEventListener('click', folderParent);
@@ -1076,6 +1090,9 @@
     } catch(e) { toast(e.message || 'Could not use image.'); }
   });
   window.addEventListener('keydown', event => {
+    if(event.key==='Escape'&&selectionMode()){
+      event.preventDefault();selectedBookmarks.clear();refreshSelections();return;
+    }
     if (event.key === 'Escape' && mode) { event.preventDefault(); closeOverlay(); }
     if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'b') {
       event.preventDefault(); changeVisibility(!data.visible); return;
