@@ -280,7 +280,12 @@
         await request('secret-authorize-tab',{tabId:task.id,code});
         cancelEntry();
         const active=lastState?.tabs.find(t=>t.id===lastState.activeId);
-        if(active?.id===task.id)await reveal();
+        if(active?.id===task.id){
+          // The user already pressed the privacy eye. Close the code dialog
+          // before loading so it cannot obscure the authorized website.
+          close();
+          await reveal();
+        }
       }else if(task.kind==='import'){
         await saveDropped(task,code);
         cancelEntry();
