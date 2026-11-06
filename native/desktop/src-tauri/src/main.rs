@@ -3036,6 +3036,14 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             ) {
                 return Err("Unavailable outside bookmark smoke test".into());
             }
+            if std::env::args().any(|arg|arg=="--minternet-bookmarks-smoke"){
+                if value.get("settingsKeepBookmarks").and_then(Value::as_bool)!=Some(true){
+                    return Err("Settings incorrectly hides or disables Bookmark Bar".into());
+                }
+                if value.get("secretOnlyInManager").and_then(Value::as_bool)!=Some(true){
+                    return Err("Secret Bookmarks must appear only inside Manage Bookmarks".into());
+                }
+            }
             let entries = value.get("items").and_then(Value::as_array).ok_or("Bookmark data missing")?;
             let root = entries.iter().find(|x|
                 x.get("kind").and_then(Value::as_str) == Some("folder") &&
@@ -3706,6 +3714,15 @@ fn main() {
                                     $('bookmarkBarToggle').dispatchEvent(new Event('change'));
                                     $('bookmarkBarToggle').checked = true;
                                     $('bookmarkBarToggle').dispatchEvent(new Event('change'));
+                                    // Settings must not make the Bookmark Bar
+                                    // disappear or disable its existing items.
+                                    const settingsKeepBookmarks=
+                                      getComputedStyle($('bookmarkItems')).visibility==='visible' &&
+                                      getComputedStyle($('bookmarkItems')).display!=='none' &&
+                                      getComputedStyle($('bookmarkItems')).pointerEvents!=='none';
+                                    const secretOnlyInManager=
+                                      !$('secretBookmarksBar')&&!$('secretSettingsOpen')&&
+                                      Boolean($('secretBookmarksManager'));
                                     $('bookmarkSettingsManage').click();
                                     $('bookmarkManageNewFolder').click();
                                     $('bookmarkIcon').value = '🌿';
@@ -3742,6 +3759,8 @@ fn main() {
                                     }));
                                     await new Promise(resolve=>setTimeout(resolve,420));
                                     const state = JSON.parse(localStorage.getItem('minternet.bookmark-tree.v1'));
+                                    state.settingsKeepBookmarks=settingsKeepBookmarks;
+                                    state.secretOnlyInManager=secretOnlyInManager;
                                     await window.minternet?.command('bookmarks-smoke-proof', state);
                                   }, 550);
                                 "#);
