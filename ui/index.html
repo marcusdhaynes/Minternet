@@ -91,7 +91,6 @@
     </div>
     <div class="bookmark-bar" id="bookmarkBar" aria-label="Bookmark Bar" hidden>
       <div class="bookmark-items" id="bookmarkItems"></div>
-      <button type="button" id="secretBookmarksBar" class="bookmark-item secret-root-trigger" title="Secret Bookmarks" aria-label="Secret Bookmarks">◈</button>
       <button class="bookmark-mini" id="bookmarkBarManage" title="Manage Bookmarks" aria-label="Manage Bookmarks">⋯</button>
     </div>
   </header>
@@ -145,7 +144,6 @@
       </div>
       <label class="auto-unload-setting" for="secretGroupNameSettings"><span><strong>Secret Tabs Group Name</strong><small>Default: ##### · Only the chosen label is visible</small></span><input id="secretGroupNameSettings" type="text" maxlength="42" value="#####" aria-label="Secret Tabs Group Name"></label>
       <button class="bookmark-menu-action" id="bookmarkSettingsManage">☆ Manage Bookmarks <span>›</span></button>
-      <button class="bookmark-menu-action" id="secretSettingsOpen">◈ Secret Bookmarks <span>›</span></button>
       <button class="bookmark-menu-action" id="passwordManagerOpen">♢ Passwords <span>›</span></button>
       <button class="bookmark-menu-action" id="paymentManagerOpen">▣ Payment Methods <span>›</span></button>
       <button class="bookmark-menu-action" id="historyManagerOpen">◷ Browsing History <span>›</span></button>
@@ -184,10 +182,46 @@
     <aside class="secret-panel" role="dialog" aria-modal="true" aria-label="Secret Bookmarks">
       <div class="secret-heading">
         <span class="secret-heading-icon">◈</span><strong>Secret Bookmarks</strong>
+        <button type="button" id="secretChangePassword" title="Change the Secret Folder password">Password…</button>
         <button type="button" id="secretLock" title="Lock secret vault">Lock</button>
         <button type="button" id="secretClose" aria-label="Close Secret Bookmarks">×</button>
       </div>
       <p id="secretMessage" class="secret-description">A separate encrypted vault. Site addresses and real titles never appear in the bookmark list.</p>
+      <div class="secret-security-actions">
+        <button type="button" id="secretResetStart" class="secret-destructive-link" title="Delete the entire Secret Bookmarks vault when the current folder password is unavailable">Forgot Folder Password? Reset Vault…</button>
+      </div>
+      <form id="secretPasswordChangeForm" class="secret-security-form" autocomplete="off" hidden>
+        <strong>Change Secret Folder Password</strong>
+        <p>Changing the folder password preserves all encrypted bookmarks. Your individual bookmark entry codes stay unchanged.</p>
+        <label>Current Folder Password
+          <input id="secretOldPassword" type="password" autocomplete="off" spellcheck="false" required maxlength="64">
+        </label>
+        <label>New Folder Password <small>(1–16 characters, different from current)</small>
+          <input id="secretNewPassword" type="password" autocomplete="new-password" spellcheck="false" required maxlength="64">
+        </label>
+        <label>Confirm New Folder Password
+          <input id="secretNewPasswordConfirm" type="password" autocomplete="new-password" spellcheck="false" required maxlength="64">
+        </label>
+        <div class="secret-form-actions">
+          <button type="button" id="secretPasswordChangeCancel">Cancel</button>
+          <button type="submit">Update Password</button>
+        </div>
+      </form>
+      <form id="secretPasswordResetForm" class="secret-security-form secret-reset-form" autocomplete="off" hidden>
+        <strong>Reset Secret Folder — Permanent Deletion</strong>
+        <p>This is NOT password recovery. Without the current password, Minternet must destroy the entire Secret Bookmarks vault: all secret bookmarks, optional labels, subfolders and encrypted entry data. Normal bookmarks and saved website passwords are unaffected. SSDs, backups and snapshots may retain historical copies even after overwriting.</p>
+        <label>Enter this exact phrase to authorize deletion
+          <input id="secretResetPhrase" type="text" autocomplete="off" spellcheck="false" placeholder="DELETE SECRET BOOKMARKS" required>
+        </label>
+        <label class="secret-reset-checkbox">
+          <input id="secretResetAcknowledged" type="checkbox" required>
+          <span>I understand the entire Secret Bookmarks vault will be deleted, cannot be recovered through Minternet and must be recreated.</span>
+        </label>
+        <div class="secret-form-actions">
+          <button type="button" id="secretPasswordResetCancel">Cancel</button>
+          <button type="submit" id="secretResetConfirm">Permanently Delete Secret Vault</button>
+        </div>
+      </form>
       <form id="secretAuthForm" class="secret-auth" autocomplete="off">
         <label>Secret Folder Password <small>(1–16 characters, separate from the master password)</small>
           <input id="secretCode" type="password" autocomplete="new-password" spellcheck="false"
