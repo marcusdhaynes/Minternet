@@ -232,16 +232,24 @@
       slot.append(img);
     }else if(/^https:\/\//i.test(value)){
       const img=document.createElement('img');
-      img.alt='';img.referrerPolicy='no-referrer';img.decoding='async';
-      img.addEventListener('error',()=>{slot.textContent=isFolder?'📁':'🔖';},{once:true});
-      img.src=value;slot.append(img);
+      img.alt='';img.referrerPolicy='no-referrer';
+      const thumbnail=thumbs.get(value);
+      if(thumbnail){
+        img.decoding='sync';img.src=thumbnail;
+      }else{
+        img.decoding='async';
+        img.addEventListener('load',()=>void cacheIconThumbnail(value,value),{once:true});
+        img.addEventListener('error',()=>{slot.textContent=isFolder?'📁':'🔖';},{once:true});
+        img.src=value;
+      }
+      slot.append(img);
     }else if(value){
       slot.textContent=value;
     }else if(!isFolder && model.url(item?.url)){
       const safe=model.url(item.url);
       const thumbnail=thumbs.get(safe);
       if(thumbnail){
-        const img=document.createElement('img');img.alt='';img.src=thumbnail;
+        const img=document.createElement('img');img.alt='';img.decoding='sync';img.src=thumbnail;
         slot.append(img);return slot;
       }
       const hostname=new URL(safe).hostname.replace(/^www\./,'');
