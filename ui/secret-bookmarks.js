@@ -356,36 +356,46 @@
       try{await open();}catch(e){tell(e.message);}
       return;
     }
-    try{
-      const unique=[...new Set(ids)];
-      const result=await request('secret-open',{ids:unique});
-      const tabIds=result.tabIds||[];
-      let grouped=true;
-      if(tabIds.length>1){
-        const groups=window.minternetGroups;
-        grouped=Boolean(groups&&await waitForGroupTabs(groups,tabIds));
-        const g=grouped?groups.createGroup(savePreference(),'violet'):null;
-        grouped=Boolean(g);
-        if(g)for(const id of tabIds)if(!groups.assign(id,g.id))grouped=false;
-      }
-      selected.clear();render();
-      tell(tabIds.length+' Secret Bookmark'+(tabIds.length===1?'':'s')+
-        ' opened in background, unloaded. Select a tab and press its eye to load.'+
-        (!grouped?' Could not assign all tabs to a group.':''));
-      armLock();
-    }catch(error){tell(error.message);}
+    if(status.legacyCount>0){promptEntry({kind:'migrate'});return;}
+    const unique=[...new Set(ids)];
+    if(!unique.length)return tell('Select a Secret Bookmark.');
+    promptEntry({kind:'open',ids:unique});
+  }
+  async function openAuthorized(ids,code){
+    const result=await request('secret-open',{ids,code});
+    const tabIds=result.tabIds||[];
+    let grouped=true;
+    if(tabIds.length>1){
+      const groups=window.minternetGroups;
+      grouped=Boolean(groups&&await waitForGroupTabs(groups,tabIds));
+      const g=grouped?groups.createGroup(savePreference(),'violet'):null;
+      grouped=Boolean(g);
+      if(g)for(const id of tabIds)if(!groups.assign(id,g.id))grouped=false;
+    }
+    selected.clear();render();
+    tell(tabIds.length+' Secret Bookmark'+(tabIds.length===1?'':'s')+
+      ' authorized and opened unloaded in the background. Press the eye to load.'+
+      (!grouped?' Could not assign all tabs to a group.':''));
+    armLock();
   }
   async function reveal(){
-    const state=lastState;
-    const tab=state?.tabs.find(x=>x.id===state.activeId);
+    const tab=lastState?.tabs.find(x=>x.id===lastState.activeId);
     if(!tab?.secretPending)return;
     try{
-      const result=await request('secret-reveal',{tabId:tab.id});
-      if(result?.ok)armLock();
+      await request('secret-reveal',{tabId:tab.id});
+      armLock();
     }catch(error){
-      if(/unlock|code|locked/i.test(error.message)){
+      // A short-lived item-specific decryption ticket can expire. Only a fresh
+      // entry code can reauthorize this one tab; the folder password alone
+      // cannot be used to reveal it.
+      if(/entry code|authorization expired|unlock|locked/i.test(error.message)){
         pendingReveal=tab.id;
-        void open().catch(e=>tell(e.message));
+        if(!status.unlocked){
+          void open().catch(e=>tell(e.message));
+        }else{
+          pendingReveal=null;
+          promptEntry({kind:'tab',id:tab.id});
+        }
       }else tell(error.message);
     }
   }
