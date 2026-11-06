@@ -161,6 +161,26 @@
     parent.children.push(found.item);
     return true;
   }
+  // Reorder only direct Bookmark Bar children. Do not delete/recreate folders:
+  // their IDs, nested items, icons and sync identities must survive the move.
+  // The anchor can be before/after another bar item, or null to move to end.
+  function reorderBar(state,sourceId,anchorId=null,after=false){
+    const items=barItems(state);
+    if(sourceId===BOOKMARK_BAR_ID)return false;
+    const from=items.findIndex(item=>item.id===sourceId);
+    if(from<0)return false;
+    let destination=items.length;
+    if(anchorId!=null){
+      const anchor=items.findIndex(item=>item.id===anchorId);
+      if(anchor<0)return false;
+      destination=anchor+(after?1:0);
+    }
+    if(from<destination)destination--;
+    if(from===destination)return false;
+    const [item]=items.splice(from,1);
+    items.splice(destination,0,item);
+    return true;
+  }
   const byUrl = (state, target) => visit(state.items, node => node.kind === 'link' && node.url === url(target) ? node : undefined);
-  return { blank, hydrate, url, icon, favicon, find, location, folders, count, add, remove, update, move, byUrl, barFolder, barItems, BOOKMARK_BAR_ID, MAX_ITEMS };
+  return { blank, hydrate, url, icon, favicon, find, location, folders, count, add, remove, update, move, reorderBar, byUrl, barFolder, barItems, BOOKMARK_BAR_ID, MAX_ITEMS };
 });
