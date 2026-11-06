@@ -9,8 +9,8 @@ test('nested unnamed folders and emoji icons survive serialization', () => {
  const link=b.add(s,'link',child.id,{name:'Example',url:'https://example.com'});
  assert.equal(b.find(s,child.id).name,'');
  assert.equal(b.location(s,link.id).parent.id,child.id);
- assert.equal(b.hydrate(JSON.stringify(s)).items[0].children[0].icon,'🪐');
- assert.equal(b.folders(s).length,2);
+ assert.equal(b.hydrate(JSON.stringify(s)).items[0].children[0].children[0].icon,'🪐');
+ assert.equal(b.folders(s).length,3);
 });
 test('rejects unsafe bookmark URLs and injected icons',()=>{
  const s=b.blank();
@@ -24,8 +24,8 @@ test('rejects moving folder into its own descendants',()=>{
  const s=b.blank(),a=b.add(s,'folder',null,{name:'A'}),c=b.add(s,'folder',a.id,{name:'C'});
  assert.equal(b.move(s,a.id,c.id),false);
  assert.equal(b.move(s,c.id,null),true);
- assert.equal(b.folders(s).length,2);
- assert.equal(b.location(s,c.id).parent,null);
+ assert.equal(b.folders(s).length,3);
+ assert.equal(b.location(s,c.id).parent.id,b.BOOKMARK_BAR_ID);
 });
 test('bookmark editing, deletion, URL matching',()=>{
  const s=b.blank(),l=b.add(s,'link',null,{url:'https://example.com',name:'old'});
@@ -35,10 +35,12 @@ test('bookmark editing, deletion, URL matching',()=>{
  assert.equal(b.count(s),0);
 });
 test('normalizes corrupt JSON and strips unsafe imported data',()=>{
- assert.equal(b.hydrate('{bad').items.length,0);
+ assert.equal(b.hydrate('{bad').items.length,1);
  const state=b.hydrate({visible:false,items:[{id:'a',kind:'link',url:'data:text/html,test'},{id:'b',kind:'folder',name:'',children:[]}]});
  assert.equal(state.visible,false);
  assert.equal(state.items.length,1);
+ assert.equal(state.items[0].name,'Bookmark Bar');
+ assert.equal(state.items[0].children.length,1);
 });
 
 test('bookmark favicon uses only its own secure website origin',()=>{
@@ -54,8 +56,8 @@ test('existing bookmarks without custom icons retain URL for automatic favicon d
  const s=b.hydrate({visible:true,items:[
    {id:'old',kind:'link',name:'Home',url:'https://example.org/home'}
  ]});
- assert.equal(s.items[0].icon,'');
- assert.equal(b.favicon(s.items[0].url),'https://example.org/favicon.ico');
+ assert.equal(s.items[0].children[0].icon,'');
+ assert.equal(b.favicon(s.items[0].children[0].url),'https://example.org/favicon.ico');
  const custom=b.add(s,'link',null,{url:'https://example.com',icon:'🌟'});
  assert.equal(custom.icon,'🌟');
 });
@@ -66,7 +68,7 @@ test('folder icons can copy HTTPS favicons, emojis and uploaded image data safel
  const icon=b.favicon(link.url);
  assert.equal(icon,'https://docs.example.org/favicon.ico');
  assert.equal(b.update(s,folder.id,{icon}),true);
- assert.equal(b.hydrate(JSON.stringify(s)).items[0].icon,icon);
+ assert.equal(b.hydrate(JSON.stringify(s)).items[0].children[0].icon,icon);
  assert.equal(b.update(s,folder.id,{icon:link.icon}),true);
  assert.equal(b.find(s,folder.id).icon,'🌿');
  assert.equal(b.icon('https://u:secret@example.com/favicon.ico'),'');
@@ -96,4 +98,28 @@ test('site favicons are restricted to HTTPS and do not reveal credentials',()=>{
  assert.equal(b.favicon('https://example.org/article'),'https://example.org/favicon.ico');
  assert.equal(b.favicon('http://example.org/article'),null);
  assert.equal(b.favicon('https://user:secret@example.org/'),null);
+});
+
+test('Bookmark Bar is a permanent real folder with automatic legacy migration',()=>{
+ const legacy={visible:true,items:[
+   {id:'saved',kind:'link',name:'Saved',url:'https://youtube.com/watch?v=123'},
+   {id:'project',kind:'folder',name:'Projects',icon:'🌿',
+      children:[{id:'nested',kind:'link',name:'Nested',url:'https://example.com/deep'}]}
+ ]};
+ const moved=b.hydrate(legacy),bar=b.barFolder(moved);
+ assert.equal(moved.items.length,1);
+ assert.equal(bar.name,'Bookmark Bar');
+ assert.deepEqual(bar.children.map(x=>x.id),['saved','project']);
+ assert.equal(b.location(moved,'saved').parent.id,b.BOOKMARK_BAR_ID);
+ assert.equal(b.location(moved,'nested').parent.id,'project');
+ assert.equal(b.remove(moved,b.BOOKMARK_BAR_ID),false);
+ assert.equal(b.update(moved,b.BOOKMARK_BAR_ID,{name:'Other'}),false);
+ assert.equal(b.move(moved,b.BOOKMARK_BAR_ID,'project'),false);
+ const copy=b.hydrate(JSON.stringify(moved));
+ assert.equal(copy.items.length,1);
+ assert.equal(copy.items[0].children.length,2);
+ assert.equal(copy.items[0].children[0].id,'saved');
+ const link=b.add(copy,'link',null,{name:'New',url:'https://example.org/'});
+ assert.equal(b.location(copy,link.id).parent.id,b.BOOKMARK_BAR_ID);
+ assert.equal(b.byUrl(copy,'https://youtube.com/watch?v=123').id,'saved');
 });

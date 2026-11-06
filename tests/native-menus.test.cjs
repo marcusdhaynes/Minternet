@@ -59,7 +59,7 @@ test('folder menu actions target the correct folder, without executable URLs',()
  const items=h.window.minternetMenus.inspectFolder(h.root.id);
  items.find(x=>x.text?.includes('Folder Properties')).action();
  assert.equal(h.flags.folderEdits,1);
- assert.equal(h.bookmarks.items[0].children[0].children[0].url,'https://example.com/');
+ assert.equal(bm.find(h.bookmarks,h.sub.id).children[0].url,'https://example.com/');
 });
 
 test('context tab menu pins and unpins a real tab without closing it',()=>{
@@ -105,7 +105,7 @@ test('right-clicking an actual tab directly offers a new group containing it',()
 
 test('right-clicked bookmark gets background tab, rename, and delete actions without groups',()=>{
  const h=harness();
- const leaf=h.bookmarks.items[0].children[0].children[0];
+ const leaf=bm.find(h.bookmarks,h.sub.id).children[0];
  const menu=h.window.minternetMenus.inspectBookmark(leaf.id);
  assert.ok(!menu.some(x=>x.text?.includes('Tab Groups')));
  const action=text=>menu.find(x=>x.text?.includes(text))?.action();
