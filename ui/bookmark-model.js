@@ -6,6 +6,8 @@
   if (root) root.MinternetBookmarks = api;
 })(typeof window !== 'undefined' ? window : null, () => {
   const MAX_ITEMS = 2000, MAX_DEPTH = 12, MAX_IMAGE_LENGTH = 45000;
+  const BOOKMARK_BAR_ID = 'minternet-bookmark-bar';
+  const makeBar = children => ({ id: BOOKMARK_BAR_ID, kind:'folder', name:'Bookmark Bar', icon:'📁', children });
   const imageRE = /^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=]+$/i;
   let seq = 0;
   const id = () => {
@@ -40,7 +42,7 @@
     try{return new URL(target).origin+'/favicon.ico';}
     catch{return null;}
   }
-  function blank() { return { version: 1, visible: true, items: [] }; }
+  function blank() { return { version: 2, visible: true, items: [makeBar([])] }; }
   function hydrate(raw) {
     let data;
     try { data = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return blank(); }
@@ -72,7 +74,16 @@
       }
       return result;
     }
-    return { version: 1, visible: data.visible !== false, items: normalizeNodes(data.items, 1) };
+    const normalized=normalizeNodes(data.items,1);
+    // Version-1 bookmark roots were the visible Bookmark Bar. Move the same
+    // objects into the permanent folder without duplicating URLs or icons.
+    let bar=normalized.find(item=>item.kind==='folder'&&item.id===BOOKMARK_BAR_ID);
+    if(!bar)bar=makeBar(normalized);
+    else {
+      bar.name='Bookmark Bar';bar.icon='📁';
+      for(const node of normalized)if(node!==bar)bar.children.push(node);
+    }
+    return { version:2, visible:data.visible!==false, items:[bar] };
   }
   function visit(items, fn, parent = null, depth = 0) {
     for (let i = 0; i < items.length; i++) {
@@ -88,13 +99,17 @@
   }
   const find = (state, itemId) => visit(state.items, item => item.id === itemId ? item : undefined);
   const location = (state, itemId) => visit(state.items, (item, parent, depth, array, index) => item.id === itemId ? { item, parent, depth, array, index } : undefined);
-  const count = state => { let n = 0; visit(state.items, () => { n++; }); return n; };
+  const count = state => { let n = 0; visit(state.items, node => { if(node.id!==BOOKMARK_BAR_ID)n++; }); return n; };
   const folders = state => { const a = []; visit(state.items, (node, parent, depth) => { if (node.kind === 'folder') a.push({ id: node.id, name: node.name, icon: node.icon, depth, parentId: parent?.id ?? null }); }); return a; };
+  const barFolder = state => find(state,BOOKMARK_BAR_ID);
+  const barItems = state => barFolder(state)?.children||[];
   function add(state, kind, parentId, options = {}) {
     if (!['folder', 'link'].includes(kind) || count(state) >= MAX_ITEMS) return null;
-    const parent = parentId == null ? null : find(state, parentId);
-    if (parentId != null && (!parent || parent.kind !== 'folder')) return null;
-    const depth = parent ? (location(state, parent.id)?.depth ?? 0) + 1 : 0;
+    // Adding a bookmark with no selected parent means the visible bar.
+    if(parentId==null)parentId=BOOKMARK_BAR_ID;
+    const parent = find(state, parentId);
+    if (!parent || parent.kind !== 'folder') return null;
+    const depth = (location(state, parent.id)?.depth ?? 0) + 1;
     if (depth >= MAX_DEPTH) return null;
     const item = { id: id(), kind, name: clean(options.name, kind === 'folder' ? 100 : 180), icon: icon(options.icon) };
     if (kind === 'folder') item.children = [];
@@ -105,16 +120,18 @@
       if (!item.url || visit(state.items,entry=>entry.kind==='link'&&
           entry.url===item.url?true:undefined)) return null;
     }
-    (parent ? parent.children : state.items).push(item);
+    parent.children.push(item);
     return item;
   }
   function remove(state, itemId) {
+    if(itemId===BOOKMARK_BAR_ID)return false;
     const found = location(state, itemId);
     if (!found) return false;
     found.array.splice(found.index, 1);
     return true;
   }
   function update(state, itemId, attrs = {}) {
+    if(itemId===BOOKMARK_BAR_ID)return false;
     const node = find(state, itemId);
     if (!node) return false;
     if (Object.hasOwn(attrs, 'name')) node.name = clean(attrs.name, node.kind === 'folder' ? 100 : 180);
@@ -128,20 +145,22 @@
     return true;
   }
   function move(state, itemId, parentId) {
+    if(itemId===BOOKMARK_BAR_ID)return false;
+    if(parentId==null)parentId=BOOKMARK_BAR_ID;
     if (itemId === parentId) return false;
     const found = location(state, itemId);
     if (!found) return false;
-    const parent = parentId == null ? null : find(state, parentId);
-    if (parentId != null && (!parent || parent.kind !== 'folder')) return false;
+    const parent = find(state,parentId);
+    if(!parent || parent.kind !== 'folder')return false;
     if (parent && visit([found.item], n => n.id === parent.id ? true : undefined)) return false;
     const targetDepth = parent ? location(state, parent.id).depth + 1 : 0;
     let height = 0;
     visit([found.item], (_, __, d) => { height = Math.max(height, d); });
     if (targetDepth + height >= MAX_DEPTH) return false;
     found.array.splice(found.index, 1);
-    (parent ? parent.children : state.items).push(found.item);
+    parent.children.push(found.item);
     return true;
   }
   const byUrl = (state, target) => visit(state.items, node => node.kind === 'link' && node.url === url(target) ? node : undefined);
-  return { blank, hydrate, url, icon, favicon, find, location, folders, count, add, remove, update, move, byUrl, MAX_ITEMS };
+  return { blank, hydrate, url, icon, favicon, find, location, folders, count, add, remove, update, move, byUrl, barFolder, barItems, BOOKMARK_BAR_ID, MAX_ITEMS };
 });
