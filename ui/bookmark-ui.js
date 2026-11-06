@@ -272,13 +272,17 @@
     void act(privateTab?'new-private-background-url':'new-background-url',target);
     return true;
   }
-  function deleteBookmark(id) {
+  function deleteBookmark(id,secureMove=false) {
     const node=model.find(data,id);
     if(!node)return false;
     if(node.kind==='folder' && node.children.length &&
       !window.confirm('Delete this folder and everything inside it?'))return false;
     if(!model.remove(data,id))return false;
-    persist();
+    // An encrypted move must not create a new undo snapshot containing the
+    // site's formerly public URL; still notify encrypted sync to delete it.
+    persist(secureMove);
+    if(secureMove)window.dispatchEvent(new CustomEvent('minternet:local-change',
+      {detail:{kind:'bookmark'}}));
     if(mode==='folder' && folderId===id)closeOverlay();
     toast('Bookmark removed');
     return true;
