@@ -46,6 +46,7 @@
     try { data = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return blank(); }
     if (!data || typeof data !== 'object' || !Array.isArray(data.items)) return blank();
     const used = new Set();
+    const seenUrls = new Set();
     let count = 0;
     function normalizeNodes(nodes, depth) {
       if (!Array.isArray(nodes) || depth > MAX_DEPTH || count >= MAX_ITEMS) return [];
@@ -63,7 +64,8 @@
           basic.children = normalizeNodes(item.children, depth + 1);
         } else {
           const target = url(item.url);
-          if (!target) continue;
+          if (!target || seenUrls.has(target)) continue;
+          seenUrls.add(target);
           basic.url = target;
         }
         result.push(basic);
@@ -98,7 +100,10 @@
     if (kind === 'folder') item.children = [];
     else {
       item.url = url(options.url);
-      if (!item.url) return null;
+      // One canonical URL can exist only once, across all folders and root.
+      // A dropped page already bookmarked must never be duplicated.
+      if (!item.url || visit(state.items,entry=>entry.kind==='link'&&
+          entry.url===item.url?true:undefined)) return null;
     }
     (parent ? parent.children : state.items).push(item);
     return item;
@@ -116,7 +121,8 @@
     if (Object.hasOwn(attrs, 'icon')) node.icon = icon(attrs.icon);
     if (node.kind === 'link' && Object.hasOwn(attrs, 'url')) {
       const target = url(attrs.url);
-      if (!target) return false;
+      if (!target || visit(state.items,entry=>entry.kind==='link'&&entry.id!==itemId&&
+          entry.url===target?true:undefined)) return false;
       node.url = target;
     }
     return true;
