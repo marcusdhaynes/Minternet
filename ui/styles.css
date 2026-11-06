@@ -1294,16 +1294,24 @@ html.minternet-overlay-active .group-editor-backdrop {
 .secret-root-manager:hover,.secret-root-trigger:hover{background:#7a5aca4d!important}
 .secret-screen[hidden],.secret-pending-screen[hidden],.secret-editor[hidden],.secret-auth[hidden]{display:none!important}
 .secret-screen{position:fixed;z-index:160;inset:45px 0 0;pointer-events:auto;}
-.secret-backdrop{position:absolute;inset:0;background:#050713a6;backdrop-filter:blur(12px);}
+.secret-backdrop{position:absolute;inset:0;background:#050713a6;/* No backdrop-filter: keep the browser page sharp and avoid GPU blur stalls. */}
 .secret-panel{position:relative;margin:5vh auto;width:min(450px,calc(100vw - 24px));max-height:calc(90vh - 50px);
   overflow:auto;background:linear-gradient(148deg,#272442,#17182e 70%,#171828);color:#f0eaff;
   border:1px solid #806bb1;border-radius:13px;box-shadow:0 22px 70px #000d,inset 0 1px 0 #ffffff18;
   font-family:inherit;padding:0 0 12px}
-.secret-heading{display:flex;align-items:center;gap:9px;height:44px;border-bottom:1px solid #7b67943a;padding:0 13px}
+.secret-heading{display:flex;align-items:center;gap:6px;height:44px;border-bottom:1px solid #7b67943a;padding:0 10px}
 .secret-heading strong{font-size:13px;letter-spacing:.01em}
 .secret-heading-icon{font-size:21px;color:#bb9dff}
 .secret-heading button{border:1px solid #836b9b66;background:#3c3455;color:#ddd4ec;border-radius:6px;padding:5px 8px;font-size:11px;cursor:pointer}
-.secret-heading #secretLock{margin-left:auto}.secret-heading #secretClose{font-size:18px;line-height:1;padding:1px 8px}
+.secret-heading #secretLock{margin-left:0}.secret-heading #secretClose{font-size:18px;line-height:1;padding:1px 8px}
+.secret-heading .secret-close-lock{display:flex;align-items:center;gap:4px;margin-left:auto;white-space:nowrap;color:#b9abd4;font-size:10px}
+.secret-heading .secret-close-lock input,.secret-heading .secret-close-lock select{
+  height:24px;background:#16142a;color:#eee4ff;border:1px solid #806a9b;border-radius:4px;padding:2px;font:inherit;outline:0
+}
+.secret-heading .secret-close-lock input{width:40px;text-align:center;appearance:textfield;-moz-appearance:textfield}
+.secret-heading .secret-close-lock input::-webkit-inner-spin-button{appearance:none}
+.secret-heading .secret-close-lock select{width:53px;cursor:pointer}
+.secret-heading .secret-close-lock select:focus,.secret-heading .secret-close-lock input:focus{border-color:#bca7f6}
 .secret-description{font-size:11px;color:#c6badb;line-height:1.45;margin:11px 15px 8px;min-height:18px}
 .secret-auth,.secret-editor{display:grid;gap:10px;margin:13px 15px}
 .secret-auth label,.secret-editor label,.secret-group-setting{display:grid;gap:5px;font-size:11px;color:#dcd0f0}
@@ -1351,11 +1359,10 @@ html.minternet-overlay-active .group-editor-backdrop {
  box-shadow:0 14px 40px #050516bc;padding:6px}
 .secret-star-menu button{background:transparent;border:0;color:#f4efff;font-size:11px;padding:8px 9px;text-align:left;cursor:pointer;border-radius:5px}
 .secret-star-menu button:hover{background:#785eaa66}
-.address-star.secret-star-flash{animation:secret-star-blink .15s ease-in-out 6 alternate;color:#d6a9ff!important}
-@keyframes secret-star-blink{from{filter:brightness(1);background:transparent}to{filter:brightness(2.3);background:#995bda88;box-shadow:0 0 15px #af70ef}}
+/* Hold-to-save has no flashing or delayed animation, avoiding visual jerks. */
 .secret-pending-screen{position:fixed;z-index:25;inset:var(--chrome-height,52px) 0 0;display:grid;place-items:center;
  background:radial-gradient(ellipse at 50% 39%,#53427a 0%,#272741 32%,#0c111ecf 75%);
- backdrop-filter:blur(30px)}
+ /* No page blur while a secret tab is waiting for the eye to reveal it. */ }
 .secret-pending-content{display:grid;justify-items:center;gap:16px;color:#d6c3ec;text-align:center;font-size:12px}
 .secret-pending-caption{font-size:10px;letter-spacing:2px;color:#a98aca}
 .secret-reveal-eye{display:grid;place-items:center;width:116px;height:116px;border-radius:50%;

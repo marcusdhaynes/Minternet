@@ -9,9 +9,15 @@
   const screen=$('secretScreen'),tree=$('secretTree'),lockedForm=$('secretAuthForm');
   if(!screen||!tree||!lockedForm)return;
   const GROUP_PREF='minternet.secret-group-name.v1';
+  const GROUP_ID_PREF='minternet.secret-tabs-group-id.v1';
+  const CLOSE_LOCK_PREF='minternet.secret-close-lock.v1';
+  // Public, user-chosen visible labels only; true titles and secret URLs stay native.
+  const secretTabNames=new Map();
+  window.minternetSecretTabNames=secretTabNames;
   let status={exists:false,unlocked:false,items:[]};
   let selected=new Set(),folder=null,pendingAdd=null,pendingDrop=null,pendingReveal=null,entryTask=null;
   let editMode=null,editId=null,editorTrueTitle='',pendingNormalId=null,starMenu=null,autoLockTimer=null,suppressStarClick=false;
+  let lockPromise=null,closeDeadline=0;
   let lastState=null;
   const tell=message=>{
     const el=$('secretMessage');
@@ -197,6 +203,11 @@
   async function readStatus(){updateState(await request('secret-status'));}
   async function open(){
     if(!window.__TAURI__){tell('Secret Bookmarks requires the installed Minternet application.');return;}
+    // Reopening before the chosen close delay cancels the pending lock.
+    clearTimeout(autoLockTimer);autoLockTimer=null;closeDeadline=0;
+    // Never show stale unlocked metadata while the previous close is still
+    // clearing the native encryption key.
+    if(lockPromise)await lockPromise;
     await readStatus();
     clearPasswordForms();
     // The secret dialog takes over the trusted chrome; leave no ordinary
@@ -216,7 +227,44 @@
         'Create one Secret Folder password. Individual bookmark codes are not required.');
     }
   }
+  function closeLockMillis(){
+    const amount=Math.max(0,Math.min(999999,Math.trunc(Number($('secretAutoLockAmount').value)||0)));
+    const unit=['seconds','minutes','hours'].includes($('secretAutoLockUnit').value)
+      ?$('secretAutoLockUnit').value:'seconds';
+    return amount*(unit==='hours'?3600000:unit==='minutes'?60000:1000);
+  }
+  function saveCloseLockPreference(){
+    const amount=Math.max(0,Math.min(999999,Math.trunc(Number($('secretAutoLockAmount').value)||0)));
+    const unit=['seconds','minutes','hours'].includes($('secretAutoLockUnit').value)
+      ?$('secretAutoLockUnit').value:'seconds';
+    $('secretAutoLockAmount').value=String(amount);
+    try{localStorage.setItem(CLOSE_LOCK_PREF,JSON.stringify({amount,unit}));}catch{}
+  }
+  try{
+    const saved=JSON.parse(localStorage.getItem(CLOSE_LOCK_PREF)||'null');
+    $('secretAutoLockAmount').value=String(Math.max(0,Math.min(999999,Math.trunc(Number(saved?.amount)||0))));
+    $('secretAutoLockUnit').value=['seconds','minutes','hours'].includes(saved?.unit)?saved.unit:'seconds';
+  }catch{
+    $('secretAutoLockAmount').value='0';$('secretAutoLockUnit').value='seconds';
+  }
+  // The timer applies AFTER the Secret Bookmarks window is closed, not while
+  // the user is actively editing or viewing it. Zero is the secure default.
+  function scheduleCloseLock(){
+    clearTimeout(autoLockTimer);autoLockTimer=null;
+    if(!status.unlocked)return;
+    const ms=closeLockMillis();
+    if(ms===0){void lock(true);return;}
+    closeDeadline=Date.now()+ms;
+    const step=()=>{
+      if(!screen.hidden||!status.unlocked)return;
+      const remaining=closeDeadline-Date.now();
+      if(remaining<=0){void lock(true);return;}
+      autoLockTimer=setTimeout(step,Math.min(remaining,2147483647));
+    };
+    step();
+  }
   function close(){
+    if(screen.hidden)return;
     clearPasswordForms();
     eraseUnsavedSecretEditor();
     overlay(false);
@@ -224,27 +272,32 @@
     $('secretCode').value='';
     pendingAdd=null;pendingDrop=null;pendingNormalId=null;editorTrueTitle='';
     entryTask=null;$('secretAccessCode').value='';$('secretAccessForm').hidden=true;
+    // The native key is erased immediately at the default 0 seconds.
+    scheduleCloseLock();
   }
-  async function lock(){
-    clearPasswordForms();
-    eraseUnsavedSecretEditor();
-    try{await request('secret-lock');}catch(error){tell(error.message);return;}
-    status.unlocked=false;
-    updateState(status);
-    $('secretCode').value='';
-    $('secretEditor').hidden=true;
-    $('secretAccessForm').hidden=true;
-    $('secretAccessCode').value='';
-    entryTask=null;
-    selected.clear();
-    clearTimeout(autoLockTimer);
-    tell('Secret Bookmarks locked. The encryption key was cleared from Minternet memory.');
+  async function lock(quiet=false){
+    if(lockPromise)return lockPromise;
+    clearTimeout(autoLockTimer);autoLockTimer=null;closeDeadline=0;
+    const operation=(async()=>{
+      clearPasswordForms();
+      eraseUnsavedSecretEditor();
+      await request('secret-lock');
+      updateState({unlocked:false,items:[]});
+      $('secretCode').value='';
+      $('secretEditor').hidden=true;
+      $('secretAccessForm').hidden=true;
+      $('secretAccessCode').value='';
+      entryTask=null;selected.clear();
+      if(!quiet)tell('Secret Bookmarks locked. The encryption key was cleared from Minternet memory.');
+    })();
+    lockPromise=operation;
+    try{await operation;}
+    catch(error){tell(error.message);}
+    finally{lockPromise=null;}
   }
   function armLock(){
-    clearTimeout(autoLockTimer);
-    autoLockTimer=setTimeout(()=>{
-      if(status.unlocked)void lock();
-    },10*60*1000);
+    // Activity while the panel is open must not unexpectedly lock it.
+    if(screen.hidden&&status.unlocked)scheduleCloseLock();
   }
   function ancestry(id){
     const chain=[];let node=status.items.find(x=>x.id===id);
@@ -452,18 +505,35 @@
   async function openAuthorized(ids){
     const result=await request('secret-open',{ids});
     const tabIds=result.tabIds||[];
-    let grouped=true;
-    if(tabIds.length>1){
-      const groups=window.minternetGroups;
-      grouped=Boolean(groups&&await waitForGroupTabs(groups,tabIds));
-      const g=grouped?groups.createGroup(savePreference(),'violet'):null;
-      grouped=Boolean(g);
-      if(g)for(const id of tabIds)if(!groups.assign(id,g.id))grouped=false;
+    // Visible aliases, not true page titles/addresses, appear beneath the
+    // dedicated Secret Group. Keep this mapping in RAM, never in synced tabs.
+    for(let i=0;i<tabIds.length;i++){
+      const item=status.items.find(entry=>entry.id===ids[i]);
+      secretTabNames.set(tabIds[i],item?.visibleName||'Secret Tab');
     }
+    let grouped=false;
+    const groups=window.minternetGroups;
+    if(tabIds.length&&groups&&await waitForGroupTabs(groups,tabIds)){
+      const groupName=savePreference();
+      let groupId=null;
+      try{groupId=localStorage.getItem(GROUP_ID_PREF);}catch{}
+      let group=groupId?groups.get(groupId):null;
+      if(!group){
+        group=groups.createGroup(groupName,'violet');
+        if(group)try{localStorage.setItem(GROUP_ID_PREF,group.id);}catch{}
+      }else if(group.name!==groupName||group.collapsed||!group.visible){
+        groups.updateGroup(group.id,{name:groupName,visible:true,collapsed:false});
+      }
+      if(group){
+        grouped=true;
+        for(const id of tabIds)if(!groups.assign(id,group.id))grouped=false;
+      }
+    }
+    window.minternetRenderTabs?.();
     selected.clear();render();
     tell(tabIds.length+' Secret Bookmark'+(tabIds.length===1?'':'s')+
-      ' authorized and opened unloaded in the background. Press the eye to load.'+
-      (!grouped?' Could not assign all tabs to a group.':''));
+      ' opened unloaded inside the '+savePreference()+' group. Press the eye to load.'+
+      (!grouped?' Group assignment could not be verified.':''));
     armLock();
   }
   async function reveal(){
@@ -641,24 +711,18 @@
   }
   function installStarHold(){
     const star=$('bookmarkThisPage');if(!star)return;
-    let timer=null,activated=false;
+    let timer=null;
     const start=event=>{
       if(event.button!==0 || star.disabled)return;
-      activated=false;
       clearTimeout(timer);
       timer=setTimeout(()=>{
-        activated=true;suppressStarClick=true;
-        star.classList.add('secret-star-flash');
-        let done=false;
-        const finish=()=>{
-          if(done)return;
-          done=true;star.classList.remove('secret-star-flash');addPage();
-        };
-        star.addEventListener('animationend',finish,{once:true});
-        setTimeout(finish,1050);
-      },620);
+        timer=null;suppressStarClick=true;
+        // Save immediately on the hold threshold: no extra animation-end
+        // wait, flashing repaint, or artificial one-second timeout.
+        addPage();
+      },420);
     };
-    const stop=()=>clearTimeout(timer);
+    const stop=()=>{clearTimeout(timer);timer=null;};
     star.addEventListener('pointerdown',start);
     for(const event of ['pointerup','pointercancel','pointerleave'])star.addEventListener(event,stop);
     star.addEventListener('click',event=>{
@@ -685,6 +749,8 @@
   $('secretClose').addEventListener('click',close);
   $('secretBackdrop').addEventListener('click',close);
   $('secretLock').addEventListener('click',()=>void lock());
+  $('secretAutoLockAmount').addEventListener('change',saveCloseLockPreference);
+  $('secretAutoLockUnit').addEventListener('change',saveCloseLockPreference);
   $('secretNewFolder').addEventListener('click',()=>editor('folder'));
   $('secretAddPage').addEventListener('click',()=>addPage());
   $('secretAddLink').addEventListener('click',()=>editor('link'));
@@ -707,6 +773,8 @@
   });
   api.onState(state=>{
     lastState=state;
+    const current=new Set(state.tabs.map(tab=>tab.id));
+    for(const id of secretTabNames.keys())if(!current.has(id))secretTabNames.delete(id);
     const active=state.tabs.find(tab=>tab.id===state.activeId);
     $('secretPendingScreen').hidden=!active?.secretPending;
     document.documentElement.classList.toggle('secret-active',Boolean(active?.secretTab));
