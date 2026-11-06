@@ -548,6 +548,35 @@ impl Browser {
     }
 }
 
+#[cfg(test)]
+mod secret_tab_privacy_tests {
+    use super::*;
+    #[test]
+    fn secret_urls_titles_and_history_do_not_appear_in_public_snapshot() {
+        let mut browser=Browser::new();
+        let id=browser.add(true).unwrap();
+        let tab=browser.tabs.iter_mut().find(|t|t.id==id).unwrap();
+        tab.secret_id=Some("opaque-secret-id".into());
+        tab.secret_revealed=true;
+        tab.url="https://hidden.example/private?very_secret=token".into();
+        tab.title="Top Secret Site".into();
+        tab.history=vec![tab.url.clone()];
+        let snap=browser.snapshot();
+        let public=snap.tabs.first().unwrap();
+        assert_eq!(public.url,HOME);
+        assert_eq!(public.title,"Secret Tab");
+        assert!(public.secret_tab);
+        assert!(!public.secret_pending);
+        assert!(public.private);
+        assert!(!public.can_back && !public.can_forward);
+        let bytes=serde_json::to_string(&snap).unwrap();
+        assert!(!bytes.contains("hidden.example"));
+        assert!(!bytes.contains("Top Secret Site"));
+        browser.tabs[0].secret_revealed=false;
+        assert!(browser.snapshot().tabs[0].secret_pending);
+    }
+}
+
 // Only non-private, HTTPS pinned pages survive application restarts.
 // The file is in Minternet's own user profile, never beside the single EXE.
 fn pinned_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
