@@ -14,7 +14,7 @@ const MAX_ITEMS:usize=1800;
 const MAX_BYTES:usize=1_900_000;
 const MAX_DEPTH:usize=12;
 const AAD:&[u8]=b"Minternet.SecretBookmarks.v1|XChaCha20Poly1305|Argon2id";
-#[derive(Serialize,Deserialize,Clone)]
+#[derive(Serialize,Deserialize,Clone,PartialEq,Eq)]
 #[serde(rename_all="camelCase")]
 pub struct PublicItem{
     id:String, parent:Option<String>, kind:String, visible_name:String,
