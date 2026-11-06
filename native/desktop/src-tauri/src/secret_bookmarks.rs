@@ -1,7 +1,7 @@
 //! Secret Bookmarks are isolated from ordinary localStorage, Sync and Undo.
 //! No bookmark URL or true title is stored outside authenticated ciphertext.
 //! The user-approved visible labels/folder layout remain available when locked.
-use std::{fs,path::PathBuf,time::{Duration,Instant}};
+use std::{fs,io::{Seek,SeekFrom,Write},path::PathBuf,time::{Duration,Instant}};
 use argon2::{Argon2,Algorithm,Version,Params};
 use chacha20poly1305::{XChaCha20Poly1305,XNonce,KeyInit,aead::{Aead,Payload}};
 use rand::{rngs::OsRng,RngCore};
@@ -199,6 +199,83 @@ impl SecretVault{
         if disk.version==1{
             if let Err(error)=self.save(path){self.lock();return Err(error);}
         }
+        self.status(path)
+    }
+    /// Rekey only the folder's authenticated outer layer. The separately
+    /// Argon2id-sealed bookmark URLs are untouched: their independent entry
+    /// codes remain mandatory even after the folder password changes.
+    pub fn change_password(&mut self,path:&PathBuf,current:&str,new_code:&str)->Result<Value,String>{
+        if !self.unlocked(){return Err("Unlock the Secret Folder first".into());}
+        if self.retry_after.is_some_and(|deadline|Instant::now()<deadline){
+            return Err("Too many attempts; try again shortly".into());
+        }
+        if current==new_code {return Err("Choose a different folder password".into());}
+        let disk=load(path)?;
+        let salt=self.salt.ok_or("Secret Folder key is unavailable")?;
+        if salt!=disk.salt{return Err("The vault has changed on disk; lock and reopen it".into());}
+        let mut supplied=derive(current,&salt)?;
+        let key=self.key.as_ref().ok_or("Unlock Secret Folder first")?;
+        let mut difference=0u8;
+        for i in 0..32{difference|=supplied[i]^key[i];}
+        supplied.zeroize();
+        if difference!=0{
+            self.bad_code();
+            return Err("Current Secret Folder password is incorrect".into());
+        }
+        let mut new_salt=[0u8;16];OsRng.fill_bytes(&mut new_salt);
+        let new_key=derive(new_code,&new_salt)?;
+        let old_salt=self.salt.replace(new_salt).ok_or("Missing original salt")?;
+        let mut old_key=self.key.replace(new_key).ok_or("Missing original key")?;
+        if let Err(error)=self.save(path){
+            if let Some(mut failed)=self.key.replace(old_key){failed.zeroize();}
+            self.salt=Some(old_salt);
+            return Err(error);
+        }
+        old_key.zeroize();
+        self.failed_attempts=0;self.retry_after=None;
+        self.status(path)
+    }
+
+    /// Best-effort overwrites are complementary to cryptographic erasure.
+    /// Filesystem snapshots, SSD wear-leveling, antivirus copies and cloud
+    /// backups cannot be overwritten reliably by ordinary app software.
+    pub fn reset_without_password(&mut self,path:&PathBuf)->Result<Value,String>{
+        // Clear live folder key and decrypted folder index before disk access.
+        self.lock();
+        self.failed_attempts=0;self.retry_after=None;
+        for candidate in [path.to_path_buf(),path.with_extension("tmp")]{
+            let metadata=match fs::symlink_metadata(&candidate){
+                Ok(meta)=>meta,
+                Err(e) if e.kind()==std::io::ErrorKind::NotFound=>continue,
+                Err(e)=>return Err(format!("Cannot inspect encrypted vault: {e}")),
+            };
+            if !metadata.file_type().is_file() || metadata.len()>(MAX_BYTES+500_000) as u64{
+                return Err("Refusing to overwrite an unexpected secret-vault file".into());
+            }
+            let mut file=fs::OpenOptions::new().write(true).open(&candidate)
+                .map_err(|e|format!("Cannot open encrypted vault for reset: {e}"))?;
+            let mut remaining=metadata.len();
+            let mut scratch=[0u8;65536];
+            for _ in 0..3 {
+                file.seek(SeekFrom::Start(0)).map_err(|e|e.to_string())?;
+                remaining=metadata.len();
+                while remaining>0{
+                    let count=(remaining as usize).min(scratch.len());
+                    OsRng.fill_bytes(&mut scratch[..count]);
+                    file.write_all(&scratch[..count]).map_err(|e|e.to_string())?;
+                    remaining-=count as u64;
+                }
+                // Request actual file writes before advancing each random pass.
+                file.sync_all().map_err(|e|e.to_string())?;
+            }
+            scratch.zeroize();
+            file.set_len(0).map_err(|e|e.to_string())?;
+            file.sync_all().map_err(|e|e.to_string())?;
+            drop(file);
+            fs::remove_file(&candidate).map_err(|e|format!("Vault deletion failed: {e}"))?;
+        }
+        // No new vault or replacement password is created here. The next
+        // operation must explicitly create a fresh vault with a fresh salt.
         self.status(path)
     }
     pub fn save(&self,path:&PathBuf)->Result<(),String>{
