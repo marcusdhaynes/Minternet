@@ -4003,7 +4003,7 @@ fn main() {
                                       $('bookmarkName').value = 'Folder Menu Test';
                                       $('bookmarkEditForm').requestSubmit();
                                       const data = window.minternetBookmarks.getState();
-                                      const root = data.items.findLast(n => n.kind === 'folder' && n.name === 'Folder Menu Test');
+                                      const root = window.MinternetBookmarks.barItems(data).findLast(n => n.kind === 'folder' && n.name === 'Folder Menu Test');
                                       if (!root) return;
                                       window.minternetBookmarks.newFolder(root.id);
                                       $('bookmarkName').value = 'Subfolder Test';
