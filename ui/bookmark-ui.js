@@ -86,9 +86,12 @@
   function fallbackIcons(address){
     const safe=model.url(address);
     if(!safe)return [];
-    const root=model.favicon(safe);
+    // Try the site's HTTPS icon even for a legacy HTTP bookmark; never
+    // display insecure icon resources inside the trusted browser chrome.
+    const secure=safe.replace(/^http:/i,'https:');
+    const root=model.favicon(secure);
     try{
-      const page=new URL(safe);
+      const page=new URL(secure);
       return [
         new URL('./favicon.svg',page).href,
         new URL('./favicon.png',page).href,
@@ -123,7 +126,8 @@
     return promise;
   }
   function tryIcon(slot,address,candidates,index=0){
-    if(index>=candidates.length){slot.textContent='🔖';return;}
+    // Keep the site-specific host-letter icon when no usable favicon exists.
+    if(index>=candidates.length)return;
     const candidate=candidates[index];
     if(faviconBad.has(candidate)){tryIcon(slot,address,candidates,index+1);return;}
     const img=document.createElement('img');
