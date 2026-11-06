@@ -2875,6 +2875,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 let state=app.state::<Mutex<Browser>>();
                 let b=state.lock().map_err(|e|e.to_string())?;
                 let tab=b.tabs.iter().find(|t|t.id==id).ok_or("Unknown tab")?;
+                if tab.secret_id.is_some(){return Err("Secret tabs cannot enter split view".into());}
                 if tab.url==HOME{return Err("Open a webpage before splitting".into());}
                 // When the dragged tab is already active, pair it with another
                 // existing page of the same privacy mode instead of displaying
@@ -3134,7 +3135,11 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 let id=if should_isolate {
                     let opener=b.active_id;
                     b.add_after(true,opener,false)?
-                }else if b.active().is_none(){b.add(false)?}else{b.active_id};
+                }else if b.active().is_none()||b.active().is_some_and(|t|t.secret_id.is_some()){
+                    // Address-bar navigation from a secret tab creates a
+                    // normal tab; it cannot silently load a concealed tab.
+                    b.add(false)?
+                }else{b.active_id};
                 if let Some(tab)=b.tabs.iter_mut().find(|tab|tab.id==id){
                     tab.pending_chatgpt=pending;
                 }
@@ -3248,9 +3253,18 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                         b.tabs.iter().find(|t|t.id!=id)).map(|t|t.id).unwrap_or(0);
                 }
                 let tab=b.tabs.iter_mut().find(|t|t.id==id).ok_or("Tab not found")?;
+                if name=="reload-tab"&&tab.secret_id.is_some()&&!tab.secret_revealed{
+                    return Err("Press the privacy eye before loading this Secret Tab".into());
+                }
                 let label=if name=="unload-tab"{
                     tab.loading=false;tab.checking_unload=false;
                     tab.audio_playing=false;tab.audio_muted=false;
+                    if tab.secret_id.is_some(){
+                        tab.secret_revealed=false;
+                        tab.url=HOME.into();
+                        tab.history=vec![HOME.into()];
+                        tab.at=0;
+                    }
                     tab.view.take()
                 }else{
                     if tab.view.is_some(){tab.loading=true;}
@@ -3303,6 +3317,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 let state = app.state::<Mutex<Browser>>();
                 let mut b = state.lock().map_err(|e|e.to_string())?;
                 let t = b.active_mut().ok_or("No tab")?;
+                if t.secret_id.is_some(){return Err("Secret tabs cannot change privacy mode".into());}
                 let old = t.view.take();
                 t.private = !t.private;
                 t.history = vec![t.url.clone()];
