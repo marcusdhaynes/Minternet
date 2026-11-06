@@ -142,6 +142,7 @@
     }
     return [
       item('↗  Open in New Tab',()=>b?.openInNewTab(bookmarkId)),
+      item('◈  Move to Secret Bookmarks…',()=>window.minternetSecrets?.addFromNormal(bookmarkId)),
       sep(),
       item('✎  Edit Name…',()=>b?.edit(bookmarkId)),
       item('×  Delete Bookmark',()=>b?.deleteBookmark(bookmarkId))
@@ -152,6 +153,7 @@
     return [
       item('📁  New Folder…',()=>b?.newFolder(null)),
       item('☆  Bookmark This Page',()=>b?.toggleBookmark()),
+      item('◈  Add to Secret Bookmarks…',()=>window.minternetSecrets?.addPage()),
       item('⚙  Manage Bookmarks…',()=>b?.manager()),
       sep(),
       item((state()?.visible?'✓  ':'')+'Show Bookmark Bar',()=>b?.toggleBar())
