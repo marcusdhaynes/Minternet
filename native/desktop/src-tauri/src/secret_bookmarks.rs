@@ -202,8 +202,13 @@ impl SecretVault{
         let parsed=serde_json::from_slice::<Vec<Entry>>(&clear);
         clear.zeroize();
         let entries=parsed.map_err(|_|"Secret vault payload invalid".to_string())?;
-        if entries.len()>MAX_ITEMS ||
-            (disk.version==1 && visible_json(&entries)!=disk.visible) {
+        // Old v1 sidecars contain only these four fields. Check them without
+        // comparing the new versioned encryption-mode flags.
+        let old_sidecar_valid=disk.visible.len()==entries.len() &&
+            disk.visible.iter().zip(&entries).all(|(pub_item,entry)|
+                pub_item.id==entry.id && pub_item.parent==entry.parent &&
+                pub_item.kind==entry.kind && pub_item.visible_name==entry.visible_name);
+        if entries.len()>MAX_ITEMS || (disk.version==1 && !old_sidecar_valid) {
             key.zeroize();return Err("Secret vault metadata failed integrity validation".into());
         }
         self.lock();self.key=Some(key);self.salt=Some(disk.salt);self.entries=entries;
