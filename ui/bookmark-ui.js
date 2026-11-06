@@ -401,7 +401,7 @@
     };
     const destinationDepth=parentId==null?1:(model.location(data,parentId)?.depth??0)+1;
     measure(items,destinationDepth);
-    if(model.count(data)+total>model.MAX_ITEMS||maxDepth>=12){
+    if(model.count(data)+total>model.MAX_ITEMS||maxDepth>=13){
       toast('Folder cannot fit: too many bookmarks or nested folder levels.');
       return 0;
     }
