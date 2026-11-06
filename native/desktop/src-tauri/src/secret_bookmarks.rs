@@ -21,7 +21,8 @@ const ITEM_AAD:&[u8]=b"Minternet.SecretBookmarks.Item.v2|XChaCha20Poly1305|Argon
 #[serde(rename_all="camelCase")]
 pub struct PublicItem{
     id:String, parent:Option<String>, kind:String, visible_name:String,
-    bind_visible_name:bool, legacy_code_required:bool,
+    #[serde(default)] bind_visible_name:bool,
+    #[serde(default)] legacy_code_required:bool,
 }
 #[derive(Serialize,Deserialize,Clone)]
 struct SealedEntry {
