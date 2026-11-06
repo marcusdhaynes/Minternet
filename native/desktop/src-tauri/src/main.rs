@@ -3,6 +3,7 @@ mod password_vault;
 mod browsing_history;
 mod google_account;
 mod firefox_bookmarks;
+mod secret_bookmarks;
 use base64::Engine as _;
 use rand::{rngs::OsRng,RngCore};
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -49,6 +50,8 @@ struct Tab {
     opener_id: Option<u32>,
     pending_chatgpt: Option<PendingChatPrompt>,
     sync_id: String,
+    secret_id: Option<String>,
+    secret_revealed: bool,
 }
 
 #[derive(Clone, PartialEq, Serialize)]
@@ -68,6 +71,8 @@ struct PublicTab {
     opener_id: Option<u32>,
     sync_id:String,
     error: String,
+    secret_tab: bool,
+    secret_pending: bool,
 }
 
 #[derive(Clone, PartialEq, Serialize)]
@@ -502,6 +507,7 @@ impl Browser {
             inactive_since: None, loading: false, checking_unload: false,
             opener_id: None, pending_chatgpt: None,
             sync_id: new_sync_id(),
+            secret_id:None,secret_revealed:false,
         });
         self.active_id = id;
         Ok(id)
@@ -525,12 +531,18 @@ impl Browser {
             active_id: self.active_id,
             extensions_count: 0,
             tabs: self.tabs.iter().map(|t| PublicTab {
-                id: t.id, title: t.title.clone(), url: t.url.clone(), private: t.private,
-                pinned: t.pinned, audio_playing:t.audio_playing,
-                audio_muted:t.audio_muted, loading: t.loading, can_back: t.at > 0, can_forward: t.at + 1 < t.history.len(),
-                suspended: t.view.is_none() && t.url != HOME,
+                id:t.id,
+                title:if t.secret_id.is_some(){"Secret Tab".into()}else{t.title.clone()},
+                url:if t.secret_id.is_some(){HOME.into()}else{t.url.clone()},
+                private:t.private,pinned:t.pinned,audio_playing:t.audio_playing,
+                audio_muted:t.audio_muted,loading:t.loading,
+                can_back:t.secret_id.is_none() && t.at>0,
+                can_forward:t.secret_id.is_none() && t.at+1<t.history.len(),
+                suspended:t.view.is_none() && t.url!=HOME,
                 opener_id:t.opener_id,sync_id:t.sync_id.clone(),
-                error: String::new(),
+                error:String::new(),
+                secret_tab:t.secret_id.is_some(),
+                secret_pending:t.secret_id.is_some()&&!t.secret_revealed,
             }).collect(),
         }
     }
@@ -1346,6 +1358,7 @@ fn update_from_site(app: &tauri::AppHandle, id: u32, url: &str) {
         let state=app.state::<Mutex<Browser>>();
         if let Ok(mut browser)=state.lock(){
             if let Some(tab)=browser.tabs.iter_mut().find(|tab|tab.id==id){
+                if tab.secret_id.is_some(){return;}
                 if tab.url!=url {
                     pinned_change=tab.pinned && !tab.private;
                     tab.url=url.into();
@@ -1368,7 +1381,7 @@ fn record_page_history(app:&tauri::AppHandle,id:u32,url:&str,title_hint:Option<&
         let state=app.state::<Mutex<Browser>>();
         let Ok(b)=state.lock() else{return};
         let Some(tab)=b.tabs.iter().find(|t|t.id==id) else{return};
-        if tab.private{return;}
+        if tab.private||tab.secret_id.is_some(){return;}
         (tab.title.clone(),tab.url.clone())
     };
     if details.1!=url{return;}
@@ -1528,6 +1541,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
             let mut confirmed_in_app = false;
             if let Ok(mut browser) = state.lock() {
                 if let Some(tab) = browser.tabs.iter_mut().find(|tab| tab.id == id) {
+                    if tab.secret_id.is_some(){return;}
                     // A real webview title from example.com is observable
                     // only after the website loaded inside this child WebView.
                     confirmed_in_app = tab.url.starts_with("https://example.com/")
@@ -1853,6 +1867,13 @@ fn activated(app: &tauri::AppHandle) -> Result<(), String> {
         display_active(app);
         return Ok(());
     };
+    let pending_secret={
+        let store=app.state::<Mutex<Browser>>();
+        store.lock().ok().and_then(|b|b.tabs.iter().find(|t|t.id==id)
+            .map(|t|t.secret_id.is_some()&&!t.secret_revealed)).unwrap_or(false)
+    };
+    // Even activation of a suspended Secret Tab never loads it.
+    if pending_secret {display_active(app);return Ok(());}
     if url != HOME && !view_exists {
         navigate_tab(app, id, Some(tauri::Url::parse(&url).map_err(|e| e.to_string())?), false)?;
     } else { display_active(app); }
@@ -3213,6 +3234,7 @@ fn main() {
         .manage(UndoHistory(Mutex::new(VecDeque::new())))
         .manage(Mutex::new(Browser::new()))
         .manage(Mutex::new(password_vault::Vault::default()))
+        .manage(Mutex::new(secret_bookmarks::SecretVault::default()))
         .manage(Mutex::new(google_account::GoogleState::default()))
         .manage(Mutex::new(LayoutCache::default()))
         .invoke_handler(tauri::generate_handler![browser_action, browser_snapshot])
