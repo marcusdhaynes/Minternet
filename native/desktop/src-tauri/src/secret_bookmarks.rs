@@ -282,7 +282,7 @@ impl SecretVault{
         let mut key=derive(code,&salt)?;
         if title.len()>512||url.len()>4096{return Err("Secret preview too large".into());}
         if !url.is_empty()&&!url_valid(url){return Err("Invalid secret website URL".into());}
-        let cipher=XChaCha20Poly1305::new_from_slice(key)
+        let cipher=XChaCha20Poly1305::new_from_slice(&key)
             .map_err(|_|"Cipher initialization failed")?;
         fn encode_preview(cipher:&XChaCha20Poly1305,plain:&[u8])->Result<String,String>{
             let mut nonce=[0u8;24];OsRng.fill_bytes(&mut nonce);
@@ -343,7 +343,7 @@ impl SecretVault{
             return Err("Too many incorrect attempts; try again shortly".into());
         }
         if ids.is_empty()||ids.len()>35{return Err("Select 1–35 bookmarks".into());}
-        let mut keys=Vec::with_capacity(ids.len());
+        let mut keys:Vec<[u8;32]>=Vec::with_capacity(ids.len());
         for id in ids{
             let entry=self.entries.iter().find(|e|e.id==*id&&e.kind=="link")
                 .ok_or("Secret Bookmark not found")?;
