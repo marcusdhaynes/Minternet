@@ -14,6 +14,7 @@
   <script src="./search-settings.js" defer></script>
   <script src="./app.js" defer></script>
   <script src="./bookmark-ui.js" defer></script>
+  <script src="./secret-bookmarks.js" defer></script>
   <script src="./tab-group-ui.js" defer></script>
   <script src="./chrome-native-menu.js" defer></script>
   <script src="./password-ui.js" defer></script>
@@ -90,6 +91,7 @@
     </div>
     <div class="bookmark-bar" id="bookmarkBar" aria-label="Bookmark Bar" hidden>
       <div class="bookmark-items" id="bookmarkItems"></div>
+      <button type="button" id="secretBookmarksBar" class="bookmark-item secret-root-trigger" title="Secret Bookmarks" aria-label="Secret Bookmarks">◈</button>
       <button class="bookmark-mini" id="bookmarkBarManage" title="Manage Bookmarks" aria-label="Manage Bookmarks">⋯</button>
     </div>
   </header>
@@ -157,6 +159,7 @@
     </aside>
     <aside id="bookmarkManager" class="bookmark-panel bookmark-manager" hidden aria-label="Bookmark Manager">
       <div class="bookmark-panel-head"><strong>Bookmarks</strong><button id="bookmarkImportFile" class="bookmark-mini" type="button" title="Import bookmarks and folders from another browser">⇩</button><input id="bookmarkImportInput" type="file" accept=".html,.htm,.json,.url,.txt,text/html,application/json" multiple hidden><button id="bookmarkManageNewFolder" title="New Folder" class="bookmark-mini">📁＋</button><button id="bookmarkManageNewLink" title="New Bookmark" class="bookmark-mini">☆＋</button><button id="bookmarkManageClose" class="bookmark-close" aria-label="Close Bookmarks">×</button></div>
+      <button id="secretBookmarksManager" class="bookmark-tree-line secret-root-manager" type="button" data-secret-target="root" aria-label="Open Secret Bookmarks">◈　Secret Bookmarks <span>›</span></button>
       <div id="bookmarkTree" class="bookmark-tree"></div>
       <div class="bookmark-panel-foot bookmark-hint">Drag bookmarks or folders here · ⇩ to import</div>
     </aside>
@@ -173,6 +176,68 @@
         <div class="bookmark-editor-buttons"><button type="button" id="bookmarkRemove" class="bookmark-delete" hidden>Delete</button><span class="bookmark-fill"></span><button type="button" id="bookmarkCancel">Cancel</button><button type="submit" class="bookmark-save">Save</button></div>
       </form>
     </aside>
+  </section>
+  <section id="secretScreen" class="secret-screen" hidden aria-label="Encrypted Secret Bookmarks">
+    <div id="secretBackdrop" class="secret-backdrop"></div>
+    <aside class="secret-panel" role="dialog" aria-modal="true" aria-label="Secret Bookmarks">
+      <div class="secret-heading">
+        <span class="secret-heading-icon">◈</span><strong>Secret Bookmarks</strong>
+        <button type="button" id="secretLock" title="Lock secret vault">Lock</button>
+        <button type="button" id="secretClose" aria-label="Close Secret Bookmarks">×</button>
+      </div>
+      <p id="secretMessage" class="secret-description">A separate encrypted vault. Site addresses and real titles never appear in the bookmark list.</p>
+      <form id="secretAuthForm" class="secret-auth" autocomplete="off">
+        <label>Secret Code <small>(1–16 characters, including symbols)</small>
+          <input id="secretCode" type="password" autocomplete="new-password" spellcheck="false"
+            autocapitalize="none" maxlength="32" required placeholder="Your separate secret code">
+        </label>
+        <p class="secret-advice">Use a random 16-character code. Short codes are vulnerable to offline guessing even with strong encryption. Losing this code means losing access to the vault.</p>
+        <button type="submit" id="secretAuthButton">Unlock Secret Bookmarks</button>
+      </form>
+      <div id="secretUnlocked" hidden>
+        <div class="secret-toolbar">
+          <button id="secretNewFolder" type="button">＋ Folder</button>
+          <button id="secretAddPage" type="button">☆ Save Page</button>
+          <button id="secretAddLink" type="button">＋ Bookmark</button>
+          <button id="secretOpenSelected" type="button">◈ Open Selected</button>
+        </div>
+        <div id="secretBreadcrumb" class="secret-breadcrumb" aria-label="Folder navigation"></div>
+        <div id="secretTree" class="secret-tree" role="list"></div>
+      </div>
+      <form id="secretEditor" class="secret-editor" hidden autocomplete="off">
+        <strong id="secretEditorTitle">New Secret Bookmark</strong>
+        <label>Visible Name <small>(Optional)</small>
+          <input id="secretVisibleName" type="text" maxlength="100" placeholder="Optional label only">
+        </label>
+        <label id="secretUrlLabel">Website URL
+          <input id="secretUrl" type="url" spellcheck="false" autocomplete="off" placeholder="https://example.com">
+        </label>
+        <div class="secret-scrambled">Scrambled Name <code id="secretScrambledName"></code></div>
+        <div class="secret-scrambled">Scrambled Link <code id="secretScrambledLink"></code></div>
+        <small class="secret-crypto-note">These previews are random placeholders; fresh authenticated ciphertext is generated locally when saved. The secret code is never stored.</small>
+        <div class="secret-form-actions">
+          <button id="secretDiscard" type="button">Discard</button>
+          <button id="secretSave" type="submit">Encrypt &amp; Save</button>
+        </div>
+      </form>
+      <label class="secret-group-setting">Secret Tabs Group Name
+        <input id="secretGroupName" type="text" maxlength="42" value="#####" placeholder="#####">
+      </label>
+      <small class="secret-foot">Private tabs start unloaded. Press the eye to permit loading. Secret URLs are excluded from normal bookmark storage, saved history and sync.</small>
+    </aside>
+  </section>
+  <section id="secretPendingScreen" class="secret-pending-screen" hidden aria-label="Secret tab is concealed">
+    <div class="secret-pending-content">
+      <span class="secret-pending-caption">PRIVATE · UNLOADED</span>
+      <button id="secretReveal" type="button" class="secret-reveal-eye" title="Reveal and load this website" aria-label="Reveal and load Secret Bookmark">
+        <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-linecap="round" stroke-width="2">
+          <path d="M4 32S14 15 32 15s28 17 28 17-10 17-28 17S4 32 4 32Z"/>
+          <circle cx="32" cy="32" r="9"/>
+          <path d="M14 49 50 15"/>
+        </svg>
+      </button>
+      <p>Press the eye to load this Secret Bookmark</p>
+    </div>
   </section>
   <section id="groupEditorScreen" class="group-editor-screen" hidden aria-label="Tab Group Editor">
     <div id="groupEditorBackdrop" class="group-editor-backdrop"></div>
