@@ -388,10 +388,15 @@
     });
     menu.append(add,normal);
     document.body.append(menu);starMenu=menu;
+    // A native child WebView2 can overlap an HTML popup unless the trusted
+    // browser chrome is raised while this context menu is open.
+    if(window.__TAURI__)void api.command('chrome-overlay',true);
     menu.style.left=Math.max(5,Math.min(event.clientX,window.innerWidth-235))+'px';
     menu.style.top=Math.max(5,Math.min(event.clientY,window.innerHeight-75))+'px';
     const dismiss=e=>{if(menu.contains(e.target))return;
       menu.remove();if(starMenu===menu)starMenu=null;
+      if(screen.hidden&&$('bookmarkOverlay')?.hidden&&window.__TAURI__)
+        void api.command('chrome-overlay',false);
       document.removeEventListener('pointerdown',dismiss,true);
     };
     document.addEventListener('pointerdown',dismiss,true);
@@ -406,10 +411,13 @@
       timer=setTimeout(()=>{
         activated=true;suppressStarClick=true;
         star.classList.add('secret-star-flash');
-        star.addEventListener('animationend',()=>{
-          star.classList.remove('secret-star-flash');
-          addPage();
-        },{once:true});
+        let done=false;
+        const finish=()=>{
+          if(done)return;
+          done=true;star.classList.remove('secret-star-flash');addPage();
+        };
+        star.addEventListener('animationend',finish,{once:true});
+        setTimeout(finish,1050);
       },620);
     };
     const stop=()=>clearTimeout(timer);
