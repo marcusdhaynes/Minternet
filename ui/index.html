@@ -192,7 +192,7 @@
       </div>
       <form id="secretPasswordChangeForm" class="secret-security-form" autocomplete="off" hidden>
         <strong>Change Secret Folder Password</strong>
-        <p>Changing the folder password preserves all encrypted bookmarks. Your individual bookmark entry codes stay unchanged.</p>
+        <p>Changing the folder password securely re-encrypts all current-format bookmarks. Older bookmarks using former separate codes can be upgraded using those codes.</p>
         <label>Current Folder Password
           <input id="secretOldPassword" type="password" autocomplete="off" spellcheck="false" required maxlength="64">
         </label>
@@ -227,19 +227,19 @@
           <input id="secretCode" type="password" autocomplete="new-password" spellcheck="false"
             autocapitalize="none" maxlength="32" required placeholder="Your separate secret code">
         </label>
-        <p class="secret-advice">Use a random 16-character folder password. Each individual bookmark also requires a different, independently derived entry code. Losing either code can make the protected data unrecoverable.</p>
+        <p class="secret-advice">Use a strong, preferably random 16-character folder password. Secret Bookmarks use this password; a second code is not required. Your Optional Visible Name can also be included in each bookmark's encryption key.</p>
         <button type="submit" id="secretAuthButton">Unlock Secret Bookmarks</button>
       </form>
       <form id="secretAccessForm" class="secret-auth secret-access" autocomplete="off" hidden>
-        <strong id="secretAccessTitle">Bookmark Entry Code</strong>
-        <p id="secretAccessMessage" class="secret-advice">Each bookmark is encrypted with its own separate entry code. One entry can unlock a batch sharing the same code.</p>
-        <label>Bookmark Entry Code <small>(1–16 characters; independent from folder password)</small>
+        <strong id="secretAccessTitle">Upgrade Older Bookmarks</strong>
+        <p id="secretAccessMessage" class="secret-advice">Only bookmarks saved by older Minternet versions may need a one-time migration using their former entry code.</p>
+        <label>Previous Bookmark Entry Code <small>(Only for migrating old bookmarks)</small>
           <input id="secretAccessCode" type="password" autocomplete="off" spellcheck="false"
-            autocapitalize="none" maxlength="64" required placeholder="Your independent bookmark code">
+            autocapitalize="none" maxlength="64" required placeholder="Former code used on older bookmarks">
         </label>
         <div class="secret-form-actions">
           <button id="secretAccessCancel" type="button">Cancel</button>
-          <button id="secretAccessSubmit" type="submit">Authorize Bookmarks</button>
+          <button id="secretAccessSubmit" type="submit">Upgrade Matching Bookmarks</button>
         </div>
       </form>
       <div id="secretUnlocked" hidden>
@@ -248,6 +248,7 @@
           <button id="secretAddPage" type="button">☆ Save Page</button>
           <button id="secretAddLink" type="button">＋ Bookmark</button>
           <button id="secretOpenSelected" type="button">◈ Open Selected</button>
+          <button id="secretMigrateLegacy" type="button" hidden>Upgrade Old Bookmarks</button>
         </div>
         <div id="secretBreadcrumb" class="secret-breadcrumb" aria-label="Folder navigation"></div>
         <div id="secretTree" class="secret-tree" role="list"></div>
@@ -260,13 +261,13 @@
         <label id="secretUrlLabel">Website URL
           <input id="secretUrl" type="password" inputmode="url" spellcheck="false" autocomplete="off" placeholder="Enter HTTP(S) address (masked)">
         </label>
-        <label id="secretEntryCodeLabel">Independent Bookmark Entry Code <small>(Required, different from the folder password)</small>
-          <input id="secretEntryCode" type="password" spellcheck="false" autocomplete="new-password"
-            autocapitalize="none" maxlength="64" placeholder="1–16 characters, including any symbol">
+        <label id="secretBindVisibleNameLabel" class="secret-name-key-setting">
+          <input id="secretBindVisibleName" type="checkbox" checked>
+          <span>Include Optional Visible Name in Encryption Key <small>Default: On. When checked, the bookmark key uses your Secret Folder Password plus this Visible Name. When unchecked, it uses the Secret Folder Password alone.</small></span>
         </label>
         <div class="secret-scrambled">Scrambled Name <code id="secretScrambledName"></code></div>
         <div class="secret-scrambled">Scrambled Link <code id="secretScrambledLink"></code></div>
-        <small class="secret-crypto-note">These previews use the separate bookmark entry code to produce authenticated ciphertext. Each bookmark is independently encrypted again when saved; the codes are never stored.</small>
+        <small class="secret-crypto-note">Each bookmark uses a fresh salt and authenticated encryption. The optional Visible Name binds its key when checked, but a visible name is not an additional secret. The key and real URL are never returned in the preview.</small>
         <div class="secret-form-actions">
           <button id="secretDiscard" type="button">Discard</button>
           <button id="secretSave" type="submit">Encrypt &amp; Save</button>
