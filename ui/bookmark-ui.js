@@ -384,7 +384,7 @@
         if(node.kind==='folder')measure(node.children,depth+1);
       }
     };
-    const destinationDepth=parentId==null?0:(model.location(data,parentId)?.depth??0)+1;
+    const destinationDepth=parentId==null?1:(model.location(data,parentId)?.depth??0)+1;
     measure(items,destinationDepth);
     if(model.count(data)+total>model.MAX_ITEMS||maxDepth>=12){
       toast('Folder cannot fit: too many bookmarks or nested folder levels.');
@@ -471,7 +471,7 @@
       if(node?.kind==='folder')return id;
     }
     if(target.closest('#bookmarkFolderMenu')&&mode==='folder')return folderId;
-    if(target.closest('#bookmarkBar,#bookmarkManager,#bookmarkTree,#bookmarkItems'))return '';
+    if(target.closest('#bookmarkBar,#bookmarkManager,#bookmarkTree,#bookmarkItems'))return model.BOOKMARK_BAR_ID;
     return null;
   }
   function externalTransfer(dt){
@@ -550,7 +550,7 @@
         toast('Firefox only supplied the folder name; import a bookmarks HTML export to preserve its contents.');
         return;
       }
-      const added=appendImported(items,parent||null);
+      const added=appendImported(items,parent||model.BOOKMARK_BAR_ID);
       if(added){
         toast('Imported '+added+' bookmark'+(added===1?'':'s')+' / folders');
       }else if(!items.length){
@@ -568,7 +568,7 @@
     for(const file of Array.from(event.target.files||[]).slice(0,100)){
       items.push(...await readImportedFile(file));
     }
-    const added=appendImported(items,mode==='folder'?folderId:null);
+    const added=appendImported(items,mode==='folder'?folderId:model.BOOKMARK_BAR_ID);
     toast(added?'Imported '+added+' items':'No supported bookmarks found in selected files');
     event.target.value='';
   });
@@ -648,12 +648,12 @@
       contents.append(empty);
     }
     for (const item of folder.children) contents.append(entryForMenu(item));
-
+    $('bookmarkFolderEdit').hidden=folder.id===model.BOOKMARK_BAR_ID;
   }
   function renderManager() {
     const tree = $('bookmarkTree');
     tree.replaceChildren();
-    if (!data.items.length) {
+    if (!model.barItems(data).length) {
       const empty = document.createElement('div');
       empty.className = 'bookmark-settings-foot';
       empty.textContent = 'No bookmarks yet · Create a folder or star a page.';
@@ -690,13 +690,15 @@
           add.addEventListener('click', () => openEditor('folder', null, item.id));
           row.append(add);
         }
-        const editButton = document.createElement('button');
-        editButton.className = 'action';
-        editButton.textContent = '✎';
-        editButton.title = 'Edit / Move';
-        editButton.setAttribute('aria-label', 'Edit ' + textFor(item));
-        editButton.addEventListener('click', () => edit(item.id));
-        row.append(editButton);
+        if(item.id!==model.BOOKMARK_BAR_ID){
+          const editButton = document.createElement('button');
+          editButton.className = 'action';
+          editButton.textContent = '✎';
+          editButton.title = 'Edit / Move';
+          editButton.setAttribute('aria-label', 'Edit ' + textFor(item));
+          editButton.addEventListener('click', () => edit(item.id));
+          row.append(editButton);
+        }
         tree.append(row);
         if (item.kind === 'folder') walk(item.children, depth + 1);
       }
@@ -704,12 +706,14 @@
     walk(data.items, 0);
   }
   function edit(id) {
+    if(id===model.BOOKMARK_BAR_ID)return openFolder(id);
     const node = model.find(data, id);
     if (!node) return toast('Bookmark not found');
     const info = model.location(data, id);
     openEditor(node.kind, id, info?.parent?.id ?? null);
   }
   function openEditor(kind, id = null, parentId = null) {
+    if(id===model.BOOKMARK_BAR_ID)return openFolder(id);
     const node = id ? model.find(data, id) : null;
     draft = { kind, id, parentId };
     $('bookmarkEditorTitle').textContent = id ? 'Edit ' + (kind === 'folder' ? 'Folder' : 'Bookmark') : 'New ' + (kind === 'folder' ? 'Folder' : 'Bookmark');
@@ -735,17 +739,19 @@
     parentList.replaceChildren();
     const rootOption = document.createElement('option');
     rootOption.value = '';
-    rootOption.textContent = 'Bookmark Bar (Root)';
+    rootOption.value = model.BOOKMARK_BAR_ID;
+    rootOption.textContent = 'Bookmark Bar';
     parentList.append(rootOption);
     for (const f of model.folders(data)) {
+      if(f.id===model.BOOKMARK_BAR_ID)continue;
       const option = document.createElement('option');
       option.value = f.id;
       option.textContent = '  '.repeat(f.depth) + (f.icon && !f.icon.startsWith('data:') ? f.icon + ' ' : '📁 ') + (f.name || 'Unnamed Folder');
       if (id === f.id || (kind === 'folder' && id && model.location(data, f.id)?.depth > model.location(data, id)?.depth && isDescendant(id, f.id))) option.disabled = true;
       parentList.append(option);
     }
-    parentList.value = parentId || '';
-    if (parentList.value !== (parentId || '')) parentList.value = '';
+    parentList.value = parentId || model.BOOKMARK_BAR_ID;
+    if (parentList.value !== (parentId || model.BOOKMARK_BAR_ID)) parentList.value = model.BOOKMARK_BAR_ID;
     setMode('editor');
     $('bookmarkName').focus();
   }
@@ -768,12 +774,12 @@
   function saveEditor(event) {
     event.preventDefault();
     if (!draft) return;
-    const parent = $('bookmarkParent').value || null;
+    const parent = $('bookmarkParent').value || model.BOOKMARK_BAR_ID;
     const name = $('bookmarkName').value;
     const url = draft.kind === 'link' ? model.url($('bookmarkUrl').value) : null;
     if (draft.kind === 'link' && !url) return toast('Enter a valid HTTPS website address.');
     if (draft.id) {
-      if (parent !== draft.parentId && !model.move(data, draft.id, parent)) return toast('Cannot move a folder into itself or its descendant.');
+      if (parent !== (draft.parentId||model.BOOKMARK_BAR_ID) && !model.move(data, draft.id, parent)) return toast('Cannot move a folder into itself or its descendant.');
       if (!model.update(data, draft.id, { name, icon:customIcon, ...(draft.kind === 'link' ? {url} : {}) })) return toast('Could not update this bookmark.');
     } else {
       const item = model.add(data, draft.kind, parent, {name, icon:customIcon, ...(draft.kind === 'link' ? {url} : {})});
@@ -783,7 +789,7 @@
     closeOverlay();
   }
   function deleteEditor() {
-    if (!draft?.id) return;
+    if (!draft?.id || draft.id===model.BOOKMARK_BAR_ID) return;
     const node = model.find(data, draft.id);
     if (node?.kind === 'folder' && node.children.length &&
         !window.confirm('Delete this folder and everything inside it?')) return;
@@ -929,6 +935,11 @@
     currentTitle = tab?.title || '';
     renderStar();
   });
+  // Persist the one-time flat-root to Bookmark Bar migration without Undo.
+  try{
+    const json=JSON.stringify(data);
+    if(localStorage.getItem(STORE)!==json)localStorage.setItem(STORE,json);
+  }catch{}
   // Initial hydration is synchronous and survives portable EXE restarts in the
   // trusted Tauri WebView2 profile, independent of website sessions.
   applyVisibility();
