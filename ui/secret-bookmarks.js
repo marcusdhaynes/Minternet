@@ -1,5 +1,5 @@
 'use strict';
-// Secret Bookmarks never use localStorage for addresses, content, codes, or
+// Secret Bookmarks never use localStorage for addresses, content, or
 // ciphertext. Only the chosen tab-group display name is a public preference.
 (() => {
   const api=window.minternet;
@@ -34,7 +34,7 @@
   function eraseUnsavedSecretEditor(){
     // The editor is the only normal chrome form allowed to hold a secret URL
     // during creation; clear it whenever the editor is hidden.
-    for(const id of ['secretUrl','secretEntryCode'])if($(id))$(id).value='';
+    for(const id of ['secretUrl'])if($(id))$(id).value='';
     editorTrueTitle='';
     previewRevision++;
   }
@@ -87,7 +87,7 @@
       updateState(result);
       finishPasswordForm();
       armLock();
-      tell('Secret Folder password changed. All existing bookmarks and separate entry codes are preserved.');
+      tell('Secret Folder password changed. Existing bookmarks were securely re-encrypted.');
     }catch(error){tell(error.message);}
     finally{
       current='';next='';
@@ -117,7 +117,7 @@
       if(result?.exists!==false)throw new Error('Vault deletion did not complete.');
       selected.clear();folder=null;
       pendingAdd=null;pendingDrop=null;pendingReveal=null;
-      $('secretCode').value='';$('secretEntryCode').value='';$('secretAccessCode').value='';
+      $('secretCode').value='';$('secretAccessCode').value='';
       updateState(result);
       finishPasswordForm();
       tell('Secret Bookmarks vault deleted. Create a NEW folder password to start again. Regular bookmarks and the password manager were not changed.');
@@ -138,23 +138,23 @@
   $('secretGroupNameSettings')?.addEventListener('change',event=>setGroupPreference(event.target.value));
   let previewRevision=0,previewTimer=null;
   function refreshPreview(){
-    // A preview uses the real native XChaCha20-Poly1305 key and a fresh nonce.
-    // Neither the key nor the unencrypted address is ever returned by native.
+    // Native uses the real authenticated encryption algorithm and the exact
+    // folder-key/name-binding mode selected in the editor.
     const revision=++previewRevision;
     clearTimeout(previewTimer);
     $('secretScrambledName').textContent='Encrypting…';
     $('secretScrambledLink').textContent='Encrypting…';
-    if(!window.__TAURI__||!status.unlocked||editMode==='link'&&!$('secretEntryCode').value){
-      $('secretScrambledName').textContent='Enter a separate bookmark code';
-      $('secretScrambledLink').textContent='Encrypted separately from the folder';
-      return;
+    if(!window.__TAURI__||!status.unlocked){
+      $('secretScrambledName').textContent='Unlock Secret Bookmarks to preview';
+      $('secretScrambledLink').textContent='—';return;
     }
     previewTimer=setTimeout(async()=>{
       try{
         const preview=await request('secret-preview',{
           title:editorTrueTitle||$('secretVisibleName').value,
-          url:editMode==='folder'?'':$('secretUrl').value,
-          entryCode:$('secretEntryCode').value
+          visibleName:$('secretVisibleName').value.trim(),
+          bindVisibleName:$('secretBindVisibleName').checked,
+          url:editMode==='folder'?'':$('secretUrl').value
         });
         if(revision!==previewRevision||$('secretEditor').hidden)return;
         $('secretScrambledName').textContent=preview.scrambledName||'—';
@@ -183,6 +183,7 @@
     $('secretAuthButton').textContent=status.exists?'Unlock Secret Folder':'Create Secret Folder Password';
     $('secretChangePassword').hidden=!status.unlocked;
     $('secretResetStart').hidden=!status.exists;
+    $('secretMigrateLegacy').hidden=!status.unlocked||!status.legacyCount;
     if(status.unlocked){
       if(folder&&!status.items.some(item=>item.id===folder&&item.kind==='folder'))folder=null;
       render();
@@ -199,15 +200,15 @@
     overlay(true);
     if(status.unlocked){
       render();
-      if(status.legacyCount>0&&$('secretAccessForm').hidden){
-        promptEntry({kind:'migrate'});
+      if(status.legacyCount>0){
+        tell(status.legacyCount+' older bookmark(s) need a one-time upgrade using their former codes. New bookmarks never need entry codes.');
       }
     }else{
       $('secretAuthButton').textContent=status.exists?'Unlock Secret Folder':'Create Secret Folder Password';
       $('secretCode').value='';
       tell(status.exists?
-        'Unlock the Secret Folder to see its optional labels. Each website still needs its own independent entry code.':
-        'Create the folder password first. Each bookmark will also require a different entry code.');
+        'Unlock the Secret Folder to access all modern encrypted bookmarks with this password.':
+        'Create one Secret Folder password. Individual bookmark codes are not required.');
     }
   }
   function close(){
@@ -228,7 +229,7 @@
     $('secretCode').value='';
     $('secretEditor').hidden=true;
     $('secretAccessForm').hidden=true;
-    $('secretEntryCode').value='';$('secretAccessCode').value='';
+    $('secretAccessCode').value='';
     entryTask=null;
     selected.clear();
     clearTimeout(autoLockTimer);
@@ -286,14 +287,15 @@
     }
     const title=document.createElement('button');title.type='button';title.className='secret-row-title';
     title.textContent=item.visibleName || (kind?'Secret Folder':'◈ Untitled Secret');
-    title.title=kind?'Open Secret Folder':'Open this secret bookmark in an unloaded background tab';
+    title.title=kind?'Open Secret Folder':item.legacyCodeRequired?
+      'Upgrade this older bookmark using its former code':'Open this secret bookmark in an unloaded background tab';
     title.addEventListener('click',()=>{
       if(kind){folder=item.id;render();}
       else void openMany([item.id]);
     });
     row.append(title);
     const edit=document.createElement('button');edit.type='button';edit.className='secret-row-action';
-    edit.textContent='✎';edit.title='Edit visible label';
+    edit.textContent='✎';edit.title='Edit visible label and encryption setting';
     edit.addEventListener('click',()=>editLabel(item));
     const del=document.createElement('button');del.type='button';del.className='secret-row-action';
     del.textContent='×';del.title='Delete encrypted bookmark';
@@ -317,29 +319,18 @@
     $('secretOpenSelected').disabled=!status.items.some(x=>selected.has(x.id));
   }
   function promptEntry(task){
-    if(status.unlocked&&screen.hidden)overlay(true);
-    if(!status.unlocked){
-      // The second code is never a substitute for the folder password.
-      tell('Unlock the Secret Folder first.');
-      void open().catch(error=>tell(error.message));
-      return;
-    }
+    // The only remaining entry-code input is for migration of previously
+    // created bookmarks. New bookmarks never ask for independent codes.
+    if(!status.unlocked){tell('Unlock the Secret Folder first.');return;}
     entryTask=task;
     $('secretEditor').hidden=true;
     $('secretUnlocked').hidden=true;
     $('secretAccessForm').hidden=false;
     $('secretAccessCode').value='';
-    const migration=task.kind==='migrate';
-    $('secretAccessTitle').textContent=migration?'Upgrade Existing Secret Bookmarks':
-      task.kind==='import'?'Encrypt Imported Secret Bookmarks':
-      task.kind==='tab'?'Authorize This Secret Tab':'Enter Bookmark Entry Code';
-    $('secretAccessMessage').textContent=migration?
-      'Existing bookmarks were encrypted under the folder password alone. Choose a DIFFERENT 1–16-character bookmark entry code to independently re-encrypt every old link without losing it.':
-      task.kind==='import'?
-      'Choose an entry code for all imported sites. You will need this code whenever you open them; it must differ from the folder password.':
-      'The folder is unlocked, but URLs and actual site titles remain encrypted. Enter the independently chosen bookmark code. A batch may use one code only if every selected bookmark shares it.';
-    $('secretAccessSubmit').textContent=migration?'Encrypt Existing Links':
-      task.kind==='import'?'Encrypt Import':'Authorize Bookmarks';
+    $('secretAccessTitle').textContent='Upgrade Older Bookmarks';
+    $('secretAccessMessage').textContent=
+      'Only bookmarks created by older Minternet versions used separate entry codes. Enter the previous code once to re-encrypt matching bookmarks using your Secret Folder password and Visible Name. Repeat for other old codes if needed.';
+    $('secretAccessSubmit').textContent='Upgrade Matching Bookmarks';
     $('secretAccessCode').focus();
   }
   function cancelEntry(){
@@ -348,51 +339,36 @@
     if(status.unlocked){$('secretUnlocked').hidden=false;render();}
   }
   async function finishFolderUnlock(){
-    if(status.legacyCount>0){promptEntry({kind:'migrate'});return;}
     if(pendingAdd){
       const item=pendingAdd;pendingAdd=null;
       editor(item.kind,item.url,item.title);
     }else if(pendingDrop){
       const task=pendingDrop;pendingDrop=null;
       if(task.openIds)await openMany(task.openIds);
-      else promptEntry({kind:'import',nodes:task.nodes,parent:task.parent});
+      else await saveDropped(task);
     }else if(pendingReveal!=null){
       const id=pendingReveal;pendingReveal=null;
-      promptEntry({kind:'tab',id});
+      try{
+        await request('secret-authorize-tab',{tabId:id});
+        await request('secret-reveal',{tabId:id});
+      }catch(error){tell(error.message);}
     }
   }
   async function authorizeEntries(event){
     event.preventDefault();
     const task=entryTask;
-    if(!task)return;
+    if(!task||task.kind!=='migrate')return;
     let code=$('secretAccessCode').value;
     if([...code].length<1||[...code].length>16){
-      tell('Bookmark code must contain 1–16 characters. Symbols are accepted.');return;
+      tell('Previous bookmark code must contain 1–16 characters.');return;
     }
     $('secretAccessSubmit').disabled=true;
     try{
-      if(task.kind==='migrate'){
-        updateState(await request('secret-migrate',{code}));
-        cancelEntry();
-        tell('Existing links are now independently encrypted with the new bookmark code.');
-        await finishFolderUnlock();
-      }else if(task.kind==='open'){
-        await openAuthorized(task.ids,code);
-        cancelEntry();
-      }else if(task.kind==='tab'){
-        await request('secret-authorize-tab',{tabId:task.id,code});
-        cancelEntry();
-        const active=lastState?.tabs.find(t=>t.id===lastState.activeId);
-        if(active?.id===task.id){
-          // The user already pressed the privacy eye. Close the code dialog
-          // before loading so it cannot obscure the authorized website.
-          close();
-          await reveal();
-        }
-      }else if(task.kind==='import'){
-        await saveDropped(task,code);
-        cancelEntry();
-      }
+      const result=await request('secret-migrate',{code});
+      updateState(result);
+      cancelEntry();
+      tell('Upgraded '+result.migrated+' older bookmark(s). '+(status.legacyCount||0)+' still need their former code.');
+      if(task.openIds)await openMany(task.openIds);
     }catch(error){tell(error.message);}
     finally{
       code='';$('secretAccessCode').value='';
@@ -410,8 +386,9 @@
     $('secretEditor').hidden=false;
     $('secretEditorTitle').textContent=id?'Edit Visible Name':kind==='folder'?'New Secret Folder':'New Secret Bookmark';
     $('secretUrlLabel').hidden=kind==='folder'||Boolean(id);
-    $('secretEntryCodeLabel').hidden=kind==='folder'||Boolean(id);
-    $('secretEntryCode').value='';
+    $('secretBindVisibleNameLabel').hidden=kind==='folder';
+    const existing=id?status.items.find(x=>x.id===id):null;
+    $('secretBindVisibleName').checked=existing?.bindVisibleName??true;
     $('secretUrl').value=url||'';
     $('secretVisibleName').value=id
       ?status.items.find(x=>x.id===id)?.visibleName||'':'';
@@ -460,13 +437,15 @@
       try{await open();}catch(e){tell(e.message);}
       return;
     }
-    if(status.legacyCount>0){promptEntry({kind:'migrate'});return;}
     const unique=[...new Set(ids)];
     if(!unique.length)return tell('Select a Secret Bookmark.');
-    promptEntry({kind:'open',ids:unique});
+    if(unique.some(id=>status.items.find(item=>item.id===id)?.legacyCodeRequired)){
+      promptEntry({kind:'migrate',openIds:unique});return;
+    }
+    try{await openAuthorized(unique);}catch(error){tell(error.message);}
   }
-  async function openAuthorized(ids,code){
-    const result=await request('secret-open',{ids,code});
+  async function openAuthorized(ids){
+    const result=await request('secret-open',{ids});
     const tabIds=result.tabIds||[];
     let grouped=true;
     if(tabIds.length>1){
@@ -489,16 +468,16 @@
       await request('secret-reveal',{tabId:tab.id});
       armLock();
     }catch(error){
-      // A short-lived item-specific decryption ticket can expire. Only a fresh
-      // entry code can reauthorize this one tab; the folder password alone
-      // cannot be used to reveal it.
-      if(/entry code|authorization expired|unlock|locked/i.test(error.message)){
-        pendingReveal=tab.id;
+      if(/authorization expired|unlock|locked/i.test(error.message)){
         if(!status.unlocked){
+          pendingReveal=tab.id;
           void open().catch(e=>tell(e.message));
         }else{
-          pendingReveal=null;
-          promptEntry({kind:'tab',id:tab.id});
+          try{
+            await request('secret-authorize-tab',{tabId:tab.id});
+            await request('secret-reveal',{tabId:tab.id});
+            armLock();
+          }catch(e){tell(e.message);}
         }
       }else tell(error.message);
     }
@@ -507,23 +486,18 @@
     event.preventDefault();
     if(!status.unlocked)return;
     const visibleName=$('secretVisibleName').value.trim();
-    let entryCode=editMode==='link'&&!editId?$('secretEntryCode').value:'';
-    if(editMode==='link'&&!editId&&([...entryCode].length<1||[...entryCode].length>16)){
-      return tell('A separate bookmark entry code of 1–16 characters is required.');
-    }
+    const bindVisibleName=$('secretBindVisibleName').checked;
     try{
       const result=editId
-        ?await request('secret-edit',{id:editId,visibleName})
+        ?await request('secret-edit',{id:editId,visibleName,bindVisibleName})
         :await request('secret-put',{kind:editMode,parent:folder,
           visibleName,url:editMode==='link'?$('secretUrl').value:'',
-          title:editorTrueTitle,entryCode});
+          title:editorTrueTitle,bindVisibleName});
       updateState(result);
       const savedUrl=editMode==='link'&&!editId?$('secretUrl').value:'';
-      // Best-effort removal from ordinary local history after the encrypted
-      // write succeeds. It cannot erase network/OS logs or cloud backups.
+      // Best-effort removal from regular history after encrypted saving.
       if(savedUrl)void api.command('history-remove',savedUrl);
       $('secretUrl').value='';
-      $('secretEntryCode').value='';entryCode='';
       if(pendingNormalId){
         window.minternetBookmarks?.deleteBookmark(pendingNormalId,true);
         pendingNormalId=null;
@@ -533,9 +507,8 @@
       $('secretUnlocked').hidden=false;
       editId=null;editMode=null;
       render();armLock();
-      tell('Saved under a separate per-bookmark code. The folder unlock alone cannot read this URL.');
+      tell('Secret Bookmark saved with '+(bindVisibleName?'folder password and Visible Name binding.':'folder password encryption.'));
     }catch(error){tell(error.message);}
-    finally{entryCode='';}
   }
   async function authenticate(event){
     event.preventDefault();
@@ -569,9 +542,8 @@
     const imported=window.MinternetBookmarkImport?.parseTransfer(dt)||[];
     return imported;
   }
-  async function saveDropped({nodes,parent},entryCode=null){
+  async function saveDropped({nodes,parent}){
     if(!status.unlocked){pendingDrop={nodes,parent};await open();return;}
-    if(!entryCode){promptEntry({kind:'import',nodes,parent});return;}
     let saved=0;
     async function go(node,where,depth){
       if(depth>=12||saved>=100)return;
@@ -583,7 +555,7 @@
       }else if(node.kind==='link'&&model?.url(node.url)){
         await request('secret-put',{kind:'link',parent:where,
           visibleName:node.name||'',url:node.url,title:node.name||'',
-          entryCode});
+          bindVisibleName:true});
         saved++;
         void api.command('history-remove',node.url);
         if(node.sourceId)window.minternetBookmarks?.deleteBookmark(node.sourceId,true);
@@ -592,8 +564,7 @@
     try{
       for(const node of nodes.slice(0,100))await go(node,parent,0);
       updateState(await request('secret-status'));
-      tell('Encrypted '+saved+' dropped item'+(saved===1?'':'s')+
-        ' with the separately supplied entry code.');
+      tell('Encrypted '+saved+' dropped item'+(saved===1?'':'s')+' using the Secret Folder password.');
       armLock();
     }catch(error){tell('Imported '+saved+' items before error: '+error.message);}
   }
@@ -713,12 +684,13 @@
   $('secretAddPage').addEventListener('click',()=>addPage());
   $('secretAddLink').addEventListener('click',()=>editor('link'));
   $('secretOpenSelected').addEventListener('click',()=>void openMany([...selected]));
+  $('secretMigrateLegacy').addEventListener('click',()=>promptEntry({kind:'migrate'}));
   $('secretEditor').addEventListener('submit',event=>void saveEditor(event));
   $('secretVisibleName').addEventListener('input',refreshPreview);
   $('secretUrl').addEventListener('input',refreshPreview);
-  $('secretEntryCode').addEventListener('input',refreshPreview);
+  $('secretBindVisibleName').addEventListener('change',refreshPreview);
   $('secretDiscard').addEventListener('click',()=>{
-    $('secretUrl').value='';$('secretEntryCode').value='';
+    $('secretUrl').value='';
     $('secretEditor').hidden=true;
     $('secretUnlocked').hidden=false;editId=null;editMode=null;
     editorTrueTitle='';pendingNormalId=null;
