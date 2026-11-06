@@ -167,6 +167,13 @@
     if(!safe)return Promise.resolve([]);
     if(faviconGood.has(safe))return Promise.resolve([faviconGood.get(safe)]);
     if(faviconCandidates.has(safe))return faviconCandidates.get(safe);
+    // Do not fetch YouTube/Google page HTML just to discover a favicon.
+    // Those unauthenticated page probes can produce extra requests and make
+    // site-side unusual-traffic checks more likely on shared IP networks.
+    const host=new URL(safe).hostname.toLowerCase();
+    if(host==='youtube.com'||host==='www.youtube.com'||host==='m.youtube.com'||host==='youtu.be'){
+      return Promise.resolve(['https://www.youtube.com/favicon.ico']);
+    }
     const branded=currentGoogleIcons(safe);
     if(branded.length){
       // Avoid slow logged-in HTML scanning and preserve true product icons.
