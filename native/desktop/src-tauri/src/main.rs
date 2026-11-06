@@ -2038,6 +2038,35 @@ const AUTO_UNLOAD_ELIGIBILITY: &str = r#"(() => {
   } catch { return false; }
 })()"#;
 
+// Google sessions can hold live, transient authentication state in a WebView2
+// controller. Closing the controller shortly after a tab goes idle is not a
+// real logout, but can force a new Google challenge when the tab is selected.
+// Preserve such controllers until the user closes the tab or browser.
+fn google_session_page(url:&str)->bool{
+    let Ok(address)=tauri::Url::parse(url) else{return false};
+    if !matches!(address.scheme(),"https"|"http"){return false;}
+    let Some(host)=address.host_str() else{return false};
+    let host=host.to_ascii_lowercase();
+    ["google.com","youtube.com","youtu.be","gmail.com","googleusercontent.com"]
+        .iter().any(|domain|host==*domain||host.ends_with(&format!(".{domain}")))
+}
+
+#[cfg(test)]
+mod google_session_page_tests{
+    use super::google_session_page;
+    #[test]
+    fn exact_google_hosts_only(){
+        for url in ["https://accounts.google.com/","https://mail.google.com/mail/",
+            "https://www.youtube.com/watch?v=test","https://youtu.be/a","https://gmail.com"]{
+            assert!(google_session_page(url),"{url}");
+        }
+        for url in ["https://notgoogle.com/","https://google.com.example.org/",
+            "https://evil.org/?next=google.com","about:blank","https://youtube.com.evil.com/"]{
+            assert!(!google_session_page(url),"{url}");
+        }
+    }
+}
+
 // The user-configured policy is checked every ten seconds by trusted chrome.
 // Page requests, media playback, entered values and split-visible tabs block
 // auto-unload; evaluation errors or unknown documents are never destroyed.
@@ -2055,7 +2084,8 @@ fn check_idle_tabs(app:&tauri::AppHandle, minutes:u64) -> Result<(),String>{
         let now=Instant::now();
         b.tabs.iter_mut().filter_map(|tab|{
             if tab.id==active || split.contains(&tab.id) ||
-                tab.loading || tab.audio_playing || tab.checking_unload || tab.url==HOME {
+                tab.loading || tab.audio_playing || tab.checking_unload || tab.url==HOME ||
+                google_session_page(&tab.url) {
                 return None;
             }
             let since=tab.inactive_since?;
@@ -2086,6 +2116,7 @@ fn check_idle_tabs(app:&tauri::AppHandle, minutes:u64) -> Result<(),String>{
                         if eligible && !is_active && !split_visible && !tab.loading &&
                             !tab.audio_playing && tab.view.as_deref()==Some(captured.as_str()) &&
                             tab.inactive_since==Some(since) &&
+                            !google_session_page(&tab.url) &&
                             Instant::now().duration_since(since)>=idle {
                             tab.loading=false;tab.audio_playing=false;tab.audio_muted=false;
                             if tab.secret_id.is_some(){tab.secret_revealed=false;}
