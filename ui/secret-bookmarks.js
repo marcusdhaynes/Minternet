@@ -138,6 +138,7 @@
       box.setAttribute('aria-label','Select '+(item.visibleName||'Secret Bookmark'));
       box.addEventListener('change',()=>{
         if(box.checked)selected.add(item.id);else selected.delete(item.id);
+        $('secretOpenSelected').disabled=!selected.size;
       });
       row.append(box);
     }else{
@@ -210,6 +211,25 @@
     try{updateState(await request('secret-delete',{id:item.id}));selected.delete(item.id);}
     catch(e){tell(e.message);}
   }
+  // Native tab creation sends a state event asynchronously. The tab-group
+  // controller must see those tab IDs before assigning them; otherwise bulk
+  // opening could create a group with no children on slower computers.
+  function waitForGroupTabs(group,ids){
+    if(ids.every(id=>group.getLatest()?.tabs?.some(tab=>tab.id===id)))return Promise.resolve(true);
+    return new Promise(resolve=>{
+      let finished=false,off=()=>{};
+      const finish=ok=>{
+        if(finished)return;
+        finished=true;clearTimeout(timeout);off();resolve(ok);
+      };
+      const check=()=>{
+        if(ids.every(id=>group.getLatest()?.tabs?.some(tab=>tab.id===id)))finish(true);
+      };
+      const timeout=setTimeout(()=>finish(false),4500);
+      off=api.onState(()=>setTimeout(check,0));
+      setTimeout(check,0);
+    });
+  }
   async function openMany(ids){
     if(!status.unlocked){
       pendingDrop={openIds:ids};
@@ -220,14 +240,18 @@
       const unique=[...new Set(ids)];
       const result=await request('secret-open',{ids:unique});
       const tabIds=result.tabIds||[];
+      let grouped=true;
       if(tabIds.length>1){
         const groups=window.minternetGroups;
-        const g=groups?.createGroup(savePreference(),'violet');
-        if(g)for(const id of tabIds)groups.assign(id,g.id);
+        grouped=Boolean(groups&&await waitForGroupTabs(groups,tabIds));
+        const g=grouped?groups.createGroup(savePreference(),'violet'):null;
+        grouped=Boolean(g);
+        if(g)for(const id of tabIds)if(!groups.assign(id,g.id))grouped=false;
       }
       selected.clear();render();
       tell(tabIds.length+' Secret Bookmark'+(tabIds.length===1?'':'s')+
-        ' opened in background, unloaded. Select a tab and press its eye to load.');
+        ' opened in background, unloaded. Select a tab and press its eye to load.'+
+        (!grouped?' Could not assign all tabs to a group.':''));
       armLock();
     }catch(error){tell(error.message);}
   }
