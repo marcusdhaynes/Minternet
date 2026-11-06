@@ -8,7 +8,7 @@ use base64::Engine as _;
 use rand::{rngs::OsRng,RngCore};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
-use std::{sync::{Mutex,atomic::{AtomicU64,Ordering}}, collections::{HashSet, HashMap, VecDeque}, path::PathBuf, time::{Instant, Duration}};
+use std::{sync::{Mutex,atomic::{AtomicBool,AtomicU64,Ordering}}, collections::{HashSet, HashMap, VecDeque}, path::PathBuf, time::{Instant, Duration}};
 use serde::{Serialize,Deserialize};
 use zeroize::Zeroize;
 use serde_json::{json, Value};
@@ -95,7 +95,25 @@ impl Drop for AuthorizedSecret {
     fn drop(&mut self){self.key.zeroize();}
 }
 #[derive(Default)]
-struct AuthorizedSecrets(Mutex<HashMap<u32,AuthorizedSecret>>);
+struct AuthorizedSecrets{
+    items:Mutex<HashMap<u32,AuthorizedSecret>>,
+    cleanup_running:AtomicBool,
+}
+fn schedule_secret_access_expiry(app:&tauri::AppHandle){
+    let manager=app.state::<AuthorizedSecrets>();
+    if manager.cleanup_running.swap(true,Ordering::AcqRel){return;}
+    let handle=app.clone();
+    std::thread::spawn(move||loop {
+        std::thread::sleep(Duration::from_secs(10));
+        let manager=handle.state::<AuthorizedSecrets>();
+        let Ok(mut tickets)=manager.items.lock() else{break};
+        tickets.retain(|_,v|Instant::now()<=v.expires);
+        if tickets.is_empty(){
+            manager.cleanup_running.store(false,Ordering::Release);
+            break;
+        }
+    });
+}
 
 struct Browser {
     tabs: Vec<Tab>,
@@ -427,7 +445,19 @@ fn remember_undo(app:&tauri::AppHandle, ui:Option<Value>) {
     let (tabs,active_id)={
         let state=app.state::<Mutex<Browser>>();
         let Ok(browser)=state.lock() else{return};
-        (browser.tabs.clone(),browser.active_id)
+        let safe=browser.tabs.iter().map(|tab|{
+            let mut saved=tab.clone();
+            // Undo cannot retain or restore an authenticated secret website.
+            if saved.secret_id.is_some(){
+                saved.url.zeroize();saved.url=HOME.into();
+                for page in &mut saved.history{page.zeroize();}
+                saved.history=vec![HOME.into()];
+                saved.title.zeroize();saved.title="Secret Tab".into();
+                saved.at=0;saved.view=None;saved.secret_revealed=false;
+            }
+            saved
+        }).collect::<Vec<_>>();
+        (safe,browser.active_id)
     };
     let split_ids=app.state::<SplitState>().0.lock().map(|s|s.clone()).unwrap_or_default();
     let ratios=app.state::<SplitRatios>().0.lock().map(|r|*r).unwrap_or((0.5,0.5));
@@ -2093,7 +2123,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         let vault=app.state::<Mutex<secret_bookmarks::SecretVault>>();
         vault.lock().map_err(|e|e.to_string())?.lock();
         // Destroy all per-site keys as well as the independent folder key.
-        app.state::<AuthorizedSecrets>().0.lock().map_err(|e|e.to_string())?.clear();
+        app.state::<AuthorizedSecrets>().items.lock().map_err(|e|e.to_string())?.clear();
         display_active(&app);
         notify(&app);
         return Ok(json!({"ok":true}));
@@ -2195,8 +2225,9 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         }
         b.active_id=selected;
         drop(b);
-        app.state::<AuthorizedSecrets>().0.lock().map_err(|e|e.to_string())?
+        app.state::<AuthorizedSecrets>().items.lock().map_err(|e|e.to_string())?
             .extend(authorized);
+        schedule_secret_access_expiry(&app);
         notify(&app);
         return Ok(json!({"tabIds":created,"authorizationSeconds":300}));
     }
@@ -2228,10 +2259,11 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 &&!t.secret_revealed)
         };
         if !entry_unchanged{key.zeroize();return Err("Secret Tab changed or closed".into());}
-        app.state::<AuthorizedSecrets>().0.lock().map_err(|e|e.to_string())?
+        app.state::<AuthorizedSecrets>().items.lock().map_err(|e|e.to_string())?
             .insert(tab_id,AuthorizedSecret{
                 id:entry_id,key,expires:Instant::now()+Duration::from_secs(300)
             });
+        schedule_secret_access_expiry(&app);
         return Ok(json!({"ok":true}));
     }
     if name=="secret-reveal"{
@@ -2245,7 +2277,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             if tab.secret_revealed{return Ok(json!({"ok":true}));}
             tab.secret_id.clone().ok_or("Not a secret bookmark tab")?
         };
-        let authorization=app.state::<AuthorizedSecrets>().0.lock()
+        let authorization=app.state::<AuthorizedSecrets>().items.lock()
             .map_err(|e|e.to_string())?.remove(&id)
             .ok_or("Enter the bookmark entry code before pressing the eye")?;
         if Instant::now()>authorization.expires||authorization.id!=secret_id{
