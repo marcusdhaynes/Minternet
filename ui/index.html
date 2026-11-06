@@ -158,10 +158,10 @@
       </div>
     </aside>
     <aside id="bookmarkManager" class="bookmark-panel bookmark-manager" hidden aria-label="Bookmark Manager">
-      <div class="bookmark-panel-head"><strong>Bookmarks</strong><button id="bookmarkImportFile" class="bookmark-mini" type="button" title="Import bookmarks and folders from another browser">⇩</button><input id="bookmarkImportInput" type="file" accept=".html,.htm,.json,.url,.txt,text/html,application/json" multiple hidden><button id="bookmarkManageNewFolder" title="New Folder" class="bookmark-mini">📁＋</button><button id="bookmarkManageNewLink" title="New Bookmark" class="bookmark-mini">☆＋</button><button id="bookmarkManageClose" class="bookmark-close" aria-label="Close Bookmarks">×</button></div>
+      <div class="bookmark-panel-head"><strong>Bookmarks</strong><button id="bookmarkSelectionCount" class="bookmark-selection-count" title="Clear selected bookmarks" hidden>0 selected ×</button><button id="bookmarkImportFile" class="bookmark-mini" type="button" title="Import bookmarks and folders from another browser">⇩</button><input id="bookmarkImportInput" type="file" accept=".html,.htm,.json,.url,.txt,text/html,application/json" multiple hidden><button id="bookmarkManageNewFolder" title="New Folder" class="bookmark-mini">📁＋</button><button id="bookmarkManageNewLink" title="New Bookmark" class="bookmark-mini">☆＋</button><button id="bookmarkManageClose" class="bookmark-close" aria-label="Close Bookmarks">×</button></div>
       <button id="secretBookmarksManager" class="bookmark-tree-line secret-root-manager" type="button" data-secret-target="root" aria-label="Open Secret Bookmarks">◈　Secret Bookmarks <span>›</span></button>
       <div id="bookmarkTree" class="bookmark-tree"></div>
-      <div class="bookmark-panel-foot bookmark-hint">Drag bookmarks or folders here · ⇩ to import</div>
+      <div class="bookmark-panel-foot bookmark-hint">Click folders to expand · Hold a bookmark to multi-select · Drag to reorder or move · ⇩ to import</div>
     </aside>
     <aside id="bookmarkEditor" class="bookmark-panel bookmark-editor" hidden aria-label="Edit Bookmark">
       <form id="bookmarkEditForm" autocomplete="off">
