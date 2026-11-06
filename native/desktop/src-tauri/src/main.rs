@@ -3718,7 +3718,7 @@ fn main() {
         .manage(Mutex::new(password_vault::Vault::default()))
         .manage(Mutex::new(secret_bookmarks::SecretVault::default()))
         .manage(AuthorizedSecrets::default())
-        .manage(Mutex::new(google_account::GoogleState::default()))
+        .manage(Mutex::new(google_account::restore()))
         .manage(Mutex::new(LayoutCache::default()))
         .invoke_handler(tauri::generate_handler![browser_action, browser_snapshot])
         .setup(|app| {
