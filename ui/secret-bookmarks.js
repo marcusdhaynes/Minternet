@@ -28,13 +28,18 @@
     if(window.__TAURI__)void api.command('chrome-overlay',open);
     if(open)$('secretCode').focus();
   }
-  const savePreference=()=>{
-    const value=$('secretGroupName').value.trim().slice(0,42)||'#####';
+  const setGroupPreference=input=>{
+    const value=String(input||'#####').trim().slice(0,42)||'#####';
+    $('secretGroupName').value=value;
+    if($('secretGroupNameSettings'))$('secretGroupNameSettings').value=value;
     try{localStorage.setItem(GROUP_PREF,value);}catch{}
     return value;
   };
-  try{$('secretGroupName').value=localStorage.getItem(GROUP_PREF)||'#####';}catch{}
+  const savePreference=()=>setGroupPreference($('secretGroupName').value);
+  try{setGroupPreference(localStorage.getItem(GROUP_PREF)||'#####');}
+  catch{setGroupPreference('#####');}
   $('secretGroupName').addEventListener('change',savePreference);
+  $('secretGroupNameSettings')?.addEventListener('change',event=>setGroupPreference(event.target.value));
   function securePreview(){
     const bytes=new Uint8Array(18);
     crypto.getRandomValues(bytes);
@@ -420,6 +425,7 @@
     },true);
   }
   $('secretBookmarksBar')?.addEventListener('click',()=>void open().catch(e=>tell(e.message)));
+  $('secretSettingsOpen')?.addEventListener('click',()=>void open().catch(e=>tell(e.message)));
   $('secretBookmarksManager')?.addEventListener('click',()=>void open().catch(e=>tell(e.message)));
   $('secretAuthForm').addEventListener('submit',event=>void authenticate(event));
   $('secretClose').addEventListener('click',close);
