@@ -1308,6 +1308,18 @@ html.minternet-overlay-active .group-editor-backdrop {
 .secret-auth,.secret-editor{display:grid;gap:10px;margin:13px 15px}
 .secret-auth label,.secret-editor label,.secret-group-setting{display:grid;gap:5px;font-size:11px;color:#dcd0f0}
 .secret-auth label small,.secret-editor label small{font-size:10px;color:#bda7d8}
+/* Use a compact native checkbox, not the full-width text-field styling. */
+.secret-editor label.secret-name-key-setting{
+  display:flex;align-items:flex-start;gap:9px;padding:9px;border:1px solid #6a538d;
+  border-radius:7px;background:#241e37;color:#eee2fa;line-height:1.35
+}
+.secret-editor .secret-name-key-setting input[type=checkbox]{
+  width:16px;height:16px;min-width:16px;flex:none;accent-color:#b6a1f0;
+  padding:0;margin:1px 0 0;box-shadow:none;cursor:pointer
+}
+.secret-editor .secret-name-key-setting span{display:grid;gap:4px}
+.secret-editor .secret-name-key-setting small{line-height:1.35;color:#bda7d8}
+
 .secret-auth input,.secret-editor input,.secret-group-setting input{width:100%;box-sizing:border-box;background:#100f21;color:#f6f0ff;
   border:1px solid #776493;border-radius:6px;height:31px;padding:5px 9px;font-size:12px;outline:0}
 .secret-auth input:focus,.secret-editor input:focus,.secret-group-setting input:focus{border-color:#b69bed;box-shadow:0 0 0 2px #b79af53a}

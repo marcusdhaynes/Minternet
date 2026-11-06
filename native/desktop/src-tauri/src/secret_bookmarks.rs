@@ -21,16 +21,21 @@ const ITEM_AAD:&[u8]=b"Minternet.SecretBookmarks.Item.v2|XChaCha20Poly1305|Argon
 #[serde(rename_all="camelCase")]
 pub struct PublicItem{
     id:String, parent:Option<String>, kind:String, visible_name:String,
+    #[serde(default)] bind_visible_name:bool,
+    #[serde(default)] legacy_code_required:bool,
 }
 #[derive(Serialize,Deserialize,Clone)]
 struct SealedEntry {
     salt:[u8;16], nonce:[u8;24], ciphertext:Vec<u8>,
     // Blind index only inside the outer authenticated encrypted vault.
     #[serde(default)] fingerprint:String,
+    // 0: older independent entry-code format; 1: folder-derived key format.
+    #[serde(default)] version:u8,
 }
 #[derive(Serialize,Deserialize,Clone)]
 struct Entry{
     id:String,parent:Option<String>,kind:String,visible_name:String,
+    #[serde(default)] bind_visible_name:bool,
     #[serde(default,skip_serializing_if="String::is_empty")] true_title:String,
     #[serde(default,skip_serializing_if="Option::is_none")] url:Option<String>,
     #[serde(default,skip_serializing_if="Option::is_none")] sealed:Option<SealedEntry>,
@@ -80,7 +85,9 @@ fn load(path:&PathBuf)->Result<Disk,String>{
 }
 fn visible(entry:&Entry)->PublicItem{
     PublicItem{id:entry.id.clone(),parent:entry.parent.clone(),
-        kind:entry.kind.clone(),visible_name:entry.visible_name.clone()}
+        kind:entry.kind.clone(),visible_name:entry.visible_name.clone(),
+        bind_visible_name:entry.bind_visible_name,
+        legacy_code_required:entry.kind=="link" && entry.sealed.as_ref().is_some_and(|s|s.version==0)}
 }
 fn visible_json(items:&[Entry])->Vec<PublicItem>{items.iter().map(visible).collect()}
 fn url_valid(raw:&str)->bool{
@@ -98,26 +105,33 @@ fn item_aad(id:&str)->Vec<u8>{
     bytes.extend_from_slice(id.as_bytes());
     bytes
 }
-// This key-separated digest is only inside the outer encrypted vault. It
-// detects duplicate URLs without keeping the URL available to a folder unlock.
-fn blind_fingerprint(entry_code:&str,folder_salt:&[u8;16],url:&str)->Result<String,String>{
-    // This lookup index is derived from the *second* code, never the folder
-    // key. The outer-folder unlock alone cannot test guesses about websites.
-    // Deduplication is possible only among links sharing this entry code.
-    let mut key=derive(entry_code,folder_salt)?;
-    let mut mac=<Hmac<Sha256> as Mac>::new_from_slice(&key)
-        .expect("HMAC-SHA256 accepts 32-byte secret keys");
-    mac.update(b"Minternet Independent Secret URL equality v3");
-    mac.update(url.as_bytes());
-    let value=mac.finalize().into_bytes().iter()
-        .map(|x|format!("{x:02x}")).collect();
-    key.zeroize();
-    Ok(value)
+// Outer Argon2id password key is expanded into an independent, per-item AEAD key.
+// The optional visible name is additional authenticated key *context*, not a
+// second secret: knowing a visible label does not add password entropy.
+fn item_key(master:&[u8;32],salt:&[u8;16],visible_name:&str,bind:bool)->[u8;32]{
+    let mut mac=<Hmac<Sha256> as Mac>::new_from_slice(master)
+        .expect("HMAC-SHA256 accepts 32-byte keys");
+    mac.update(b"Minternet Secret Bookmark Item Key v3");
+    mac.update(salt);
+    mac.update(&[u8::from(bind)]);
+    if bind{
+        mac.update(&(visible_name.len() as u32).to_be_bytes());
+        mac.update(visible_name.as_bytes());
+    }
+    let bytes=mac.finalize().into_bytes();
+    let mut key=[0u8;32];key.copy_from_slice(&bytes);key
 }
-fn encrypted_link(id:&str,title:&str,url:&str,code:&str,
-    fingerprint:String)->Result<SealedEntry,String>{
+fn blind_fingerprint(master:&[u8;32],url:&str)->String{
+    let mut mac=<Hmac<Sha256> as Mac>::new_from_slice(master)
+        .expect("HMAC-SHA256 accepts 32-byte keys");
+    mac.update(b"Minternet Secret URL equality v4");
+    mac.update(url.as_bytes());
+    mac.finalize().into_bytes().iter().map(|x|format!("{x:02x}")).collect()
+}
+fn encrypted_link(id:&str,title:&str,url:&str,master:&[u8;32],
+    visible_name:&str,bind:bool)->Result<SealedEntry,String>{
     let mut salt=[0u8;16];OsRng.fill_bytes(&mut salt);
-    let mut key=derive(code,&salt)?;
+    let mut key=item_key(master,&salt,visible_name,bind);
     let mut nonce=[0u8;24];OsRng.fill_bytes(&mut nonce);
     let payload=SensitiveLink{title:title.to_owned(),url:url.to_owned()};
     let mut clear=serde_json::to_vec(&payload).map_err(|e|e.to_string())?;
@@ -125,14 +139,15 @@ fn encrypted_link(id:&str,title:&str,url:&str,code:&str,
     let result=cipher.encrypt(XNonce::from_slice(&nonce),
         Payload{msg:&clear,aad:&item_aad(id)}).map_err(|_|"Bookmark encryption failed".to_string());
     key.zeroize();clear.zeroize();
-    Ok(SealedEntry{salt,nonce,ciphertext:result?,fingerprint})
+    Ok(SealedEntry{salt,nonce,ciphertext:result?,
+        fingerprint:blind_fingerprint(master,url),version:1})
 }
 fn decrypt_item(id:&str,sealed:&SealedEntry,key:&[u8;32])->Result<SensitiveLink,String>{
     let cipher=XChaCha20Poly1305::new_from_slice(key)
         .map_err(|_|"Cipher init failed")?;
     let mut clear=cipher.decrypt(XNonce::from_slice(&sealed.nonce),
         Payload{msg:&sealed.ciphertext,aad:&item_aad(id)})
-        .map_err(|_|"Wrong bookmark code or encrypted entry authentication failed".to_string())?;
+        .map_err(|_|"Bookmark data failed authentication".to_string())?;
     let parsed=serde_json::from_slice::<SensitiveLink>(&clear)
         .map_err(|_|"Encrypted bookmark payload is damaged".to_string());
     clear.zeroize();
@@ -161,7 +176,7 @@ impl SecretVault{
         }
         Ok(json!({"exists":true,"unlocked":true,
             "items":visible_json(&self.entries),
-            "legacyCount":self.entries.iter().filter(|e|e.kind=="link"&&e.sealed.is_none()).count()}))
+            "legacyCount":self.legacy_count()}))
     }
     pub fn open(&mut self,path:&PathBuf,code:&str,create:bool)->Result<Value,String>{
         if let Some(deadline)=self.retry_after{
@@ -187,51 +202,69 @@ impl SecretVault{
         let parsed=serde_json::from_slice::<Vec<Entry>>(&clear);
         clear.zeroize();
         let entries=parsed.map_err(|_|"Secret vault payload invalid".to_string())?;
-        if entries.len()>MAX_ITEMS ||
-            (disk.version==1 && visible_json(&entries)!=disk.visible) {
+        // Old v1 sidecars contain only these four fields. Check them without
+        // comparing the new versioned encryption-mode flags.
+        let old_sidecar_valid=disk.visible.len()==entries.len() &&
+            disk.visible.iter().zip(&entries).all(|(pub_item,entry)|
+                pub_item.id==entry.id && pub_item.parent==entry.parent &&
+                pub_item.kind==entry.kind && pub_item.visible_name==entry.visible_name);
+        if entries.len()>MAX_ITEMS || (disk.version==1 && !old_sidecar_valid) {
             key.zeroize();return Err("Secret vault metadata failed integrity validation".into());
         }
         self.lock();self.key=Some(key);self.salt=Some(disk.salt);self.entries=entries;
         self.failed_attempts=0;self.retry_after=None;
-        // Legacy format exposed optional display aliases in a cleartext
-        // sidecar. Rewrite immediately under the authenticated folder key,
-        // even before the separate entry-code migration is performed.
-        if disk.version==1{
-            if let Err(error)=self.save(path){self.lock();return Err(error);}
+        // Migrate old folder-only plaintext links automatically after the
+        // authenticated unlock. Old independent-code links remain sealed until
+        // their former code is supplied once for migration.
+        if let Err(error)=self.migrate_plaintext(path,disk.version==1){
+            self.lock();return Err(error);
         }
         self.status(path)
     }
-    /// Rekey only the folder's authenticated outer layer. The separately
-    /// Argon2id-sealed bookmark URLs are untouched: their independent entry
-    /// codes remain mandatory even after the folder password changes.
+    /// Rewrap every current-format item under the new folder-derived key.
+    /// Historical independently coded entries retain their old ciphertext
+    /// until the user supplies their former code for one-time migration.
     pub fn change_password(&mut self,path:&PathBuf,current:&str,new_code:&str)->Result<Value,String>{
         if !self.unlocked(){return Err("Unlock the Secret Folder first".into());}
         if self.retry_after.is_some_and(|deadline|Instant::now()<deadline){
             return Err("Too many attempts; try again shortly".into());
         }
-        if current==new_code {return Err("Choose a different folder password".into());}
+        if current==new_code{return Err("Choose a different folder password".into());}
         let disk=load(path)?;
         let salt=self.salt.ok_or("Secret Folder key is unavailable")?;
-        if salt!=disk.salt{return Err("The vault has changed on disk; lock and reopen it".into());}
+        if salt!=disk.salt{return Err("The vault changed on disk; lock and reopen it".into());}
         let mut supplied=derive(current,&salt)?;
-        let key=self.key.as_ref().ok_or("Unlock Secret Folder first")?;
+        let master=self.key.as_ref().ok_or("Unlock Secret Folder first")?;
         let mut difference=0u8;
-        for i in 0..32{difference|=supplied[i]^key[i];}
+        for i in 0..32{difference|=supplied[i]^master[i];}
         supplied.zeroize();
         if difference!=0{
-            self.bad_code();
-            return Err("Current Secret Folder password is incorrect".into());
+            self.bad_code();return Err("Current Secret Folder password is incorrect".into());
         }
         let mut new_salt=[0u8;16];OsRng.fill_bytes(&mut new_salt);
-        let new_key=derive(new_code,&new_salt)?;
+        let mut new_key=derive(new_code,&new_salt)?;
+        let mut replacement=self.entries.clone();
+        for entry in &mut replacement {
+            if let Some(ref sealed)=entry.sealed {
+                if sealed.version==0{continue;}
+                let mut old_item_key=item_key(master,&sealed.salt,&entry.visible_name,entry.bind_visible_name);
+                let clear=decrypt_item(&entry.id,sealed,&old_item_key);
+                old_item_key.zeroize();
+                let clear=clear?;
+                entry.sealed=Some(encrypted_link(&entry.id,&clear.title,&clear.url,
+                    &new_key,&entry.visible_name,entry.bind_visible_name)?);
+            }
+        }
+        let old_entries=std::mem::replace(&mut self.entries,replacement);
         let old_salt=self.salt.replace(new_salt).ok_or("Missing original salt")?;
         let mut old_key=self.key.replace(new_key).ok_or("Missing original key")?;
         if let Err(error)=self.save(path){
             if let Some(mut failed)=self.key.replace(old_key){failed.zeroize();}
             self.salt=Some(old_salt);
+            self.entries=old_entries;
             return Err(error);
         }
-        old_key.zeroize();
+        old_key.zeroize();drop(old_entries);
         self.failed_attempts=0;self.retry_after=None;
         self.status(path)
     }
@@ -304,7 +337,7 @@ impl SecretVault{
         Ok(())
     }
     pub fn put(&mut self,path:&PathBuf,kind:&str,parent:Option<&str>,
-        label:&str,url:Option<&str>,true_title:Option<&str>,entry_code:Option<&str>)
+        label:&str,url:Option<&str>,true_title:Option<&str>,bind_visible_name:bool)
         ->Result<Value,String>{
         if !self.unlocked(){return Err("Unlock Secret Bookmarks first".into());}
         if self.entries.len()>=MAX_ITEMS{return Err("Secret Bookmarks is full".into());}
@@ -324,20 +357,21 @@ impl SecretVault{
         let id=id();
         let mut entry=Entry{
             id:id.clone(),parent:parent.map(str::to_owned),kind:kind.into(),
-            visible_name:label,true_title:String::new(),url:None,sealed:None,
+            visible_name:label,bind_visible_name:kind=="link"&&bind_visible_name,
+            true_title:String::new(),url:None,sealed:None,
         };
         if kind=="link"{
             let target=url.ok_or("Missing website URL")?;
             if !url_valid(target){return Err("Enter a valid HTTP(S) bookmark URL".into());}
             let canonical=tauri::Url::parse(target).map_err(|_|"Invalid website URL")?.to_string();
-            let code=entry_code.ok_or("Set a separate code for this Secret Bookmark")?;
-            self.ensure_distinct(code)?;
-            let fingerprint=blind_fingerprint(code,&self.salt.ok_or("Folder locked")?,&canonical)?;
-            if self.entries.iter().any(|e|e.sealed.as_ref().is_some_and(|x|x.fingerprint==fingerprint)
+            let master=self.key.as_ref().ok_or("Folder locked")?;
+            let fingerprint=blind_fingerprint(master,&canonical);
+            if self.entries.iter().any(|e|e.sealed.as_ref().is_some_and(|x|x.version==1&&x.fingerprint==fingerprint)
                 ||e.url.as_deref()==Some(canonical.as_str())){
                 return Err("Bookmark already exists in Secret Bookmarks".into());
             }
-            entry.sealed=Some(encrypted_link(&id,true_title.unwrap_or(""),&canonical,code,fingerprint)?);
+            entry.sealed=Some(encrypted_link(&id,true_title.unwrap_or(""),&canonical,
+                master,&entry.visible_name,entry.bind_visible_name)?);
         }
         let new_id=entry.id.clone();
         self.entries.push(entry);
@@ -362,16 +396,16 @@ impl SecretVault{
         self.save(path)?;
         Ok(json!({"items":visible_json(&self.entries)}))
     }
-    /// Return a genuine authenticated-encryption preview without storing
-    /// plaintext or returning the key. Preview nonces are independent of those
-    /// used on save, so the final ciphertext intentionally differs.
-    pub fn preview(&self,title:&str,url:&str,code:&str)->Result<Value,String>{
-        if !self.unlocked(){return Err("Unlock Secret Bookmarks first".into());}
-        self.ensure_distinct(code)?;
-        let mut salt=[0u8;16];OsRng.fill_bytes(&mut salt);
-        let mut key=derive(code,&salt)?;
-        if title.len()>512||url.len()>4096{return Err("Secret preview too large".into());}
+    /// Return a genuine authenticated-encryption preview without disclosing
+    /// any key or plaintext to the browser chrome.
+    pub fn preview(&self,title:&str,url:&str,visible_name:&str,bind:bool)->Result<Value,String>{
+        let master=self.key.as_ref().ok_or("Unlock Secret Bookmarks first")?;
+        if title.len()>512||url.len()>4096||visible_name.len()>512{
+            return Err("Secret preview too large".into());
+        }
         if !url.is_empty()&&!url_valid(url){return Err("Invalid secret website URL".into());}
+        let mut salt=[0u8;16];OsRng.fill_bytes(&mut salt);
+        let mut key=item_key(master,&salt,visible_name,bind);
         let cipher=XChaCha20Poly1305::new_from_slice(&key)
             .map_err(|_|"Cipher initialization failed")?;
         fn encode_preview(cipher:&XChaCha20Poly1305,plain:&[u8])->Result<String,String>{
@@ -379,93 +413,124 @@ impl SecretVault{
             let bytes=cipher.encrypt(XNonce::from_slice(&nonce),
                 Payload{msg:plain,aad:AAD})
                 .map_err(|_|"Encryption preview failed".to_string())?;
-            // Ciphertext, not a fake random label. The 128-bit Poly1305 tag
-            // is included, and every preview uses a fresh random nonce.
             Ok(bytes.iter().take(28).map(|b|format!("{b:02x}")).collect())
         }
         let name=encode_preview(&cipher,title.as_bytes())?;
         let link=encode_preview(&cipher,url.as_bytes())?;
         key.zeroize();
-        Ok(json!({
-            "scrambledName":name,"scrambledLink":link,"ephemeral":true
-        }))
+        Ok(json!({"scrambledName":name,"scrambledLink":link,"ephemeral":true}))
     }
-    fn ensure_distinct(&self,code:&str)->Result<(),String>{
-        let salt=self.salt.ok_or("Folder not unlocked")?;
-        let mut derived=derive(code,&salt)?;
-        let outer=self.key.as_ref().ok_or("Folder not unlocked")?;
-        let mut difference=0u8;
-        for i in 0..32{difference|=derived[i]^outer[i];}
-        derived.zeroize();
-        if difference==0{return Err("Bookmark entry code must differ from the folder password".into());}
+    fn migrate_plaintext(&mut self,path:&PathBuf,force_save:bool)->Result<(),String>{
+        let master=self.key.as_ref().ok_or("Unlock Secret Bookmarks first")?;
+        let mut changed=false;
+        for entry in &mut self.entries {
+            if entry.kind!="link"||entry.sealed.is_some(){continue;}
+            let url=entry.url.as_deref().ok_or("Legacy secret URL missing")?;
+            entry.bind_visible_name=true;
+            entry.sealed=Some(encrypted_link(&entry.id,&entry.true_title,url,
+                master,&entry.visible_name,true)?);
+            if let Some(url)=entry.url.as_mut(){url.zeroize();}
+            entry.url=None;entry.true_title.zeroize();entry.true_title.clear();
+            changed=true;
+        }
+        if changed||force_save{self.save(path)?;}
         Ok(())
     }
     pub fn legacy_count(&self)->usize{
-        self.entries.iter().filter(|e|e.kind=="link"&&e.sealed.is_none()).count()
+        self.entries.iter().filter(|e|e.kind=="link"&&
+            e.sealed.as_ref().is_some_and(|s|s.version==0)).count()
     }
-    /// Older Minternet builds protected URLs only with the folder password.
-    /// Rewrap them under an independent item code, preserving IDs and folders.
-    /// Do not auto-upgrade without a user-supplied, distinct second code.
+    /// One-time upgrade of older entries that used distinct bookmark codes.
+    /// Unmatched entries remain untouched so multiple old codes can migrate
+    /// independently, without changing IDs or losing their ciphertext.
     pub fn migrate(&mut self,path:&PathBuf,code:&str)->Result<Value,String>{
         if !self.unlocked(){return Err("Unlock Secret Bookmarks first".into());}
-        self.ensure_distinct(code)?;
+        if self.retry_after.is_some_and(|deadline|Instant::now()<deadline){
+            return Err("Too many attempts; try again shortly".into());
+        }
+        let master=self.key.as_ref().ok_or("Folder locked")?;
         let mut replacement=self.entries.clone();
-        let salt=self.salt.ok_or("Folder locked")?;
-        for entry in replacement.iter_mut().filter(|e|e.kind=="link"&&e.sealed.is_none()){
-            let url=entry.url.as_deref().ok_or("Legacy secret URL missing")?;
-            let fingerprint=blind_fingerprint(code,&salt,url)?;
-            entry.sealed=Some(encrypted_link(&entry.id,&entry.true_title,url,code,fingerprint)?);
-            if let Some(url)=entry.url.as_mut(){url.zeroize();}
-            entry.url=None;entry.true_title.zeroize();entry.true_title.clear();
+        let mut count=0;
+        for entry in &mut replacement{
+            let Some(ref sealed)=entry.sealed else{continue};
+            if sealed.version!=0{continue;}
+            let mut prior_key=derive(code,&sealed.salt)?;
+            let clear=decrypt_item(&entry.id,sealed,&prior_key);
+            prior_key.zeroize();
+            if let Ok(clear)=clear{
+                entry.bind_visible_name=true;
+                entry.sealed=Some(encrypted_link(&entry.id,&clear.title,&clear.url,
+                    master,&entry.visible_name,true)?);
+                count+=1;
+            }
+        }
+        if count==0{
+            self.bad_code();
+            return Err("No older bookmarks matched that previous entry code".into());
         }
         let old=std::mem::replace(&mut self.entries,replacement);
-        if let Err(e)=self.save(path){self.entries=old;return Err(e);}
-        // old plaintext is zeroized as the old entries are dropped here.
+        if let Err(error)=self.save(path){self.entries=old;return Err(error);}
         drop(old);
-        self.status(path)
+        self.failed_attempts=0;self.retry_after=None;
+        let mut result=self.status(path)?;
+        result["migrated"]=json!(count);
+        Ok(result)
     }
-    /// A successful folder unlock never authorizes access to link contents.
-    /// Each entry has its own salt and authentication tag. The same entry code
-    /// can authorize a batch, but wrong/different codes fail the entire batch.
-    pub fn authorize(&mut self,ids:&[String],code:&str)->Result<Vec<[u8;32]>,String>{
-        if !self.unlocked(){return Err("Unlock the Secret Bookmarks folder first".into());}
-        if self.retry_after.is_some_and(|deadline|Instant::now()<deadline){
-            return Err("Too many incorrect attempts; try again shortly".into());
-        }
+    /// Each modern entry's key is deterministically derived from the unlocked
+    /// folder password key and optional name. No separate entry code is used.
+    pub fn authorize(&self,ids:&[String])->Result<Vec<[u8;32]>,String>{
+        let master=self.key.as_ref().ok_or("Unlock the Secret Bookmarks folder first")?;
         if ids.is_empty()||ids.len()>35{return Err("Select 1–35 bookmarks".into());}
-        let mut keys:Vec<[u8;32]>=Vec::with_capacity(ids.len());
+        let mut keys=Vec::with_capacity(ids.len());
         for id in ids{
             let entry=self.entries.iter().find(|e|e.id==*id&&e.kind=="link")
                 .ok_or("Secret Bookmark not found")?;
-            let sealed=entry.sealed.as_ref()
-                .ok_or("This older bookmark needs an independent entry code before it can open")?;
-            let mut key=derive(code,&sealed.salt)?;
+            let sealed=entry.sealed.as_ref().ok_or("Secret Bookmark needs migration")?;
+            if sealed.version==0{
+                return Err("This older bookmark needs a one-time entry-code migration".into());
+            }
+            let mut key=item_key(master,&sealed.salt,&entry.visible_name,entry.bind_visible_name);
             if decrypt_item(id,sealed,&key).is_err(){
                 key.zeroize();
-                for value in &mut keys {value.zeroize();}
-                self.bad_code();
-                return Err("Incorrect bookmark entry code or encrypted data failed authentication".into());
+                for value in &mut keys{value.zeroize();}
+                return Err("Secret Bookmark ciphertext failed authentication".into());
             }
             keys.push(key);
         }
-        self.failed_attempts=0;self.retry_after=None;
         Ok(keys)
     }
     pub fn link_with_key(&self,id:&str,key:&[u8;32])->Result<String,String>{
         if !self.unlocked(){return Err("Unlock the Secret Bookmarks folder first".into());}
         let entry=self.entries.iter().find(|e|e.id==id&&e.kind=="link")
             .ok_or("Secret bookmark not found")?;
-        let sealed=entry.sealed.as_ref().ok_or("Bookmark still requires migration")?;
+        let sealed=entry.sealed.as_ref().ok_or("Bookmark needs migration")?;
         let decrypted=decrypt_item(id,sealed,key)?;
         if !url_valid(&decrypted.url){return Err("Decrypted bookmark URL is invalid".into());}
         Ok(decrypted.url.clone())
     }
-    pub fn edit(&mut self,path:&PathBuf,id:&str,label:&str)->Result<Value,String>{
-        if !self.unlocked(){return Err("Unlock Secret Bookmarks first".into());}
-        let entry=self.entries.iter_mut().find(|entry|entry.id==id)
+    pub fn edit(&mut self,path:&PathBuf,id:&str,label:&str,bind:bool)->Result<Value,String>{
+        let master=self.key.as_ref().ok_or("Unlock Secret Bookmarks first")?;
+        let idx=self.entries.iter().position(|entry|entry.id==id)
             .ok_or("Secret bookmark not found")?;
-        entry.visible_name=label.chars().take(100).collect();
-        self.save(path)?;
+        let mut next=self.entries[idx].clone();
+        let new_label=label.chars().take(100).collect::<String>();
+        if next.kind=="link"{
+            if let Some(ref sealed)=next.sealed{
+                if sealed.version==1{
+                    let mut previous_key=item_key(master,&sealed.salt,&next.visible_name,next.bind_visible_name);
+                    let clear=decrypt_item(id,sealed,&previous_key);
+                    previous_key.zeroize();
+                    let clear=clear?;
+                    next.sealed=Some(encrypted_link(id,&clear.title,&clear.url,
+                        master,&new_label,bind)?);
+                }
+            }
+            next.bind_visible_name=bind;
+        }
+        next.visible_name=new_label;
+        let previous=std::mem::replace(&mut self.entries[idx],next);
+        if let Err(error)=self.save(path){self.entries[idx]=previous;return Err(error);}
+        drop(previous);
         Ok(json!({"items":visible_json(&self.entries)}))
     }
     pub fn move_inside(&mut self,path:&PathBuf,id:&str,parent:Option<&str>)->Result<Value,String>{
@@ -495,115 +560,149 @@ mod tests{
         std::env::temp_dir().join(format!("secret-bookmarks-test-{}.enc",id()))
     }
     const FOLDER:&str="~!@#$%^&*()_+あ🪐";
-    const ENTRY:&str="<>[]{}!@#$%-_++?";
+    const OLD_CODE:&str="<>[]{}!@#$%-_++?";
+    fn old_seal(id:&str,title:&str,url:&str,code:&str)->SealedEntry{
+        let mut salt=[0u8;16];OsRng.fill_bytes(&mut salt);
+        let mut nonce=[0u8;24];OsRng.fill_bytes(&mut nonce);
+        let mut key=derive(code,&salt).unwrap();
+        let payload=SensitiveLink{title:title.into(),url:url.into()};
+        let mut clear=serde_json::to_vec(&payload).unwrap();
+        let cipher=XChaCha20Poly1305::new_from_slice(&key).unwrap();
+        let ciphertext=cipher.encrypt(XNonce::from_slice(&nonce),
+            Payload{msg:&clear,aad:&item_aad(id)}).unwrap();
+        key.zeroize();clear.zeroize();
+        SealedEntry{salt,nonce,ciphertext,fingerprint:String::new(),version:0}
+    }
     #[test]
-    fn independent_code_keeps_urls_secret_even_after_folder_unlock(){
+    fn folder_password_opens_items_without_independent_entry_codes(){
         let path=temporary();
         let mut vault=SecretVault::default();
         vault.open(&path,FOLDER,true).unwrap();
-        let folder=vault.put(&path,"folder",None,"Public Alias",None,None,None).unwrap();
-        let folder_id=folder["id"].as_str().unwrap().to_string();
-        // The folder code must NOT be accepted as the second layer's code.
-        assert!(vault.put(&path,"link",Some(&folder_id),"Visible",
-            Some("https://secret.example/private"),Some("Real Sensitive Title"),Some(FOLDER)).is_err());
-        let a=vault.put(&path,"link",Some(&folder_id),"Visible",
-            Some("https://secret.example/private"),Some("Real Sensitive Title"),Some(ENTRY)).unwrap();
-        let first=a["id"].as_str().unwrap().to_owned();
-        let b=vault.put(&path,"link",Some(&folder_id),"Another",
-            Some("https://secret.example/other"),Some("Second Secret"),Some(ENTRY)).unwrap();
-        let second=b["id"].as_str().unwrap().to_owned();
-        assert!(vault.put(&path,"link",Some(&folder_id),"Duplicate",
-            Some("https://secret.example/private"),Some("Dup"),Some(ENTRY)).is_err());
+        let folder=vault.put(&path,"folder",None,"Folder",None,None,false).unwrap();
+        let folder_id=folder["id"].as_str().unwrap().to_owned();
+        let first=vault.put(&path,"link",Some(&folder_id),"Visible",
+            Some("https://secret.example/private"),Some("Real Sensitive Title"),true).unwrap();
+        let first_id=first["id"].as_str().unwrap().to_owned();
+        let second=vault.put(&path,"link",Some(&folder_id),"Other",
+            Some("https://secret.example/other"),Some("Second Secret"),false).unwrap();
+        let second_id=second["id"].as_str().unwrap().to_owned();
+        assert!(vault.put(&path,"link",None,"Duplicate",
+            Some("https://secret.example/private"),Some(""),false).is_err());
         assert_eq!(vault.legacy_count(),0);
-        let first_entry=vault.entries.iter().find(|x|x.id==first).unwrap();
-        assert!(first_entry.url.is_none());
-        assert!(first_entry.true_title.is_empty());
-        assert!(first_entry.sealed.is_some());
-        // Neither the nested, decrypted outer vault nor raw disk bytes
-        // expose the actual title and link.
-        let inner=serde_json::to_string(&vault.entries).unwrap();
+        let contents=serde_json::to_string(&vault.entries).unwrap();
         let raw=fs::read_to_string(&path).unwrap();
-        for data in [&inner,&raw]{
-            assert!(!data.contains("secret.example"));
-            assert!(!data.contains("Real Sensitive Title"));
+        for sample in [&contents,&raw]{
+            assert!(!sample.contains("secret.example"));
+            assert!(!sample.contains("Real Sensitive Title"));
         }
+        let keys=vault.authorize(&[first_id.clone(),second_id.clone()]).unwrap();
+        assert!(vault.link_with_key(&first_id,&keys[0]).unwrap().ends_with("/private"));
+        assert!(vault.link_with_key(&second_id,&keys[1]).unwrap().ends_with("/other"));
         vault.lock();
         assert!(vault.status(&path).unwrap()["items"].as_array().unwrap().is_empty());
         vault.open(&path,FOLDER,false).unwrap();
-        assert!(vault.authorize(&[first.clone()],"Wrong Entry Code").is_err());
-        vault.retry_after=None;
-        let codes=vault.authorize(&[first.clone(),second.clone()],ENTRY).unwrap();
-        assert!(vault.link_with_key(&first,&codes[0]).unwrap().ends_with("/private"));
-        assert!(vault.link_with_key(&second,&codes[1]).unwrap().ends_with("/other"));
-        assert!(vault.link_with_key(&first,&codes[1]).is_err());
-        vault.lock();
-        let _=fs::remove_file(&path);
-    }
-    #[test]
-    fn legacy_bookmarks_require_explicit_second_code_migration(){
-        let path=temporary();
-        let mut vault=SecretVault::default();
-        vault.open(&path,FOLDER,true).unwrap();
-        let entry=Entry{id:id(),parent:None,kind:"link".into(),
-            visible_name:"Alias".into(),true_title:"Old Title".into(),
-            url:Some("https://legacy.example/private".into()),sealed:None};
-        let old_id=entry.id.clone();
-        vault.entries.push(entry);
-        vault.save(&path).unwrap();
-        vault.lock();
-        vault.open(&path,FOLDER,false).unwrap();
-        assert_eq!(vault.legacy_count(),1);
-        assert!(vault.authorize(&[old_id.clone()],ENTRY).is_err());
-        assert!(vault.migrate(&path,FOLDER).is_err());
-        let outcome=vault.migrate(&path,ENTRY).unwrap();
-        assert_eq!(outcome["legacyCount"],0);
-        assert!(vault.entries.iter().all(|x|x.url.is_none()&&x.true_title.is_empty()));
-        let keys=vault.authorize(&[old_id.clone()],ENTRY).unwrap();
-        assert_eq!(vault.link_with_key(&old_id,&keys[0]).unwrap(),"https://legacy.example/private");
-        vault.lock();
-        let _=fs::remove_file(&path);
-    }
-    #[test]
-    fn unicode_punctuation_is_key_material_not_code_or_path_syntax(){
-        assert!(passcode_valid("<>{}[];:|=?!@#$"));
-        assert!(passcode_valid("🪐✨?&/#*_+-!"));
-        assert!(!passcode_valid(""));
-        assert!(!passcode_valid("12345678901234567"));
-        let path=temporary();
-        let mut vault=SecretVault::default();
-        vault.open(&path,r#"<>{}[];:|=?!@#$"#,true).unwrap();
-        let a=vault.put(&path,"link",None,"",
-            Some("https://example.org/"),Some(""),
-            Some("🪐✨?&/#*_+-!")).unwrap();
-        let id=a["id"].as_str().unwrap().to_owned();
-        let keys=vault.authorize(&[id.clone()],"🪐✨?&/#*_+-!").unwrap();
-        assert_eq!(vault.link_with_key(&id,&keys[0]).unwrap(),"https://example.org/");
+        let keys=vault.authorize(&[first_id.clone(),second_id.clone()]).unwrap();
+        assert!(vault.link_with_key(&first_id,&keys[0]).unwrap().ends_with("/private"));
         let _=fs::remove_file(path);
     }
     #[test]
-    fn password_change_requires_current_and_preserves_independent_bookmarks(){
+    fn visible_name_changes_key_only_if_checked_and_rewraps_on_edit(){
         let path=temporary();
         let mut vault=SecretVault::default();
         vault.open(&path,FOLDER,true).unwrap();
-        let saved=vault.put(&path,"link",None,"Alias",
-            Some("https://private.example.org/protected"),
-            Some("Encrypted Real Name"),Some(ENTRY)).unwrap();
-        let id=saved["id"].as_str().unwrap().to_string();
+        let checked=vault.put(&path,"link",None,"Alias A",
+            Some("https://name-bound.example/"),None,true).unwrap()["id"].as_str().unwrap().to_string();
+        let unchecked=vault.put(&path,"link",None,"Alias B",
+            Some("https://password-only.example/"),None,false).unwrap()["id"].as_str().unwrap().to_string();
+        let master=vault.key.unwrap();
+        let first=vault.entries.iter().find(|e|e.id==checked).unwrap();
+        let first_sealed=first.sealed.as_ref().unwrap();
+        let mut wrong=item_key(&master,&first_sealed.salt,"Wrong alias",true);
+        assert!(decrypt_item(&checked,first_sealed,&wrong).is_err());
+        wrong.zeroize();
+        let other=vault.entries.iter().find(|e|e.id==unchecked).unwrap();
+        let sealed=other.sealed.as_ref().unwrap();
+        let mut unaffected=item_key(&master,&sealed.salt,"Wrong alias",false);
+        assert_eq!(decrypt_item(&unchecked,sealed,&unaffected).unwrap().url,
+            "https://password-only.example/");
+        unaffected.zeroize();
+        vault.edit(&path,&checked,"Renamed Alias",true).unwrap();
+        vault.edit(&path,&unchecked,"Renamed Password-Only",false).unwrap();
+        let keys=vault.authorize(&[checked.clone(),unchecked.clone()]).unwrap();
+        assert_eq!(vault.link_with_key(&checked,&keys[0]).unwrap(),"https://name-bound.example/");
+        assert_eq!(vault.link_with_key(&unchecked,&keys[1]).unwrap(),"https://password-only.example/");
+        vault.edit(&path,&checked,"No name binding",false).unwrap();
+        assert_eq!(vault.entries.iter().find(|e|e.id==checked).unwrap().bind_visible_name,false);
+        vault.lock();
+        vault.open(&path,FOLDER,false).unwrap();
+        assert_eq!(vault.authorize(&[checked,unchecked]).unwrap().len(),2);
+        let _=fs::remove_file(path);
+    }
+    #[test]
+    fn legacy_bookmark_requires_code_once_to_migrate_but_new_items_do_not(){
+        let path=temporary();
+        let mut vault=SecretVault::default();
+        vault.open(&path,FOLDER,true).unwrap();
+        let old_id=id();
+        vault.entries.push(Entry{id:old_id.clone(),parent:None,kind:"link".into(),
+            visible_name:"Old alias".into(),bind_visible_name:false,
+            true_title:String::new(),url:None,
+            sealed:Some(old_seal(&old_id,"Old Title","https://old.example/",OLD_CODE))});
+        vault.save(&path).unwrap();
+        vault.lock();vault.open(&path,FOLDER,false).unwrap();
+        assert_eq!(vault.legacy_count(),1);
+        assert!(vault.authorize(&[old_id.clone()]).is_err());
+        assert!(vault.migrate(&path,"incorrect").is_err());
+        vault.retry_after=None;
+        let result=vault.migrate(&path,OLD_CODE).unwrap();
+        assert_eq!(result["migrated"],1);
+        assert_eq!(vault.legacy_count(),0);
+        assert!(vault.entries.iter().all(|entry|entry.url.is_none()));
+        let keys=vault.authorize(&[old_id.clone()]).unwrap();
+        assert_eq!(vault.link_with_key(&old_id,&keys[0]).unwrap(),"https://old.example/");
+        let _=fs::remove_file(path);
+    }
+    #[test]
+    fn old_folder_only_plaintext_migrates_on_unlock(){
+        let path=temporary();
+        let mut vault=SecretVault::default();
+        vault.open(&path,FOLDER,true).unwrap();
+        let old_id=id();
+        vault.entries.push(Entry{id:old_id.clone(),parent:None,kind:"link".into(),
+            visible_name:"Old alias".into(),bind_visible_name:false,
+            true_title:"Old Title".into(),url:Some("https://plain.example/".into()),sealed:None});
+        vault.save(&path).unwrap();vault.lock();
+        vault.open(&path,FOLDER,false).unwrap();
+        assert_eq!(vault.legacy_count(),0);
+        let keys=vault.authorize(&[old_id.clone()]).unwrap();
+        assert_eq!(vault.link_with_key(&old_id,&keys[0]).unwrap(),"https://plain.example/");
+        assert!(vault.entries.iter().all(|entry|entry.url.is_none()));
+        let _=fs::remove_file(path);
+    }
+    #[test]
+    fn password_change_rewraps_checked_and_unchecked_items(){
+        let path=temporary();
+        let mut vault=SecretVault::default();
+        vault.open(&path,FOLDER,true).unwrap();
+        let a=vault.put(&path,"link",None,"Alias",
+            Some("https://private.example.org/protected"),Some("Encrypted Real Name"),true).unwrap();
+        let b=vault.put(&path,"link",None,"",
+            Some("https://other.example.org/"),None,false).unwrap();
+        let ids=[a["id"].as_str().unwrap().to_string(),b["id"].as_str().unwrap().to_string()];
         let original=fs::read(&path).unwrap();
         assert!(vault.change_password(&path,"wrong!", "new-pass*2026").is_err());
         assert_eq!(fs::read(&path).unwrap(),original);
         vault.retry_after=None;
         assert!(vault.change_password(&path,FOLDER,FOLDER).is_err());
-        let updated=vault.change_password(&path,FOLDER,"new-pass*2026").unwrap();
-        assert_eq!(updated["items"].as_array().unwrap().len(),1);
+        vault.change_password(&path,FOLDER,"new-pass*2026").unwrap();
         vault.lock();
         assert!(vault.open(&path,FOLDER,false).is_err());
         vault.retry_after=None;
         vault.open(&path,"new-pass*2026",false).unwrap();
-        let keys=vault.authorize(&[id.clone()],ENTRY).unwrap();
-        assert_eq!(vault.link_with_key(&id,&keys[0]).unwrap(),
+        let keys=vault.authorize(&ids).unwrap();
+        assert_eq!(vault.link_with_key(&ids[0],&keys[0]).unwrap(),
             "https://private.example.org/protected");
-        vault.lock();
+        assert_eq!(vault.link_with_key(&ids[1],&keys[1]).unwrap(),"https://other.example.org/");
         let _=fs::remove_file(path);
     }
     #[test]
@@ -612,21 +711,15 @@ mod tests{
         let mut vault=SecretVault::default();
         vault.open(&path,FOLDER,true).unwrap();
         vault.put(&path,"link",None,"Alias",Some("https://secret.example.org/"),
-            Some("Hidden"),Some(ENTRY)).unwrap();
-        let old_bytes=fs::read(&path).unwrap();
-        assert!(old_bytes.len()>100);
-        // Simulate a forgotten password: the reset does not supply the old one.
+            Some("Hidden"),true).unwrap();
+        assert!(fs::read(&path).unwrap().len()>100);
         vault.lock();
         let result=vault.reset_without_password(&path).unwrap();
         assert_eq!(result["exists"],false);
         assert!(!path.exists());
         assert!(!path.with_extension("tmp").exists());
-        assert!(!vault.unlocked());
-        // A new installation-style vault can be created only after deletion.
         vault.open(&path,"New!vault#2026",true).unwrap();
         assert!(vault.status(&path).unwrap()["items"].as_array().unwrap().is_empty());
-        vault.lock();
         let _=fs::remove_file(path);
     }
-
 }
