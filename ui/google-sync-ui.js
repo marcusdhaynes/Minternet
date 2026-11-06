@@ -265,11 +265,15 @@
       if(mail){
         if(!mailboxes.includes(result.email))mailboxes.push(result.email);
         updateUi();await checkCodes();
-        setStatus('Gmail read-only code detection enabled for '+result.email);
+        setStatus(result.sessionSaved
+          ?'Gmail read-only code detection enabled · session saved securely for '+result.email
+          :'Gmail authorized for this launch only · Windows Credential Manager unavailable');
       }else{
         email=result.email;
         updateUi();$('googleSyncChoice').hidden=false;
-        setStatus('Sync this Minternet with other devices?');
+        setStatus(result.sessionSaved
+          ?'Google sign-in saved securely · Sync this Minternet with other devices?'
+          :'Google signed in for this launch only · Windows Credential Manager unavailable');
       }
     }catch(e){fail(e);}
   }
