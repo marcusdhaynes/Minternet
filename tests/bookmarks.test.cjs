@@ -75,3 +75,25 @@ test('folder icons can copy HTTPS favicons, emojis and uploaded image data safel
  assert.equal(b.update(s,folder.id,{icon:tinyPng}),true);
  assert.equal(b.find(s,folder.id).icon,tinyPng);
 });
+
+
+test('no duplicate website bookmarks across root, folders, edits or drops',()=>{
+ const s=b.blank();
+ const folder=b.add(s,'folder',null,{name:'Research'});
+ const first=b.add(s,'link',null,{url:'https://example.com',name:'One'});
+ assert.ok(first);
+ assert.equal(b.add(s,'link',folder.id,{url:'https://example.com/',name:'Duplicate'}),null);
+ assert.equal(b.count(s),2);
+ const second=b.add(s,'link',folder.id,{url:'https://example.org/',name:'Two'});
+ assert.equal(b.update(s,second.id,{url:'https://example.com/'}),false);
+ assert.equal(b.find(s,second.id).url,'https://example.org/');
+ const restored=b.hydrate(JSON.stringify({...s,items:[
+   ...s.items,{id:'legacy',kind:'link',name:'Legacy',url:'https://example.com/'}
+ ]}));
+ assert.equal(b.count(restored),3);
+});
+test('site favicons are restricted to HTTPS and do not reveal credentials',()=>{
+ assert.equal(b.favicon('https://example.org/article'),'https://example.org/favicon.ico');
+ assert.equal(b.favicon('http://example.org/article'),null);
+ assert.equal(b.favicon('https://user:secret@example.org/'),null);
+});
