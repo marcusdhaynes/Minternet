@@ -2112,6 +2112,68 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             result
         }).await.map_err(|e|e.to_string())?;
     }
+    if name=="secret-change-password"{
+        let mut current=value.get("current").and_then(Value::as_str)
+            .ok_or("Enter your current Secret Folder password")?.to_owned();
+        let mut next=value.get("next").and_then(Value::as_str)
+            .ok_or("Enter a new Secret Folder password")?.to_owned();
+        let handle=app.clone();
+        return tauri::async_runtime::spawn_blocking(move||{
+            let path=secret_bookmarks::file(&handle)?;
+            let vault=handle.state::<Mutex<secret_bookmarks::SecretVault>>();
+            let result=vault.lock().map_err(|e|e.to_string())?
+                .change_password(&path,&current,&next);
+            current.zeroize();next.zeroize();
+            result
+        }).await.map_err(|e|e.to_string())?;
+    }
+    if name=="secret-reset"{
+        // A forgotten password is not bypassed. Only complete deletion is
+        // permitted, with two independent explicit confirmations.
+        if value.get("phrase").and_then(Value::as_str)!=Some("DELETE SECRET BOOKMARKS") ||
+            value.get("acknowledged").and_then(Value::as_bool)!=Some(true) ||
+            value.get("confirm").and_then(Value::as_str)!=Some("PERMANENTLY DELETE") {
+            return Err("Full destructive-reset confirmation is required".into());
+        }
+        let labels={
+            let state=app.state::<Mutex<Browser>>();
+            let mut b=state.lock().map_err(|e|e.to_string())?;
+            let mut labels=Vec::new();
+            for tab in &mut b.tabs {
+                if tab.secret_id.is_some(){
+                    if let Some(view)=tab.view.take(){labels.push(view);}
+                    scrub_secret_tab(tab);
+                }
+            }
+            b.tabs.retain(|tab|tab.secret_id.is_none());
+            if !b.tabs.iter().any(|tab|tab.id==b.active_id){
+                b.active_id=b.tabs.iter().find(|tab|tab.pinned)
+                    .or_else(||b.tabs.first()).map(|tab|tab.id).unwrap_or(0);
+            }
+            b.last_notified=None;
+            labels
+        };
+        for label in labels{
+            if let Some(view)=app.get_webview(&label){let _=view.close();}
+        }
+        // Remove secret authorization tickets and any historical UI snapshots
+        // that might retain a copy of a previously revealed secret URL.
+        app.state::<AuthorizedSecrets>().items.lock()
+            .map_err(|e|e.to_string())?.clear();
+        app.state::<UndoHistory>().0.lock()
+            .map_err(|e|e.to_string())?.clear();
+        let handle=app.clone();
+        let result=tauri::async_runtime::spawn_blocking(move||{
+            let path=secret_bookmarks::file(&handle)?;
+            let vault=handle.state::<Mutex<secret_bookmarks::SecretVault>>();
+            let result=vault.lock().map_err(|e|e.to_string())?
+                .reset_without_password(&path);
+            result
+        }).await.map_err(|e|e.to_string())?;
+        display_active(&app);
+        notify(&app);
+        return result;
+    }
     if name=="secret-lock"{
         // Locking must also conceal already-open secrets, not just erase the
         // encryption key. Keep only opaque secret IDs for a later unlock.
