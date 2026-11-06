@@ -2019,7 +2019,8 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         return tauri::async_runtime::spawn_blocking(move || {
             let path=secret_bookmarks::file(&handle)?;
             let state=handle.state::<Mutex<secret_bookmarks::SecretVault>>();
-            state.lock().map_err(|e|e.to_string())?.open(&path,&code,create)
+            let result=state.lock().map_err(|e|e.to_string())?.open(&path,&code,create);
+            result
         }).await.map_err(|e|e.to_string())?;
     }
     if name=="secret-lock"{
@@ -2100,7 +2101,8 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         };
         let url={
             let state=app.state::<Mutex<secret_bookmarks::SecretVault>>();
-            state.lock().map_err(|e|e.to_string())?.link(&secret_id)?
+            let result=state.lock().map_err(|e|e.to_string())?.link(&secret_id)?;
+            result
         };
         let parsed=tauri::Url::parse(&url).map_err(|_|"Secret URL invalid")?;
         {
