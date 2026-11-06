@@ -580,4 +580,53 @@ mod tests{
         assert_eq!(vault.link_with_key(&id,&keys[0]).unwrap(),"https://example.org/");
         let _=fs::remove_file(path);
     }
+    #[test]
+    fn password_change_requires_current_and_preserves_independent_bookmarks(){
+        let path=temporary();
+        let mut vault=SecretVault::default();
+        vault.open(&path,FOLDER,true).unwrap();
+        let saved=vault.put(&path,"link",None,"Alias",
+            Some("https://private.example.org/protected"),
+            Some("Encrypted Real Name"),Some(ENTRY)).unwrap();
+        let id=saved["id"].as_str().unwrap().to_string();
+        let original=fs::read(&path).unwrap();
+        assert!(vault.change_password(&path,"wrong!", "new-pass*2026").is_err());
+        assert_eq!(fs::read(&path).unwrap(),original);
+        vault.retry_after=None;
+        assert!(vault.change_password(&path,FOLDER,FOLDER).is_err());
+        let updated=vault.change_password(&path,FOLDER,"new-pass*2026").unwrap();
+        assert_eq!(updated["items"].as_array().unwrap().len(),1);
+        vault.lock();
+        assert!(vault.open(&path,FOLDER,false).is_err());
+        vault.retry_after=None;
+        vault.open(&path,"new-pass*2026",false).unwrap();
+        let keys=vault.authorize(&[id.clone()],ENTRY).unwrap();
+        assert_eq!(vault.link_with_key(&id,&keys[0]).unwrap(),
+            "https://private.example.org/protected");
+        vault.lock();
+        let _=fs::remove_file(path);
+    }
+    #[test]
+    fn password_reset_deletes_every_secret_and_requires_fresh_creation(){
+        let path=temporary();
+        let mut vault=SecretVault::default();
+        vault.open(&path,FOLDER,true).unwrap();
+        vault.put(&path,"link",None,"Alias",Some("https://secret.example.org/"),
+            Some("Hidden"),Some(ENTRY)).unwrap();
+        let old_bytes=fs::read(&path).unwrap();
+        assert!(old_bytes.len()>100);
+        // Simulate a forgotten password: the reset does not supply the old one.
+        vault.lock();
+        let result=vault.reset_without_password(&path).unwrap();
+        assert_eq!(result["exists"],false);
+        assert!(!path.exists());
+        assert!(!path.with_extension("tmp").exists());
+        assert!(!vault.unlocked());
+        // A new installation-style vault can be created only after deletion.
+        vault.open(&path,"New!vault#2026",true).unwrap();
+        assert!(vault.status(&path).unwrap()["items"].as_array().unwrap().is_empty());
+        vault.lock();
+        let _=fs::remove_file(path);
+    }
+
 }
