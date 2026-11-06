@@ -2002,6 +2002,121 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 &url,&key))
             .await.map_err(|e|e.to_string())?;
     }
+    // Secret bookmarks use a dedicated, password-derived native key. Only
+    // visible aliases and opaque IDs cross into the trusted chrome; no URL is
+    // returned by list, open, edit or preview operations.
+    if name=="secret-status"{
+        let path=secret_bookmarks::file(&app)?;
+        let vault=app.state::<Mutex<secret_bookmarks::SecretVault>>();
+        return vault.lock().map_err(|e|e.to_string())?.status(&path);
+    }
+    if name=="secret-auth"{
+        let code=value.get("code").and_then(Value::as_str)
+            .ok_or("Enter the Secret Bookmarks code")?.to_owned();
+        let create=value.get("create").and_then(Value::as_bool)==Some(true);
+        let handle=app.clone();
+        return tauri::async_runtime::spawn_blocking(move || {
+            let path=secret_bookmarks::file(&handle)?;
+            let state=handle.state::<Mutex<secret_bookmarks::SecretVault>>();
+            state.lock().map_err(|e|e.to_string())?.open(&path,&code,create)
+        }).await.map_err(|e|e.to_string())?;
+    }
+    if name=="secret-lock"{
+        let vault=app.state::<Mutex<secret_bookmarks::SecretVault>>();
+        vault.lock().map_err(|e|e.to_string())?.lock();
+        return Ok(json!({"ok":true}));
+    }
+    if matches!(name.as_str(),"secret-put"|"secret-delete"|"secret-edit"|"secret-move"){
+        let path=secret_bookmarks::file(&app)?;
+        let vault=app.state::<Mutex<secret_bookmarks::SecretVault>>();
+        let mut secret=vault.lock().map_err(|e|e.to_string())?;
+        return match name.as_str(){
+            "secret-put" => secret.put(
+                &path,
+                value.get("kind").and_then(Value::as_str).ok_or("Missing bookmark kind")?,
+                value.get("parent").and_then(Value::as_str),
+                value.get("visibleName").and_then(Value::as_str).unwrap_or(""),
+                value.get("url").and_then(Value::as_str),
+                value.get("title").and_then(Value::as_str)
+            ),
+            "secret-delete" => secret.delete(&path,
+                value.get("id").and_then(Value::as_str).ok_or("Missing bookmark ID")?),
+            "secret-edit" => secret.edit(&path,
+                value.get("id").and_then(Value::as_str).ok_or("Missing bookmark ID")?,
+                value.get("visibleName").and_then(Value::as_str).unwrap_or("")),
+            "secret-move" => secret.move_inside(&path,
+                value.get("id").and_then(Value::as_str).ok_or("Missing bookmark ID")?,
+                value.get("parent").and_then(Value::as_str)),
+            _ => unreachable!()
+        };
+    }
+    if name=="secret-open"{
+        let wanted=value.get("ids").and_then(Value::as_array)
+            .ok_or("Choose Secret Bookmarks")?;
+        if wanted.is_empty()||wanted.len()>MAX_TABS{
+            return Err("Choose up to 35 Secret Bookmarks".into());
+        }
+        // One successful passcode entry authorizes the entire selected batch.
+        // Validate every ID before creating even one tab.
+        let secrets=app.state::<Mutex<secret_bookmarks::SecretVault>>();
+        let secret=secrets.lock().map_err(|e|e.to_string())?;
+        if !secret.unlocked(){return Err("Enter your Secret Bookmarks code first".into());}
+        for item in wanted{
+            let id=item.as_str().ok_or("Invalid Secret Bookmark ID")?;
+            secret.link(id)?;
+        }
+        drop(secret);
+        let browser=app.state::<Mutex<Browser>>();
+        let mut b=browser.lock().map_err(|e|e.to_string())?;
+        let selected=b.active_id;
+        if b.tabs.len()+wanted.len()>MAX_TABS{return Err("Not enough available tabs".into());}
+        let mut created=Vec::with_capacity(wanted.len());
+        for item in wanted {
+            let id=b.add(true)?;
+            let tab=b.tabs.iter_mut().find(|t|t.id==id).ok_or("Tab missing")?;
+            tab.secret_id=item.as_str().map(str::to_string);
+            tab.secret_revealed=false;
+            tab.title="Secret Tab".into();
+            tab.url=HOME.into();
+            tab.view=None;
+            created.push(id);
+        }
+        b.active_id=selected;
+        drop(b);
+        notify(&app);
+        return Ok(json!({"tabIds":created}));
+    }
+    if name=="secret-reveal"{
+        let id=value.get("tabId").and_then(Value::as_u64)
+            .ok_or("Missing tab ID")? as u32;
+        let secret_id={
+            let state=app.state::<Mutex<Browser>>();
+            let browser=state.lock().map_err(|e|e.to_string())?;
+            let tab=browser.tabs.iter().find(|t|t.id==id).ok_or("Unknown tab")?;
+            if browser.active_id!=id{return Err("Select the secret tab first".into());}
+            if tab.secret_revealed{return Ok(json!({"ok":true}));}
+            tab.secret_id.clone().ok_or("Not a secret bookmark tab")?
+        };
+        let url={
+            let state=app.state::<Mutex<secret_bookmarks::SecretVault>>();
+            state.lock().map_err(|e|e.to_string())?.link(&secret_id)?
+        };
+        let parsed=tauri::Url::parse(&url).map_err(|_|"Secret URL invalid")?;
+        {
+            let state=app.state::<Mutex<Browser>>();
+            let mut browser=state.lock().map_err(|e|e.to_string())?;
+            let tab=browser.tabs.iter_mut().find(|t|t.id==id).ok_or("Unknown tab")?;
+            tab.secret_revealed=true;
+        }
+        if let Err(err)=navigate_tab(&app,id,Some(parsed),false){
+            let state=app.state::<Mutex<Browser>>();
+            if let Ok(mut b)=state.lock(){
+                if let Some(tab)=b.tabs.iter_mut().find(|t|t.id==id){tab.secret_revealed=false;}
+            }
+            return Err(err);
+        }
+        return Ok(json!({"ok":true}));
+    }
     if name=="google-status"{
         return google_account::status(&app.state::<Mutex<google_account::GoogleState>>());
     }
