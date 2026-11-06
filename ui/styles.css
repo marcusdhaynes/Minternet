@@ -1360,3 +1360,7 @@ html.minternet-overlay-active .group-editor-backdrop {
 .tab-symbol.secret-tab-icon{color:#c7a5f8;font-size:14px}
 #secretGroupNameSettings{width:92px;max-width:34%;height:25px;border:1px solid #766b93;
  border-radius:5px;background:#161b2b;color:#e7dcff;font-size:11px;padding:3px 6px}
+
+/* Password-gated editor fields must be truly hidden for folders and alias edits. */
+.secret-editor label[hidden],.secret-access[hidden]{display:none!important;}
+.secret-access strong{font-size:13px;color:#e8d6ff;}
