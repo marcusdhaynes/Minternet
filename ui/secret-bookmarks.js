@@ -31,6 +31,13 @@
       if(shouldFocus)$('secretCode').focus();
     }
   }
+  function eraseUnsavedSecretEditor(){
+    // The editor is the only normal chrome form allowed to hold a secret URL
+    // during creation; clear it whenever the editor is hidden.
+    for(const id of ['secretUrl','secretEntryCode'])if($(id))$(id).value='';
+    editorTrueTitle='';
+    previewRevision++;
+  }
   function clearPasswordForms(){
     for(const id of ['secretOldPassword','secretNewPassword','secretNewPasswordConfirm',
       'secretResetPhrase']){if($(id))$(id).value='';}
@@ -52,6 +59,7 @@
     $('secretAuthForm').hidden=true;
     $('secretAccessForm').hidden=true;
     $('secretEditor').hidden=true;
+    eraseUnsavedSecretEditor();
     form.hidden=false;
     form.querySelector('input')?.focus();
   }
@@ -204,6 +212,7 @@
   }
   function close(){
     clearPasswordForms();
+    eraseUnsavedSecretEditor();
     overlay(false);
     $('secretEditor').hidden=true;
     $('secretCode').value='';
@@ -212,6 +221,7 @@
   }
   async function lock(){
     clearPasswordForms();
+    eraseUnsavedSecretEditor();
     try{await request('secret-lock');}catch(error){tell(error.message);return;}
     status.unlocked=false;
     updateState(status);
