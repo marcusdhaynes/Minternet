@@ -169,10 +169,12 @@ impl SecretVault{
         let address=if kind=="link"{
             let target=url.ok_or("Missing website URL")?;
             if !url_valid(target){return Err("Enter a valid HTTP(S) bookmark URL".into());}
-            if self.entries.iter().any(|entry|entry.url.as_deref()==Some(target)){
+            let canonical=tauri::Url::parse(target).map_err(|_|"Invalid website URL")?
+                .to_string();
+            if self.entries.iter().any(|entry|entry.url.as_deref()==Some(canonical.as_str())){
                 return Err("Bookmark already exists in Secret Bookmarks".into());
             }
-            Some(target.to_string())
+            Some(canonical)
         }else{None};
         let entry=Entry{
             id:id(),parent:parent.map(str::to_owned),kind:kind.into(),
