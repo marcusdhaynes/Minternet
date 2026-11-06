@@ -3116,7 +3116,11 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                     return Err("Secret Bookmarks must appear only inside Manage Bookmarks".into());
                 }
             }
-            let entries = value.get("items").and_then(Value::as_array).ok_or("Bookmark data missing")?;
+            let folders=value.get("items").and_then(Value::as_array).ok_or("Bookmark data missing")?;
+            let bar=folders.iter().find(|x|
+                x.get("id").and_then(Value::as_str)==Some("minternet-bookmark-bar")
+            ).ok_or("Permanent Bookmark Bar folder missing")?;
+            let entries=bar.get("children").and_then(Value::as_array).ok_or("Bookmark Bar children missing")?;
             let root = entries.iter().find(|x|
                 x.get("kind").and_then(Value::as_str) == Some("folder") &&
                 x.get("name").and_then(Value::as_str) == Some("") &&
@@ -3800,7 +3804,8 @@ fn main() {
                                     $('bookmarkIcon').value = '🌿';
                                     $('bookmarkIcon').dispatchEvent(new Event('input'));
                                     $('bookmarkEditForm').requestSubmit();
-                                    const root = JSON.parse(localStorage.getItem('minternet.bookmark-tree.v1')).items[0];
+                                    const root = JSON.parse(localStorage.getItem('minternet.bookmark-tree.v1'))
+                                      .items[0]?.children?.find(node=>node.icon==='🌿');
                                     if (!root || root.kind !== 'folder') return;
                                     // Native folder menus replaced the old full-page folder
                                     // panel. Their "New Subfolder" action calls this controller.
