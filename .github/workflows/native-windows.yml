@@ -41,6 +41,7 @@ jobs:
           node --check ../../ui/bookmark-model.js
           node --check ../../ui/bookmark-import.js
           node --check ../../ui/bookmark-ui.js
+          node --check ../../ui/secret-bookmarks.js
           node --check ../../ui/tab-group-model.js
           node --check ../../ui/tab-group-ui.js
           node --check ../../ui/chrome-native-menu.js
