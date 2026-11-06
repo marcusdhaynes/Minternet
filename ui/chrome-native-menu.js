@@ -35,7 +35,8 @@
     if(items.length===0)items.push(disabled('Empty Folder'));
     items.push(sep());
     items.push(item('＋  New Subfolder…',()=>b.newFolder(id)));
-    items.push(item('✎  Folder Properties…',()=>b.edit(id)));
+    if(id!==window.MinternetBookmarks?.BOOKMARK_BAR_ID)
+      items.push(item('✎  Folder Properties…',()=>b.edit(id)));
     return items;
   }
   function barGroupItems(){
@@ -133,6 +134,9 @@
     const node=window.MinternetBookmarks?.find(state(),bookmarkId);
     if(!node)return [disabled('Bookmark not found')];
     if(node.kind==='folder'){
+      if(bookmarkId===window.MinternetBookmarks?.BOOKMARK_BAR_ID)
+        return [sub('📁  Bookmark Bar',folderItems(bookmarkId)),
+          item('＋  New Subfolder…',()=>b?.newFolder(bookmarkId))];
       return [
         sub('📁  Folder Contents',folderItems(bookmarkId)),
         sep(),
