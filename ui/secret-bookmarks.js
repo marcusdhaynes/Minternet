@@ -255,6 +255,10 @@
         :await request('secret-put',{kind:editMode,parent:folder,
           visibleName,url:editMode==='link'?$('secretUrl').value:'',title:editorTrueTitle});
       updateState(result);
+      const savedUrl=editMode==='link'&&!editId?$('secretUrl').value:'';
+      // Best-effort removal from ordinary local history after the encrypted
+      // write succeeds. It cannot erase network/OS logs or cloud backups.
+      if(savedUrl)void api.command('history-remove',savedUrl);
       $('secretUrl').value='';
       if(pendingNormalId){
         window.minternetBookmarks?.deleteBookmark(pendingNormalId,true);
@@ -325,6 +329,7 @@
         await request('secret-put',{kind:'link',parent:where,
           visibleName:node.name||'',url:node.url,title:node.name||''});
         saved++;
+        void api.command('history-remove',node.url);
         if(node.sourceId)window.minternetBookmarks?.deleteBookmark(node.sourceId,true);
       }
     }
