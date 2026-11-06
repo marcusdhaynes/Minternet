@@ -473,8 +473,8 @@ h1 em { color: #b3bfff; font-family: Georgia, serif; font-weight: 400; letter-sp
 .sr-only{position:absolute!important;clip-path:inset(50%);overflow:hidden;white-space:nowrap;width:1px;height:1px;margin:-1px;border:0;padding:0}
 .bookmark-bar .tab-groups-btn{height:19px;flex:0 0 23px;width:23px;margin:0 5px 0 0;align-self:center;border-right:1px solid #3a4564;border-radius:4px}
 .bookmark-bar .tab-groups-btn svg{width:17px;height:17px}
-:root.settings-visible .bookmark-items{visibility:hidden;pointer-events:none}
-:root.settings-visible .bookmark-bar .tab-groups-btn,:root.settings-visible .bookmark-bar #bookmarkBarManage{opacity:.4;pointer-events:none}
+/* Settings must never hide or disable the bookmark bar. */
+/* Settings must never hide or disable the bookmark bar. */
 .ungroup-drop-target{display:none;align-self:end;height:19px;padding:1px 8px;margin:0 2px 1px;flex:none;align-items:center;justify-content:center;border:1px dashed #8d9ac1;border-radius:5px 5px 0 0;color:#e0e7fa;font-size:10px;background:#283754;white-space:nowrap;-webkit-app-region:no-drag}
 body.tab-dragging .ungroup-drop-target{display:flex}
 .ungroup-drop-target.drag-target,.tabs.drag-ungroup-over{background:#4e5f8c;outline:1px solid #c3d4ff}
@@ -1356,7 +1356,17 @@ html.minternet-overlay-active .group-editor-backdrop {
 @media(max-width:600px){.secret-panel{margin:9px auto;max-height:calc(100vh - 100px)}.secret-tree{max-height:30vh}}
 
 .bookmark-site-fallback{font-size:11px;font-weight:700;display:inline-grid;place-items:center;
- color:#ffffff!important;background:hsl(var(--bookmark-icon-hue,255) 30% 36%);border-radius:4px}
+ color:hsl(var(--bookmark-icon-hue,255) 66% 74%)!important;background:transparent!important;
+ border:0!important;border-radius:0;box-shadow:none!important;
+ text-shadow:0 1px 2px #060816bb,0 0 2px #ffffff31;}
+/* Never add a square/circle behind website favicons. Their original image
+   transparency and silhouette are preserved; only a subtle image-shaped
+   drop-shadow is permitted. */
+.bookmark-emoji,.bookmark-emoji img{
+  background:transparent!important;border:0!important;box-shadow:none!important;
+}
+.bookmark-emoji img{filter:drop-shadow(0 1px 1px #070c1755);}
+.bookmark-item .bookmark-emoji.bookmark-site-fallback{background:transparent!important;}
 .tab-symbol.secret-tab-icon{color:#c7a5f8;font-size:14px}
 #secretGroupNameSettings{width:92px;max-width:34%;height:25px;border:1px solid #766b93;
  border-radius:5px;background:#161b2b;color:#e7dcff;font-size:11px;padding:3px 6px}
@@ -1364,3 +1374,28 @@ html.minternet-overlay-active .group-editor-backdrop {
 /* Password-gated editor fields must be truly hidden for folders and alias edits. */
 .secret-editor label[hidden],.secret-access[hidden]{display:none!important;}
 .secret-access strong{font-size:13px;color:#e8d6ff;}
+
+
+/* Secret Folder password management is separate from per-bookmark keys. */
+.secret-security-actions{padding:1px 14px 7px;}
+.secret-security-actions[hidden],.secret-security-form[hidden] {display:none!important;}
+.secret-security-actions button{border:0;background:transparent;color:#c7b0fa;cursor:pointer;font-size:10px;padding:5px 0;text-align:left;}
+.secret-security-actions button:hover{text-decoration:underline;}
+.secret-security-form{display:grid;gap:9px;margin:11px 14px;padding:12px;border:1px solid #9a79c25f;
+ border-radius:8px;background:linear-gradient(140deg,#25233b,#18182d);}
+.secret-security-form strong{font-size:12px;color:#eee3ff;}
+.secret-security-form>p{font-size:10px;color:#bcaed0;line-height:1.48;margin:0;}
+.secret-security-form>label:not(.secret-reset-checkbox){display:grid;gap:5px;font-size:10px;color:#dcccf1;}
+.secret-security-form input:not([type=checkbox]){width:100%;height:29px;border-radius:5px;
+ border:1px solid #7b6997;background:#0f1022;color:#f3eaff;padding:5px 8px;box-sizing:border-box;}
+.secret-security-form small{color:#ac9abd;}
+.secret-security-form .secret-reset-checkbox{display:flex;gap:8px;align-items:flex-start;font-size:10px;color:#e8d5ed;line-height:1.4;}
+.secret-reset-checkbox input{accent-color:#b36a9b;margin:2px 0 0;flex:none;}
+.secret-reset-form{border-color:#a65b7c94;background:linear-gradient(140deg,#3c223b,#1c1324);}
+.secret-reset-form button[type=submit]{background:#903e66!important;border-color:#c17998!important;color:#fff!important;font-weight:700;}
+.secret-security-form .secret-form-actions{gap:6px;}
+.secret-security-form .secret-form-actions button{border:1px solid #8a73b7;border-radius:5px;
+ background:#44345c;color:#f0e8ff;font-size:10px;padding:7px 9px;cursor:pointer;}
+.secret-security-form .secret-form-actions button:disabled{opacity:.4;cursor:default;}
+.secret-heading #secretChangePassword{margin-left:auto;}
+.secret-heading #secretLock{margin-left:0;}
