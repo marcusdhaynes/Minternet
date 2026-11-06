@@ -26,7 +26,95 @@
   function overlay(open){
     screen.hidden=!open;
     if(window.__TAURI__)void api.command('chrome-overlay',open);
-    if(open)$('secretCode').focus();
+    if(open){
+      const shouldFocus=!status.unlocked&&!$('secretAuthForm').hidden;
+      if(shouldFocus)$('secretCode').focus();
+    }
+  }
+  function clearPasswordForms(){
+    for(const id of ['secretOldPassword','secretNewPassword','secretNewPasswordConfirm',
+      'secretResetPhrase']){if($(id))$(id).value='';}
+    if($('secretResetAcknowledged'))$('secretResetAcknowledged').checked=false;
+    $('secretPasswordChangeForm').hidden=true;
+    $('secretPasswordResetForm').hidden=true;
+  }
+  function showPasswordForm(which){
+    clearPasswordForms();
+    const form=$(which==='change'?'secretPasswordChangeForm':'secretPasswordResetForm');
+    if(which==='change'&&!status.unlocked){
+      tell('Unlock the Secret Folder before changing its password.');
+      return;
+    }
+    if(which==='reset'&&!status.exists){
+      tell('No Secret Bookmarks vault exists to reset.');return;
+    }
+    $('secretUnlocked').hidden=true;
+    $('secretAuthForm').hidden=true;
+    $('secretAccessForm').hidden=true;
+    $('secretEditor').hidden=true;
+    form.hidden=false;
+    form.querySelector('input')?.focus();
+  }
+  function finishPasswordForm(){
+    clearPasswordForms();
+    $('secretAuthForm').hidden=status.unlocked;
+    $('secretUnlocked').hidden=!status.unlocked;
+    if(status.unlocked)render();
+    else $('secretCode').focus();
+  }
+  async function changeFolderPassword(event){
+    event.preventDefault();
+    let current=$('secretOldPassword').value;
+    let next=$('secretNewPassword').value;
+    const repeated=$('secretNewPasswordConfirm').value;
+    const length=[...next].length;
+    if(!current||length<1||length>16||next!==repeated||next===current){
+      tell('Enter the current password and matching new 1–16-character password, different from the old one.');
+      return;
+    }
+    const submit=$('secretPasswordChangeForm').querySelector('button[type="submit"]');
+    submit.disabled=true;
+    try{
+      const result=await request('secret-change-password',{current,next});
+      updateState(result);
+      finishPasswordForm();
+      armLock();
+      tell('Secret Folder password changed. All existing bookmarks and separate entry codes are preserved.');
+    }catch(error){tell(error.message);}
+    finally{
+      current='';next='';
+      $('secretOldPassword').value='';
+      $('secretNewPassword').value='';
+      $('secretNewPasswordConfirm').value='';
+      submit.disabled=false;
+    }
+  }
+  async function resetSecretVault(event){
+    event.preventDefault();
+    if($('secretResetPhrase').value!=='DELETE SECRET BOOKMARKS'||
+       !$('secretResetAcknowledged').checked){
+      tell('Type DELETE SECRET BOOKMARKS and explicitly acknowledge the permanent deletion.');return;
+    }
+    if(!window.confirm('FINAL CONFIRMATION: Permanently delete EVERY Secret Bookmark, folder, and encrypted entry? This cannot be undone inside Minternet.')){
+      return;
+    }
+    const submit=$('secretResetConfirm');
+    submit.disabled=true;
+    try{
+      // The OS may retain snapshots, SSD remapped sectors or backups. This
+      // operation removes Minternet's live keys and its accessible vault file.
+      const result=await request('secret-reset',{
+        phrase:'DELETE SECRET BOOKMARKS',acknowledged:true,confirm:'PERMANENTLY DELETE'
+      });
+      if(result?.exists!==false)throw new Error('Vault deletion did not complete.');
+      selected.clear();folder=null;
+      pendingAdd=null;pendingDrop=null;pendingReveal=null;
+      $('secretCode').value='';$('secretEntryCode').value='';$('secretAccessCode').value='';
+      updateState(result);
+      finishPasswordForm();
+      tell('Secret Bookmarks vault deleted. Create a NEW folder password to start again. Regular bookmarks and the password manager were not changed.');
+    }catch(error){tell(error.message);}
+    finally{submit.disabled=false;}
   }
   const setGroupPreference=input=>{
     const value=String(input||'#####').trim().slice(0,42)||'#####';
@@ -85,6 +173,8 @@
     $('secretUnlocked').hidden=!status.unlocked;
     $('secretLock').hidden=!status.unlocked;
     $('secretAuthButton').textContent=status.exists?'Unlock Secret Folder':'Create Secret Folder Password';
+    $('secretChangePassword').hidden=!status.unlocked;
+    $('secretResetStart').hidden=!status.exists;
     if(status.unlocked){
       if(folder&&!status.items.some(item=>item.id===folder&&item.kind==='folder'))folder=null;
       render();
@@ -94,6 +184,7 @@
   async function open(){
     if(!window.__TAURI__){tell('Secret Bookmarks requires the installed Minternet application.');return;}
     await readStatus();
+    clearPasswordForms();
     // The secret dialog takes over the trusted chrome; leave no ordinary
     // bookmark manager behind it that could receive dropped secret content.
     window.minternetBookmarks?.closeOverlay();
@@ -112,6 +203,7 @@
     }
   }
   function close(){
+    clearPasswordForms();
     overlay(false);
     $('secretEditor').hidden=true;
     $('secretCode').value='';
@@ -119,6 +211,7 @@
     entryTask=null;$('secretAccessCode').value='';$('secretAccessForm').hidden=true;
   }
   async function lock(){
+    clearPasswordForms();
     try{await request('secret-lock');}catch(error){tell(error.message);return;}
     status.unlocked=false;
     updateState(status);
@@ -594,6 +687,12 @@
   $('secretBookmarksBar')?.addEventListener('click',()=>void open().catch(e=>tell(e.message)));
   $('secretSettingsOpen')?.addEventListener('click',()=>void open().catch(e=>tell(e.message)));
   $('secretBookmarksManager')?.addEventListener('click',()=>void open().catch(e=>tell(e.message)));
+  $('secretChangePassword').addEventListener('click',()=>showPasswordForm('change'));
+  $('secretResetStart').addEventListener('click',()=>showPasswordForm('reset'));
+  $('secretPasswordChangeForm').addEventListener('submit',event=>void changeFolderPassword(event));
+  $('secretPasswordResetForm').addEventListener('submit',event=>void resetSecretVault(event));
+  $('secretPasswordChangeCancel').addEventListener('click',finishPasswordForm);
+  $('secretPasswordResetCancel').addEventListener('click',finishPasswordForm);
   $('secretAuthForm').addEventListener('submit',event=>void authenticate(event));
   $('secretAccessForm').addEventListener('submit',event=>void authorizeEntries(event));
   $('secretAccessCancel').addEventListener('click',cancelEntry);
