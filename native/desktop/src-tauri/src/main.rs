@@ -2224,7 +2224,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         let entry_unchanged={
             let browser=app.state::<Mutex<Browser>>();
             let state=browser.lock().map_err(|e|e.to_string())?;
-            state.tabs.iter().any(|t|t.id==tab_id&&t.secret_id.as_deref()==Some(&entry_id)
+            state.tabs.iter().any(|t|t.id==tab_id&&t.secret_id.as_deref()==Some(entry_id.as_str())
                 &&!t.secret_revealed)
         };
         if !entry_unchanged{key.zeroize();return Err("Secret Tab changed or closed".into());}
