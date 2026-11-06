@@ -501,6 +501,9 @@ fn undo_last(app:&tauri::AppHandle)->Result<Option<Value>,String> {
     for label in to_close{
         if let Some(view)=app.get_webview(&label){let _=view.close();}
     }
+    // Restored tabs must re-enter the independent bookmark code even when
+    // Undo brings back their opaque tab identity.
+    app.state::<AuthorizedSecrets>().items.lock().map_err(|e|e.to_string())?.clear();
     *app.state::<SplitState>().0.lock().map_err(|e|e.to_string())?=entry.split_ids;
     *app.state::<SplitRatios>().0.lock().map_err(|e|e.to_string())?=entry.ratios;
     invalidate_layout(app);
@@ -3329,6 +3332,8 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 }
                 labels
             };
+            app.state::<AuthorizedSecrets>().items.lock().map_err(|e|e.to_string())?
+                .retain(|id,_|!wanted.contains(id));
             for label in labels {if let Some(wv)=app.get_webview(&label){let _=wv.close();}}
             prune_splits(&app);
             save_pinned(&app)?;
@@ -3350,6 +3355,8 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 }
                 tab.view
             };
+            app.state::<AuthorizedSecrets>().items.lock().map_err(|e|e.to_string())?
+                .remove(&id);
             if let Some(label)=label {
                 if let Some(wv)=app.get_webview(&label) { let _=wv.close(); }
             }
