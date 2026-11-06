@@ -29,7 +29,8 @@ function toast(message) {
   toast.timer = setTimeout(() => el.classList.remove('visible'), 3800);
 }
 function tabTooltip(tab) {
-  if(tab.secretTab)return (tab.secretPending?'Unloaded · ':'')+'Secret Tab';
+  if(tab.secretTab)return (tab.secretPending?'Unloaded · ':'')+
+    (window.minternetSecretTabNames?.get(tab.id)||'Secret Tab');
   const title=tab.title || (tab.url?.startsWith('https://') ? new URL(tab.url).hostname : 'New Tab');
   return (tab.suspended ? 'Unloaded · ' : tab.loading ? 'Loading · ' : '') + title;
 }
@@ -138,14 +139,17 @@ function buildTab(tab, active) {
   renderSiteIcon(tab,symbol);
   const text = document.createElement('span');
   text.className = 'tab-text';
-  text.textContent = tab.title || 'New Tab';
+  text.textContent = tab.secretTab
+    ?(window.minternetSecretTabNames?.get(tab.id)||'Secret Tab')
+    :(tab.title || 'New Tab');
   choose.append(symbol, text);
   if(tab.private){const eye=document.createElement('span');eye.className='tab-private-eye';eye.innerHTML=PRIVATE_EYE;choose.append(eye);}
   const close = document.createElement('button');
   close.className = 'tab-close';
   close.textContent = '×';
   close.title = 'Close tab';
-  close.setAttribute('aria-label', 'Close ' + (tab.title || 'tab'));
+  close.setAttribute('aria-label', 'Close ' +
+    (tab.secretTab?(window.minternetSecretTabNames?.get(tab.id)||'Secret Tab'):(tab.title||'tab')));
   close.addEventListener('click', () => command('close', tab.id));
   if(tab.audioPlaying){
     const audio=document.createElement('button');
