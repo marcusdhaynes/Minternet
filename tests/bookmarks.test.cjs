@@ -24,8 +24,8 @@ test('rejects moving folder into its own descendants',()=>{
  const s=b.blank(),a=b.add(s,'folder',null,{name:'A'}),c=b.add(s,'folder',a.id,{name:'C'});
  assert.equal(b.move(s,a.id,c.id),false);
  assert.equal(b.move(s,c.id,null),true);
- assert.equal(b.folders(s).length,2);
- assert.equal(b.location(s,c.id).parent,null);
+ assert.equal(b.folders(s).length,3);
+ assert.equal(b.location(s,c.id).parent.id,b.BOOKMARK_BAR_ID);
 });
 test('bookmark editing, deletion, URL matching',()=>{
  const s=b.blank(),l=b.add(s,'link',null,{url:'https://example.com',name:'old'});
@@ -56,8 +56,8 @@ test('existing bookmarks without custom icons retain URL for automatic favicon d
  const s=b.hydrate({visible:true,items:[
    {id:'old',kind:'link',name:'Home',url:'https://example.org/home'}
  ]});
- assert.equal(s.items[0].icon,'');
- assert.equal(b.favicon(s.items[0].url),'https://example.org/favicon.ico');
+ assert.equal(s.items[0].children[0].icon,'');
+ assert.equal(b.favicon(s.items[0].children[0].url),'https://example.org/favicon.ico');
  const custom=b.add(s,'link',null,{url:'https://example.com',icon:'🌟'});
  assert.equal(custom.icon,'🌟');
 });
