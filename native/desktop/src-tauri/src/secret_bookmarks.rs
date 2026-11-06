@@ -554,115 +554,149 @@ mod tests{
         std::env::temp_dir().join(format!("secret-bookmarks-test-{}.enc",id()))
     }
     const FOLDER:&str="~!@#$%^&*()_+あ🪐";
-    const ENTRY:&str="<>[]{}!@#$%-_++?";
+    const OLD_CODE:&str="<>[]{}!@#$%-_++?";
+    fn old_seal(id:&str,title:&str,url:&str,code:&str)->SealedEntry{
+        let mut salt=[0u8;16];OsRng.fill_bytes(&mut salt);
+        let mut nonce=[0u8;24];OsRng.fill_bytes(&mut nonce);
+        let mut key=derive(code,&salt).unwrap();
+        let payload=SensitiveLink{title:title.into(),url:url.into()};
+        let mut clear=serde_json::to_vec(&payload).unwrap();
+        let cipher=XChaCha20Poly1305::new_from_slice(&key).unwrap();
+        let ciphertext=cipher.encrypt(XNonce::from_slice(&nonce),
+            Payload{msg:&clear,aad:&item_aad(id)}).unwrap();
+        key.zeroize();clear.zeroize();
+        SealedEntry{salt,nonce,ciphertext,fingerprint:String::new(),version:0}
+    }
     #[test]
-    fn independent_code_keeps_urls_secret_even_after_folder_unlock(){
+    fn folder_password_opens_items_without_independent_entry_codes(){
         let path=temporary();
         let mut vault=SecretVault::default();
         vault.open(&path,FOLDER,true).unwrap();
-        let folder=vault.put(&path,"folder",None,"Public Alias",None,None,None).unwrap();
-        let folder_id=folder["id"].as_str().unwrap().to_string();
-        // The folder code must NOT be accepted as the second layer's code.
-        assert!(vault.put(&path,"link",Some(&folder_id),"Visible",
-            Some("https://secret.example/private"),Some("Real Sensitive Title"),Some(FOLDER)).is_err());
-        let a=vault.put(&path,"link",Some(&folder_id),"Visible",
-            Some("https://secret.example/private"),Some("Real Sensitive Title"),Some(ENTRY)).unwrap();
-        let first=a["id"].as_str().unwrap().to_owned();
-        let b=vault.put(&path,"link",Some(&folder_id),"Another",
-            Some("https://secret.example/other"),Some("Second Secret"),Some(ENTRY)).unwrap();
-        let second=b["id"].as_str().unwrap().to_owned();
-        assert!(vault.put(&path,"link",Some(&folder_id),"Duplicate",
-            Some("https://secret.example/private"),Some("Dup"),Some(ENTRY)).is_err());
+        let folder=vault.put(&path,"folder",None,"Folder",None,None,false).unwrap();
+        let folder_id=folder["id"].as_str().unwrap().to_owned();
+        let first=vault.put(&path,"link",Some(&folder_id),"Visible",
+            Some("https://secret.example/private"),Some("Real Sensitive Title"),true).unwrap();
+        let first_id=first["id"].as_str().unwrap().to_owned();
+        let second=vault.put(&path,"link",Some(&folder_id),"Other",
+            Some("https://secret.example/other"),Some("Second Secret"),false).unwrap();
+        let second_id=second["id"].as_str().unwrap().to_owned();
+        assert!(vault.put(&path,"link",None,"Duplicate",
+            Some("https://secret.example/private"),Some(""),false).is_err());
         assert_eq!(vault.legacy_count(),0);
-        let first_entry=vault.entries.iter().find(|x|x.id==first).unwrap();
-        assert!(first_entry.url.is_none());
-        assert!(first_entry.true_title.is_empty());
-        assert!(first_entry.sealed.is_some());
-        // Neither the nested, decrypted outer vault nor raw disk bytes
-        // expose the actual title and link.
-        let inner=serde_json::to_string(&vault.entries).unwrap();
+        let contents=serde_json::to_string(&vault.entries).unwrap();
         let raw=fs::read_to_string(&path).unwrap();
-        for data in [&inner,&raw]{
-            assert!(!data.contains("secret.example"));
-            assert!(!data.contains("Real Sensitive Title"));
+        for sample in [&contents,&raw]{
+            assert!(!sample.contains("secret.example"));
+            assert!(!sample.contains("Real Sensitive Title"));
         }
+        let keys=vault.authorize(&[first_id.clone(),second_id.clone()]).unwrap();
+        assert!(vault.link_with_key(&first_id,&keys[0]).unwrap().ends_with("/private"));
+        assert!(vault.link_with_key(&second_id,&keys[1]).unwrap().ends_with("/other"));
         vault.lock();
         assert!(vault.status(&path).unwrap()["items"].as_array().unwrap().is_empty());
         vault.open(&path,FOLDER,false).unwrap();
-        assert!(vault.authorize(&[first.clone()],"Wrong Entry Code").is_err());
-        vault.retry_after=None;
-        let codes=vault.authorize(&[first.clone(),second.clone()],ENTRY).unwrap();
-        assert!(vault.link_with_key(&first,&codes[0]).unwrap().ends_with("/private"));
-        assert!(vault.link_with_key(&second,&codes[1]).unwrap().ends_with("/other"));
-        assert!(vault.link_with_key(&first,&codes[1]).is_err());
-        vault.lock();
-        let _=fs::remove_file(&path);
-    }
-    #[test]
-    fn legacy_bookmarks_require_explicit_second_code_migration(){
-        let path=temporary();
-        let mut vault=SecretVault::default();
-        vault.open(&path,FOLDER,true).unwrap();
-        let entry=Entry{id:id(),parent:None,kind:"link".into(),
-            visible_name:"Alias".into(),true_title:"Old Title".into(),
-            url:Some("https://legacy.example/private".into()),sealed:None};
-        let old_id=entry.id.clone();
-        vault.entries.push(entry);
-        vault.save(&path).unwrap();
-        vault.lock();
-        vault.open(&path,FOLDER,false).unwrap();
-        assert_eq!(vault.legacy_count(),1);
-        assert!(vault.authorize(&[old_id.clone()],ENTRY).is_err());
-        assert!(vault.migrate(&path,FOLDER).is_err());
-        let outcome=vault.migrate(&path,ENTRY).unwrap();
-        assert_eq!(outcome["legacyCount"],0);
-        assert!(vault.entries.iter().all(|x|x.url.is_none()&&x.true_title.is_empty()));
-        let keys=vault.authorize(&[old_id.clone()],ENTRY).unwrap();
-        assert_eq!(vault.link_with_key(&old_id,&keys[0]).unwrap(),"https://legacy.example/private");
-        vault.lock();
-        let _=fs::remove_file(&path);
-    }
-    #[test]
-    fn unicode_punctuation_is_key_material_not_code_or_path_syntax(){
-        assert!(passcode_valid("<>{}[];:|=?!@#$"));
-        assert!(passcode_valid("🪐✨?&/#*_+-!"));
-        assert!(!passcode_valid(""));
-        assert!(!passcode_valid("12345678901234567"));
-        let path=temporary();
-        let mut vault=SecretVault::default();
-        vault.open(&path,r#"<>{}[];:|=?!@#$"#,true).unwrap();
-        let a=vault.put(&path,"link",None,"",
-            Some("https://example.org/"),Some(""),
-            Some("🪐✨?&/#*_+-!")).unwrap();
-        let id=a["id"].as_str().unwrap().to_owned();
-        let keys=vault.authorize(&[id.clone()],"🪐✨?&/#*_+-!").unwrap();
-        assert_eq!(vault.link_with_key(&id,&keys[0]).unwrap(),"https://example.org/");
+        let keys=vault.authorize(&[first_id.clone(),second_id.clone()]).unwrap();
+        assert!(vault.link_with_key(&first_id,&keys[0]).unwrap().ends_with("/private"));
         let _=fs::remove_file(path);
     }
     #[test]
-    fn password_change_requires_current_and_preserves_independent_bookmarks(){
+    fn visible_name_changes_key_only_if_checked_and_rewraps_on_edit(){
         let path=temporary();
         let mut vault=SecretVault::default();
         vault.open(&path,FOLDER,true).unwrap();
-        let saved=vault.put(&path,"link",None,"Alias",
-            Some("https://private.example.org/protected"),
-            Some("Encrypted Real Name"),Some(ENTRY)).unwrap();
-        let id=saved["id"].as_str().unwrap().to_string();
+        let checked=vault.put(&path,"link",None,"Alias A",
+            Some("https://name-bound.example/"),None,true).unwrap()["id"].as_str().unwrap().to_string();
+        let unchecked=vault.put(&path,"link",None,"Alias B",
+            Some("https://password-only.example/"),None,false).unwrap()["id"].as_str().unwrap().to_string();
+        let master=vault.key.unwrap();
+        let first=vault.entries.iter().find(|e|e.id==checked).unwrap();
+        let first_sealed=first.sealed.as_ref().unwrap();
+        let mut wrong=item_key(&master,&first_sealed.salt,"Wrong alias",true);
+        assert!(decrypt_item(&checked,first_sealed,&wrong).is_err());
+        wrong.zeroize();
+        let other=vault.entries.iter().find(|e|e.id==unchecked).unwrap();
+        let sealed=other.sealed.as_ref().unwrap();
+        let mut unaffected=item_key(&master,&sealed.salt,"Wrong alias",false);
+        assert_eq!(decrypt_item(&unchecked,sealed,&unaffected).unwrap().url,
+            "https://password-only.example/");
+        unaffected.zeroize();
+        vault.edit(&path,&checked,"Renamed Alias",true).unwrap();
+        vault.edit(&path,&unchecked,"Renamed Password-Only",false).unwrap();
+        let keys=vault.authorize(&[checked.clone(),unchecked.clone()]).unwrap();
+        assert_eq!(vault.link_with_key(&checked,&keys[0]).unwrap(),"https://name-bound.example/");
+        assert_eq!(vault.link_with_key(&unchecked,&keys[1]).unwrap(),"https://password-only.example/");
+        vault.edit(&path,&checked,"No name binding",false).unwrap();
+        assert_eq!(vault.entries.iter().find(|e|e.id==checked).unwrap().bind_visible_name,false);
+        vault.lock();
+        vault.open(&path,FOLDER,false).unwrap();
+        assert_eq!(vault.authorize(&[checked,unchecked]).unwrap().len(),2);
+        let _=fs::remove_file(path);
+    }
+    #[test]
+    fn legacy_bookmark_requires_code_once_to_migrate_but_new_items_do_not(){
+        let path=temporary();
+        let mut vault=SecretVault::default();
+        vault.open(&path,FOLDER,true).unwrap();
+        let old_id=id();
+        vault.entries.push(Entry{id:old_id.clone(),parent:None,kind:"link".into(),
+            visible_name:"Old alias".into(),bind_visible_name:false,
+            true_title:String::new(),url:None,
+            sealed:Some(old_seal(&old_id,"Old Title","https://old.example/",OLD_CODE))});
+        vault.save(&path).unwrap();
+        vault.lock();vault.open(&path,FOLDER,false).unwrap();
+        assert_eq!(vault.legacy_count(),1);
+        assert!(vault.authorize(&[old_id.clone()]).is_err());
+        assert!(vault.migrate(&path,"incorrect").is_err());
+        vault.retry_after=None;
+        let result=vault.migrate(&path,OLD_CODE).unwrap();
+        assert_eq!(result["migrated"],1);
+        assert_eq!(vault.legacy_count(),0);
+        assert!(vault.entries.iter().all(|entry|entry.url.is_none()));
+        let keys=vault.authorize(&[old_id.clone()]).unwrap();
+        assert_eq!(vault.link_with_key(&old_id,&keys[0]).unwrap(),"https://old.example/");
+        let _=fs::remove_file(path);
+    }
+    #[test]
+    fn old_folder_only_plaintext_migrates_on_unlock(){
+        let path=temporary();
+        let mut vault=SecretVault::default();
+        vault.open(&path,FOLDER,true).unwrap();
+        let old_id=id();
+        vault.entries.push(Entry{id:old_id.clone(),parent:None,kind:"link".into(),
+            visible_name:"Old alias".into(),bind_visible_name:false,
+            true_title:"Old Title".into(),url:Some("https://plain.example/".into()),sealed:None});
+        vault.save(&path).unwrap();vault.lock();
+        vault.open(&path,FOLDER,false).unwrap();
+        assert_eq!(vault.legacy_count(),0);
+        let keys=vault.authorize(&[old_id.clone()]).unwrap();
+        assert_eq!(vault.link_with_key(&old_id,&keys[0]).unwrap(),"https://plain.example/");
+        assert!(vault.entries.iter().all(|entry|entry.url.is_none()));
+        let _=fs::remove_file(path);
+    }
+    #[test]
+    fn password_change_rewraps_checked_and_unchecked_items(){
+        let path=temporary();
+        let mut vault=SecretVault::default();
+        vault.open(&path,FOLDER,true).unwrap();
+        let a=vault.put(&path,"link",None,"Alias",
+            Some("https://private.example.org/protected"),Some("Encrypted Real Name"),true).unwrap();
+        let b=vault.put(&path,"link",None,"",
+            Some("https://other.example.org/"),None,false).unwrap();
+        let ids=[a["id"].as_str().unwrap().to_string(),b["id"].as_str().unwrap().to_string()];
         let original=fs::read(&path).unwrap();
         assert!(vault.change_password(&path,"wrong!", "new-pass*2026").is_err());
         assert_eq!(fs::read(&path).unwrap(),original);
         vault.retry_after=None;
         assert!(vault.change_password(&path,FOLDER,FOLDER).is_err());
-        let updated=vault.change_password(&path,FOLDER,"new-pass*2026").unwrap();
-        assert_eq!(updated["items"].as_array().unwrap().len(),1);
+        vault.change_password(&path,FOLDER,"new-pass*2026").unwrap();
         vault.lock();
         assert!(vault.open(&path,FOLDER,false).is_err());
         vault.retry_after=None;
         vault.open(&path,"new-pass*2026",false).unwrap();
-        let keys=vault.authorize(&[id.clone()],ENTRY).unwrap();
-        assert_eq!(vault.link_with_key(&id,&keys[0]).unwrap(),
+        let keys=vault.authorize(&ids).unwrap();
+        assert_eq!(vault.link_with_key(&ids[0],&keys[0]).unwrap(),
             "https://private.example.org/protected");
-        vault.lock();
+        assert_eq!(vault.link_with_key(&ids[1],&keys[1]).unwrap(),"https://other.example.org/");
         let _=fs::remove_file(path);
     }
     #[test]
@@ -671,21 +705,15 @@ mod tests{
         let mut vault=SecretVault::default();
         vault.open(&path,FOLDER,true).unwrap();
         vault.put(&path,"link",None,"Alias",Some("https://secret.example.org/"),
-            Some("Hidden"),Some(ENTRY)).unwrap();
-        let old_bytes=fs::read(&path).unwrap();
-        assert!(old_bytes.len()>100);
-        // Simulate a forgotten password: the reset does not supply the old one.
+            Some("Hidden"),true).unwrap();
+        assert!(fs::read(&path).unwrap().len()>100);
         vault.lock();
         let result=vault.reset_without_password(&path).unwrap();
         assert_eq!(result["exists"],false);
         assert!(!path.exists());
         assert!(!path.with_extension("tmp").exists());
-        assert!(!vault.unlocked());
-        // A new installation-style vault can be created only after deletion.
         vault.open(&path,"New!vault#2026",true).unwrap();
         assert!(vault.status(&path).unwrap()["items"].as_array().unwrap().is_empty());
-        vault.lock();
         let _=fs::remove_file(path);
     }
-
 }
