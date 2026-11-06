@@ -6,6 +6,41 @@
   if (!model || !api) return;
   const $ = id => document.getElementById(id);
   const STORE = 'minternet.bookmark-tree.v1';
+  const ICON_STORE = 'minternet.bookmark-icon-thumbnails.v1';
+  // Persist compact, site-specific 24px thumbnails. They are read before the
+  // first paint, so known bookmarks never wait for network favicon requests.
+  const thumbs=new Map(),thumbnailJobs=new Set();
+  try{
+    const cached=JSON.parse(localStorage.getItem(ICON_STORE)||'{}');
+    for(const [address,png] of Object.entries(cached||{}).slice(-220))
+      if(model.url(address)&&typeof png==='string'&&png.length<=10000&&
+         /^data:image\/png;base64,[a-z0-9+/=]+$/i.test(png))thumbs.set(address,png);
+  }catch{}
+  function rememberThumb(address,png){
+    if(!model.url(address)||typeof png!=='string'||png.length>10000||
+       !/^data:image\/png;base64,[a-z0-9+/=]+$/i.test(png))return;
+    thumbs.delete(address);thumbs.set(address,png);
+    while(thumbs.size>170)thumbs.delete(thumbs.keys().next().value);
+    try{localStorage.setItem(ICON_STORE,JSON.stringify(Object.fromEntries(thumbs)));}catch{}
+  }
+  async function cacheIconThumbnail(address,source){
+    if(!window.__TAURI__||thumbs.has(address)||thumbnailJobs.has(address))return;
+    thumbnailJobs.add(address);
+    try{
+      const data=await api.command('bookmark-icon-data',source);
+      if(typeof data!=='string'||!/^data:image\/(?:png|jpeg|webp|x-icon);base64,[a-z0-9+/=]+$/i.test(data))return;
+      const image=new Image();image.src=data;await image.decode();
+      const canvas=document.createElement('canvas');
+      canvas.width=24;canvas.height=24;
+      const ctx=canvas.getContext('2d');
+      if(!ctx||!image.naturalWidth||!image.naturalHeight)return;
+      const scale=Math.min(24/image.naturalWidth,24/image.naturalHeight);
+      ctx.clearRect(0,0,24,24);
+      ctx.drawImage(image,(24-image.naturalWidth*scale)/2,
+        (24-image.naturalHeight*scale)/2,image.naturalWidth*scale,image.naturalHeight*scale);
+      rememberThumb(address,canvas.toDataURL('image/png'));
+    }catch{}finally{thumbnailJobs.delete(address);}
+  }
   let data;
   try { data = model.hydrate(localStorage.getItem(STORE)); }
   catch { data = model.blank(); }
@@ -172,6 +207,7 @@
       slot.replaceChildren(img);
       slot.classList.remove('bookmark-site-fallback');
       slot.style.removeProperty('--bookmark-icon-hue');
+      void cacheIconThumbnail(address,candidate);
     },{once:true});
     img.addEventListener('error',()=>{
       faviconBad.add(candidate);
@@ -196,6 +232,11 @@
       slot.textContent=value;
     }else if(!isFolder && model.url(item?.url)){
       const safe=model.url(item.url);
+      const thumbnail=thumbs.get(safe);
+      if(thumbnail){
+        const img=document.createElement('img');img.alt='';img.src=thumbnail;
+        slot.append(img);return slot;
+      }
       const hostname=new URL(safe).hostname.replace(/^www\./,'');
       // A missing favicon is represented by this site's own initial and
       // stable host color, never by a generic bookmark icon.
@@ -227,7 +268,7 @@
   function renderBar() {
     const holder = $('bookmarkItems');
     holder.replaceChildren();
-    for (const item of data.items) {
+    for (const item of model.barItems(data)) {
       const el = document.createElement('button');
       el.className = 'bookmark-item';
       el.type = 'button';
