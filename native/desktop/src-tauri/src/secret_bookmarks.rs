@@ -404,43 +404,90 @@ mod tests{
     fn temporary()->PathBuf{
         std::env::temp_dir().join(format!("secret-bookmarks-test-{}.enc",id()))
     }
+    const FOLDER:&str="~!@#$%^&*()_+あ🪐";
+    const ENTRY:&str="<>[]{}!@#$%-_++?";
     #[test]
-    fn unicode_punctuation_passcode_roundtrip_and_never_store_secret_url(){
+    fn independent_code_keeps_urls_secret_even_after_folder_unlock(){
         let path=temporary();
-        let code="~!@#$%^&*()_+あ🪐";
         let mut vault=SecretVault::default();
-        vault.open(&path,code,true).unwrap();
-        let folder=vault.put(&path,"folder",None,"Private 📁",None,None).unwrap();
-        let fid=folder["id"].as_str().unwrap();
-        let link=vault.put(&path,"link",Some(fid),"Alias",
-            Some("https://super-secret.example.net/private?q=token"),Some("Sensitive Title")).unwrap();
-        let key=link["id"].as_str().unwrap().to_owned();
-        let serialized=fs::read_to_string(&path).unwrap();
-        assert!(!serialized.contains("super-secret.example.net"));
-        assert!(!serialized.contains("Sensitive Title"));
-        assert!(serialized.contains("Private"));
+        vault.open(&path,FOLDER,true).unwrap();
+        let folder=vault.put(&path,"folder",None,"Public Alias",None,None,None).unwrap();
+        let folder_id=folder["id"].as_str().unwrap().to_string();
+        // The folder code must NOT be accepted as the second layer's code.
+        assert!(vault.put(&path,"link",Some(&folder_id),"Visible",
+            Some("https://secret.example/private"),Some("Real Sensitive Title"),Some(FOLDER)).is_err());
+        let a=vault.put(&path,"link",Some(&folder_id),"Visible",
+            Some("https://secret.example/private"),Some("Real Sensitive Title"),Some(ENTRY)).unwrap();
+        let first=a["id"].as_str().unwrap().to_owned();
+        let b=vault.put(&path,"link",Some(&folder_id),"Another",
+            Some("https://secret.example/other"),Some("Second Secret"),Some(ENTRY)).unwrap();
+        let second=b["id"].as_str().unwrap().to_owned();
+        assert!(vault.put(&path,"link",Some(&folder_id),"Duplicate",
+            Some("https://secret.example/private"),Some("Dup"),Some(ENTRY)).is_err());
+        assert_eq!(vault.legacy_count(),0);
+        let first_entry=vault.entries.iter().find(|x|x.id==first).unwrap();
+        assert!(first_entry.url.is_none());
+        assert!(first_entry.true_title.is_empty());
+        assert!(first_entry.sealed.is_some());
+        // Neither the nested, decrypted outer vault nor raw disk bytes
+        // expose the actual title and link.
+        let inner=serde_json::to_string(&vault.entries).unwrap();
+        let raw=fs::read_to_string(&path).unwrap();
+        for data in [&inner,&raw]{
+            assert!(!data.contains("secret.example"));
+            assert!(!data.contains("Real Sensitive Title"));
+        }
         vault.lock();
-        assert!(vault.link(&key).is_err());
-        assert!(vault.open(&path,"wrong!",false).is_err());
-        assert!(vault.open(&path,code,false).is_err()); // short lockout
-        vault.retry_after=None;
-        vault.open(&path,code,false).unwrap();
-        assert!(vault.link(&key).unwrap().contains("super-secret"));
-        assert!(vault.put(&path,"link",Some(fid),"Alias 2",
-            Some("https://super-secret.example.net/private?q=token"),None).is_err());
-        vault.delete(&path,fid).unwrap();
         assert!(vault.status(&path).unwrap()["items"].as_array().unwrap().is_empty());
+        vault.open(&path,FOLDER,false).unwrap();
+        assert!(vault.authorize(&[first.clone()],"Wrong Entry Code").is_err());
+        vault.retry_after=None;
+        let codes=vault.authorize(&[first.clone(),second.clone()],ENTRY).unwrap();
+        assert!(vault.link_with_key(&first,&codes[0]).unwrap().ends_with("/private"));
+        assert!(vault.link_with_key(&second,&codes[1]).unwrap().ends_with("/other"));
+        assert!(vault.link_with_key(&first,&codes[1]).is_err());
         vault.lock();
-        let _=fs::remove_file(path);
+        let _=fs::remove_file(&path);
     }
     #[test]
-    fn every_special_character_is_encoded_as_opaque_utf8_key_material(){
+    fn legacy_bookmarks_require_explicit_second_code_migration(){
         let path=temporary();
         let mut vault=SecretVault::default();
-        vault.open(&path,r#"\"\'&<>?+;=[]{}|^!@#$%"#,true).unwrap_err(); // >16 scalars
-        vault.open(&path,r#"<>{}[];:|=?!@#$"#,true).unwrap();
+        vault.open(&path,FOLDER,true).unwrap();
+        let entry=Entry{id:id(),parent:None,kind:"link".into(),
+            visible_name:"Alias".into(),true_title:"Old Title".into(),
+            url:Some("https://legacy.example/private".into()),sealed:None};
+        let old_id=entry.id.clone();
+        vault.entries.push(entry);
+        vault.save(&path).unwrap();
         vault.lock();
-        vault.open(&path,r#"<>{}[];:|=?!@#$"#,false).unwrap();
+        vault.open(&path,FOLDER,false).unwrap();
+        assert_eq!(vault.legacy_count(),1);
+        assert!(vault.authorize(&[old_id.clone()],ENTRY).is_err());
+        assert!(vault.migrate(&path,FOLDER).is_err());
+        let outcome=vault.migrate(&path,ENTRY).unwrap();
+        assert_eq!(outcome["legacyCount"],0);
+        assert!(vault.entries.iter().all(|x|x.url.is_none()&&x.true_title.is_empty()));
+        let keys=vault.authorize(&[old_id.clone()],ENTRY).unwrap();
+        assert_eq!(vault.link_with_key(&old_id,&keys[0]).unwrap(),"https://legacy.example/private");
+        vault.lock();
+        let _=fs::remove_file(&path);
+    }
+    #[test]
+    fn unicode_punctuation_is_key_material_not_code_or_path_syntax(){
+        assert!(passcode_valid("<>{}[];:|=?!@#$"));
+        assert!(passcode_valid("🪐✨?&/#*_+-!"));
+        assert!(!passcode_valid(""));
+        assert!(!passcode_valid("12345678901234567"));
+        let path=temporary();
+        let mut vault=SecretVault::default();
+        vault.open(&path,r#"<>{}[];:|=?!@#$"#,true).unwrap();
+        let a=vault.put(&path,"link",None,"",
+            Some("https://example.org/"),Some(""),
+            Some("🪐✨?&/#*_+-!")).unwrap();
+        let id=a["id"].as_str().unwrap().to_owned();
+        let keys=vault.authorize(&[id.clone()],"🪐✨?&/#*_+-!").unwrap();
+        assert_eq!(vault.link_with_key(&id,&keys[0]).unwrap(),"https://example.org/");
         let _=fs::remove_file(path);
     }
 }
