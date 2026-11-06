@@ -186,6 +186,12 @@ impl SecretVault{
         }
         self.lock();self.key=Some(key);self.salt=Some(disk.salt);self.entries=entries;
         self.failed_attempts=0;self.retry_after=None;
+        // Legacy format exposed optional display aliases in a cleartext
+        // sidecar. Rewrite immediately under the authenticated folder key,
+        // even before the separate entry-code migration is performed.
+        if disk.version==1{
+            if let Err(error)=self.save(path){self.lock();return Err(error);}
+        }
         self.status(path)
     }
     pub fn save(&self,path:&PathBuf)->Result<(),String>{
