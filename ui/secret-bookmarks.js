@@ -168,7 +168,12 @@
   }
   function updateState(next){
     if(next?.message)throw new Error(next.message);
-    if(next?.items)status.items=next.items;
+    if(next?.items){
+      status.items=next.items;
+      // Mutations return updated items but not always a legacy count.
+      if(typeof next.legacyCount!=='number')
+        status.legacyCount=next.items.filter(item=>item.legacyCodeRequired).length;
+    }
     if(typeof next?.exists==='boolean')status.exists=next.exists;
     if(typeof next?.unlocked==='boolean')status.unlocked=next.unlocked;
     if(typeof next?.legacyCount==='number')status.legacyCount=next.legacyCount;
