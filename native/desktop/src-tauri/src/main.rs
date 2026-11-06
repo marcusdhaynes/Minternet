@@ -1737,7 +1737,7 @@ fn prepare_active(app: &tauri::AppHandle) -> Result<(), String> {
         let store = app.state::<Mutex<Browser>>();
         let mut b = store.lock().map_err(|e| e.to_string())?;
         let Some(tab) = b.active() else { return Ok(()) };
-        if tab.url != HOME || tab.view.is_some() || b.warming.contains(&tab.id) {
+        if tab.url != HOME || tab.view.is_some() || tab.secret_id.is_some() || b.warming.contains(&tab.id) {
             return Ok(());
         }
         let (id, private) = (tab.id, tab.private);
@@ -1962,6 +1962,7 @@ fn check_idle_tabs(app:&tauri::AppHandle, minutes:u64) -> Result<(),String>{
                             tab.inactive_since==Some(since) &&
                             Instant::now().duration_since(since)>=idle {
                             tab.loading=false;tab.audio_playing=false;tab.audio_muted=false;
+                            if tab.secret_id.is_some(){tab.secret_revealed=false;}
                             tab.view.take()
                         }else{None}
                     }else{None}
@@ -3027,6 +3028,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 let state=app.state::<Mutex<Browser>>();
                 let mut b=state.lock().map_err(|e|e.to_string())?;
                 let tab=b.tabs.iter_mut().find(|t|t.id==id).ok_or("Tab not found")?;
+                if tab.secret_id.is_some(){return Err("Secret tabs cannot be pinned".into());}
                 tab.pinned=match name.as_str(){
                     "pin"=>true,"unpin"=>false,_=>!tab.pinned
                 };
@@ -3042,6 +3044,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 let state=app.state::<Mutex<Browser>>();
                 let browser=state.lock().map_err(|e|e.to_string())?;
                 let tab=browser.tabs.iter().find(|t|t.id==id).ok_or("Unknown tab")?;
+                if tab.secret_id.is_some(){return Err("Secret tabs cannot be duplicated outside the vault".into());}
                 (tab.url.clone(),tab.private)
             };
             let new_id={
