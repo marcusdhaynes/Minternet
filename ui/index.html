@@ -182,13 +182,13 @@
     <aside class="secret-panel" role="dialog" aria-modal="true" aria-label="Secret Bookmarks">
       <div class="secret-heading">
         <span class="secret-heading-icon">◈</span><strong>Secret Bookmarks</strong>
-        <button type="button" id="secretChangePassword" title="Change the Secret Folder password">Password…</button>
+        <button type="button" id="secretChangePassword" title="Change the Secret Folder password" hidden>Password…</button>
         <button type="button" id="secretLock" title="Lock secret vault">Lock</button>
         <button type="button" id="secretClose" aria-label="Close Secret Bookmarks">×</button>
       </div>
       <p id="secretMessage" class="secret-description">A separate encrypted vault. Site addresses and real titles never appear in the bookmark list.</p>
       <div class="secret-security-actions">
-        <button type="button" id="secretResetStart" class="secret-destructive-link" title="Delete the entire Secret Bookmarks vault when the current folder password is unavailable">Forgot Folder Password? Reset Vault…</button>
+        <button type="button" id="secretResetStart" hidden class="secret-destructive-link" title="Delete the entire Secret Bookmarks vault when the current folder password is unavailable">Forgot Folder Password? Reset Vault…</button>
       </div>
       <form id="secretPasswordChangeForm" class="secret-security-form" autocomplete="off" hidden>
         <strong>Change Secret Folder Password</strong>
