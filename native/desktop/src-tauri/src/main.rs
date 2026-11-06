@@ -978,6 +978,44 @@ mod bookmark_favicon_tests {
     }
 }
 
+// Fetch a favicon image only, never the page body. Small, validated images
+// are converted by trusted chrome to 24px PNG and cached in the local profile.
+// This avoids repeated full-page discovery requests (notably to YouTube).
+fn fetch_bookmark_icon_data(raw:&str)->Result<String,String>{
+    use std::io::Read;
+    let url=tauri::Url::parse(raw).map_err(|_|"Invalid icon URL")?;
+    if url.scheme()!="https"||url.host_str().is_none()||
+       !url.username().is_empty()||url.password().is_some(){
+        return Err("Only credential-free HTTPS favicon URLs are allowed".into());
+    }
+    let host=url.host_str().unwrap_or_default().to_ascii_lowercase();
+    if host=="localhost"||host.ends_with(".localhost")||host.ends_with(".local")||
+       host.parse::<std::net::IpAddr>().is_ok(){
+        return Err("Private or numeric hosts are not valid favicon sources".into());
+    }
+    let agent=ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(2))
+        .timeout_read(Duration::from_secs(3))
+        .timeout_write(Duration::from_secs(2))
+        .redirects(0)
+        .build();
+    let response=agent.get(url.as_str())
+        .set("Accept","image/png,image/jpeg,image/webp,image/x-icon")
+        .call().map_err(|_|"Favicon fetch unavailable")?;
+    // Require actual image content by magic bytes, not server-supplied MIME.
+    let mut bytes=Vec::new();
+    response.into_reader().take(100_001).read_to_end(&mut bytes)
+        .map_err(|_|"Could not read favicon")?;
+    if bytes.len()>100_000{return Err("Favicon exceeds 100 KB".into());}
+    let mime=if bytes.starts_with(b"\x89PNG\r\n\x1a\n"){"image/png"}
+       else if bytes.starts_with(&[0xff,0xd8,0xff]){"image/jpeg"}
+       else if bytes.len()>=12&&bytes.starts_with(b"RIFF")&&&bytes[8..12]==b"WEBP"{"image/webp"}
+       else if bytes.starts_with(&[0,0,1,0]){"image/x-icon"}
+       else{return Err("Favicon is not a supported raster image".into());};
+    Ok(format!("data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)))
+}
+
 fn lookup_site_icons(url:&str)->Vec<String>{
     use std::io::Read;
     let Ok(mut page)=tauri::Url::parse(url) else{return Vec::new()};
@@ -2709,6 +2747,15 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         return tauri::async_runtime::spawn_blocking(move||
             firefox_bookmarks::resolve_folder(&guid,id,&title))
             .await.map_err(|e|e.to_string())?;
+    }
+    if name=="bookmark-icon-data" {
+        let url=value.as_str().ok_or("Expected HTTPS favicon URL")?;
+        if url.len()>4096{return Err("Favicon URL too long".into());}
+        let target=url.to_owned();
+        let result=tauri::async_runtime::spawn_blocking(move||
+            fetch_bookmark_icon_data(&target))
+            .await.map_err(|e|e.to_string())??;
+        return Ok(json!(result));
     }
     if name=="bookmark-site-icons" {
         let url=value.as_str().ok_or("Expected bookmarked HTTPS URL")?;
