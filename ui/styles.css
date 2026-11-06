@@ -1339,7 +1339,7 @@ html.minternet-overlay-active .group-editor-backdrop {
  box-shadow:0 14px 40px #050516bc;padding:6px}
 .secret-star-menu button{background:transparent;border:0;color:#f4efff;font-size:11px;padding:8px 9px;text-align:left;cursor:pointer;border-radius:5px}
 .secret-star-menu button:hover{background:#785eaa66}
-.address-star.secret-star-flash{animation:secret-star-blink .16s ease-in-out 3 alternate;color:#d6a9ff!important}
+.address-star.secret-star-flash{animation:secret-star-blink .15s ease-in-out 6 alternate;color:#d6a9ff!important}
 @keyframes secret-star-blink{from{filter:brightness(1);background:transparent}to{filter:brightness(2.3);background:#995bda88;box-shadow:0 0 15px #af70ef}}
 .secret-pending-screen{position:fixed;z-index:25;inset:var(--chrome-height,52px) 0 0;display:grid;place-items:center;
  background:radial-gradient(ellipse at 50% 39%,#53427a 0%,#272741 32%,#0c111ecf 75%);
@@ -1354,3 +1354,9 @@ html.minternet-overlay-active .group-editor-backdrop {
 .secret-reveal-eye svg{width:59px;height:59px}
 :root.secret-active .tab.selected{border-bottom:2px solid #b18ced}
 @media(max-width:600px){.secret-panel{margin:9px auto;max-height:calc(100vh - 100px)}.secret-tree{max-height:30vh}}
+
+.bookmark-site-fallback{font-size:11px;font-weight:700;display:inline-grid;place-items:center;
+ color:#ffffff!important;background:hsl(var(--bookmark-icon-hue,255) 30% 36%);border-radius:4px}
+.tab-symbol.secret-tab-icon{color:#c7a5f8;font-size:14px}
+#secretGroupNameSettings{width:92px;max-width:34%;height:25px;border:1px solid #766b93;
+ border-radius:5px;background:#161b2b;color:#e7dcff;font-size:11px;padding:3px 6px}
