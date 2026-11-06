@@ -59,7 +59,7 @@ test('folder menu actions target the correct folder, without executable URLs',()
  const items=h.window.minternetMenus.inspectFolder(h.root.id);
  items.find(x=>x.text?.includes('Folder Properties')).action();
  assert.equal(h.flags.folderEdits,1);
- assert.equal(h.bookmarks.items[0].children[0].children[0].url,'https://example.com/');
+ assert.equal(bm.find(h.bookmarks,h.sub.id).children[0].url,'https://example.com/');
 });
 
 test('context tab menu pins and unpins a real tab without closing it',()=>{
