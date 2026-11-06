@@ -412,6 +412,9 @@
     document.documentElement.classList.remove('bookmark-drag-over');
   }
   document.addEventListener('dragover',event=>{
+    // Secret Bookmarks drop targets belong exclusively to the encrypted
+    // importer. Never copy their dropped URL into normal bookmark storage.
+    if(event.target?.closest?.('[data-secret-target],#secretBookmarksBar,#secretTree'))return;
     if(!externalTransfer(event.dataTransfer))return;
     const parent=dropTarget(event);
     // Browser-chrome must never navigate to dropped external files or URLs.
@@ -425,6 +428,7 @@
     document.documentElement.classList.add('bookmark-drag-over');
   },true);
   document.addEventListener('drop',event=>{
+    if(event.target?.closest?.('[data-secret-target],#secretBookmarksBar,#secretTree'))return;
     const parent=dropTarget(event);
     if(!externalTransfer(event.dataTransfer))return;
     event.preventDefault();event.stopPropagation();
