@@ -11,7 +11,7 @@
   const GROUP_PREF='minternet.secret-group-name.v1';
   let status={exists:false,unlocked:false,items:[]};
   let selected=new Set(),folder=null,pendingAdd=null,pendingDrop=null,pendingReveal=null;
-  let editMode=null,editId=null,starMenu=null,autoLockTimer=null,suppressStarClick=false;
+  let editMode=null,editId=null,editorTrueTitle='',pendingNormalId=null,starMenu=null,autoLockTimer=null,suppressStarClick=false;
   let lastState=null;
   const tell=message=>{
     const el=$('secretMessage');
@@ -76,7 +76,7 @@
     overlay(false);
     $('secretEditor').hidden=true;
     $('secretCode').value='';
-    pendingAdd=null;pendingDrop=null;
+    pendingAdd=null;pendingDrop=null;pendingNormalId=null;editorTrueTitle='';
   }
   async function lock(){
     try{await request('secret-lock');}catch(error){tell(error.message);return;}
@@ -174,7 +174,7 @@
       pendingAdd={kind,url,title};
       void open();return;
     }
-    editMode=kind;editId=id;
+    editMode=kind;editId=id;editorTrueTitle=title||'';
     $('secretUnlocked').hidden=true;
     $('secretEditor').hidden=false;
     $('secretEditorTitle').textContent=id?'Edit Visible Name':kind==='folder'?'New Secret Folder':'New Secret Bookmark';
@@ -245,9 +245,14 @@
       const result=editId
         ?await request('secret-edit',{id:editId,visibleName})
         :await request('secret-put',{kind:editMode,parent:folder,
-          visibleName,url:editMode==='link'?$('secretUrl').value:'',title:visibleName});
+          visibleName,url:editMode==='link'?$('secretUrl').value:'',title:editorTrueTitle});
       updateState(result);
       $('secretUrl').value='';
+      if(pendingNormalId){
+        window.minternetBookmarks?.deleteBookmark(pendingNormalId,true);
+        pendingNormalId=null;
+      }
+      editorTrueTitle='';
       $('secretEditor').hidden=true;
       $('secretUnlocked').hidden=false;
       editId=null;editMode=null;
@@ -291,7 +296,8 @@
     if(custom){
       try{
         const raw=JSON.parse(custom);
-        if(model?.url(raw.url))return [{kind:'link',url:raw.url,name:raw.name||''}];
+        if(model?.url(raw.url))return [{kind:'link',url:raw.url,name:raw.name||'',
+          sourceId:typeof raw.id==='string'?raw.id:null}];
       }catch{}
     }
     const imported=window.MinternetBookmarkImport?.parseTransfer(dt)||[];
@@ -311,6 +317,7 @@
         await request('secret-put',{kind:'link',parent:where,
           visibleName:node.name||'',url:node.url,title:node.name||''});
         saved++;
+        if(node.sourceId)window.minternetBookmarks?.deleteBookmark(node.sourceId,true);
       }
     }
     try{
@@ -423,6 +430,7 @@
   $('secretDiscard').addEventListener('click',()=>{
     $('secretUrl').value='';$('secretEditor').hidden=true;
     $('secretUnlocked').hidden=false;editId=null;editMode=null;
+    editorTrueTitle='';pendingNormalId=null;
   });
   $('secretReveal').addEventListener('click',()=>void reveal());
   $('secretGroupName').addEventListener('input',savePreference);
@@ -442,7 +450,9 @@
     addPage,contextualStar,
     addFromNormal:id=>{
       const item=model?.find(window.minternetBookmarks?.getState(),id);
-      if(item?.kind==='link')addPage(item.url,item.name);
+      if(item?.kind==='link'){
+        pendingNormalId=id;addPage(item.url,item.name);
+      }
     },
     renderManagerLink(){
       const button=$('secretBookmarksManager');
