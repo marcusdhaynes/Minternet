@@ -83,6 +83,32 @@
         .finally(()=>{iconsRunning--;runIconJobs();});
     }
   }
+  // Google migrated Gmail and Calendar branding in May 2026. Some logged-in
+  // Google apps expose a generic google.com favicon or their login page instead
+  // of the app icon. Use the official current product-logo assets for only
+  // these exact hosts, without replacing a user's explicit custom icon.
+  function currentGoogleIcons(address){
+    let host='';
+    try{host=new URL(address).hostname.toLowerCase();}catch{return [];}
+    if(['mail.google.com','gmail.google.com','gmail.com'].includes(host)){
+      return [
+        'https://ssl.gstatic.com/images/branding/productlogos/gmail_2026/v2/ico/gmail_2026_256dp.ico',
+        'https://ssl.gstatic.com/ui/v1/icons/mail/rfr/gmail.ico',
+        'https://ssl.gstatic.com/ui/v1/icons/mail/images/favicon5.ico'
+      ];
+    }
+    if(['calendar.google.com','www.google.com'].includes(host)){
+      // Do not hijack normal Google Search bookmarks that happen to share
+      // the www.google.com origin.
+      const isCalendar=host==='calendar.google.com'||new URL(address).pathname.startsWith('/calendar');
+      if(isCalendar)return [
+        'https://ssl.gstatic.com/images/branding/productlogos/calendar_2026/v2/ico/calendar_2026_256dp.ico',
+        'https://calendar.google.com/googlecalendar/images/favicons_2020q4/calendar_31_256.ico',
+        'https://calendar.google.com/googlecalendar/images/favicons_2020q4/calendar_31.ico'
+      ];
+    }
+    return [];
+  }
   function fallbackIcons(address){
     const safe=model.url(address);
     if(!safe)return [];
@@ -106,6 +132,13 @@
     if(!safe)return Promise.resolve([]);
     if(faviconGood.has(safe))return Promise.resolve([faviconGood.get(safe)]);
     if(faviconCandidates.has(safe))return faviconCandidates.get(safe);
+    const branded=currentGoogleIcons(safe);
+    if(branded.length){
+      // Avoid slow logged-in HTML scanning and preserve true product icons.
+      const promise=Promise.resolve(branded);
+      faviconCandidates.set(safe,promise);
+      return promise;
+    }
     const promise=new Promise(resolve=>{
       iconJobs.push({resolve,run:async()=>{
         let declared=[];
@@ -137,6 +170,8 @@
     img.addEventListener('load',()=>{
       faviconGood.set(address,candidate);
       slot.replaceChildren(img);
+      slot.classList.remove('bookmark-site-fallback');
+      slot.style.removeProperty('--bookmark-icon-hue');
     },{once:true});
     img.addEventListener('error',()=>{
       faviconBad.add(candidate);
