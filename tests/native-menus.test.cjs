@@ -105,7 +105,7 @@ test('right-clicking an actual tab directly offers a new group containing it',()
 
 test('right-clicked bookmark gets background tab, rename, and delete actions without groups',()=>{
  const h=harness();
- const leaf=h.bookmarks.items[0].children[0].children[0];
+ const leaf=bm.find(h.bookmarks,h.sub.id).children[0];
  const menu=h.window.minternetMenus.inspectBookmark(leaf.id);
  assert.ok(!menu.some(x=>x.text?.includes('Tab Groups')));
  const action=text=>menu.find(x=>x.text?.includes(text))?.action();
