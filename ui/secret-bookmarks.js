@@ -214,6 +214,7 @@
     $('secretOpenSelected').disabled=!status.items.some(x=>selected.has(x.id));
   }
   function promptEntry(task){
+    if(status.unlocked&&screen.hidden)overlay(true);
     if(!status.unlocked){
       // The second code is never a substitute for the folder password.
       tell('Unlock the Secret Folder first.');
