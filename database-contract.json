@@ -28,5 +28,15 @@
   "current_stage": "database_reserved_not_live",
   "source_data_migrated": false,
   "docs": "AGENTS.md",
-  "canonical_map": "marcusdhaynes/somniel-holdings/database-routing.json"
+  "canonical_map": "marcusdhaynes/somniel-holdings/database-routing.json",
+  "domain_storage_guidance": {
+    "store": [
+      "Encrypted cross-device normal tabs, groups, bookmarks, preferences, and undo history after client-side encryption and user authentication are verified",
+      "Encrypted vault sync metadata only if end-to-end encryption and conflict resolution are validated"
+    ],
+    "avoid": [
+      "Plaintext passwords, payment cards, secret bookmark URLs, private/Tor history, Gmail one-time codes, OAuth refresh tokens"
+    ],
+    "cutover": "Current local/Google sync must remain untouched until all platform clients, encryption and account migration are tested."
+  }
 }
