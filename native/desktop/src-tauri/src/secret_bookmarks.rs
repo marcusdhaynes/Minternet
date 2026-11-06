@@ -9,26 +9,41 @@ use serde::{Serialize,Deserialize};
 use serde_json::{Value,json};
 use tauri::Manager;
 use zeroize::Zeroize;
+use sha2::{Sha256,Digest};
 
 const MAX_ITEMS:usize=1800;
 const MAX_BYTES:usize=1_900_000;
 const MAX_DEPTH:usize=12;
 const AAD:&[u8]=b"Minternet.SecretBookmarks.v1|XChaCha20Poly1305|Argon2id";
+const ITEM_AAD:&[u8]=b"Minternet.SecretBookmarks.Item.v2|XChaCha20Poly1305|Argon2id";
 #[derive(Serialize,Deserialize,Clone,PartialEq,Eq)]
 #[serde(rename_all="camelCase")]
 pub struct PublicItem{
     id:String, parent:Option<String>, kind:String, visible_name:String,
 }
 #[derive(Serialize,Deserialize,Clone)]
+struct SealedEntry {
+    salt:[u8;16], nonce:[u8;24], ciphertext:Vec<u8>,
+    // Blind index only inside the outer authenticated encrypted vault.
+    #[serde(default)] fingerprint:String,
+}
+#[derive(Serialize,Deserialize,Clone)]
 struct Entry{
     id:String,parent:Option<String>,kind:String,visible_name:String,
-    true_title:String,url:Option<String>,
+    #[serde(default,skip_serializing_if="String::is_empty")] true_title:String,
+    #[serde(default,skip_serializing_if="Option::is_none")] url:Option<String>,
+    #[serde(default,skip_serializing_if="Option::is_none")] sealed:Option<SealedEntry>,
+}
+#[derive(Serialize,Deserialize)]
+struct SensitiveLink { title:String, url:String }
+impl Drop for SensitiveLink {
+    fn drop(&mut self){self.title.zeroize();self.url.zeroize();}
 }
 impl Drop for Entry{fn drop(&mut self){self.true_title.zeroize();if let Some(u)=self.url.as_mut(){u.zeroize();}}}
 #[derive(Serialize,Deserialize)]
 struct Disk{
     version:u8,salt:[u8;16],nonce:[u8;24],ciphertext:Vec<u8>,
-    visible:Vec<PublicItem>,
+    #[serde(default,skip_serializing_if="Vec::is_empty")] visible:Vec<PublicItem>,
 }
 #[derive(Default)]
 pub struct SecretVault{
@@ -59,7 +74,7 @@ fn load(path:&PathBuf)->Result<Disk,String>{
     let bytes=fs::read(path).map_err(|_|"No Secret Bookmarks vault exists".to_string())?;
     if bytes.len()>MAX_BYTES+500_000{return Err("Secret vault exceeds storage limit".into());}
     let d:Disk=serde_json::from_slice(&bytes).map_err(|_|"Invalid Secret Bookmarks vault".to_string())?;
-    if d.version!=1||d.visible.len()>MAX_ITEMS{return Err("Unsupported secret vault".into());}
+    if !matches!(d.version,1|2)||d.visible.len()>MAX_ITEMS{return Err("Unsupported secret vault".into());}
     Ok(d)
 }
 fn visible(entry:&Entry)->PublicItem{
@@ -77,6 +92,47 @@ fn id()->String{
     let mut bytes=[0u8;16];OsRng.fill_bytes(&mut bytes);
     bytes.iter().map(|b|format!("{b:02x}")).collect()
 }
+fn item_aad(id:&str)->Vec<u8>{
+    let mut bytes=ITEM_AAD.to_vec();
+    bytes.extend_from_slice(id.as_bytes());
+    bytes
+}
+// This key-separated digest is only inside the outer encrypted vault. It
+// detects duplicate URLs without keeping the URL available to a folder unlock.
+fn blind_fingerprint(index_key:&[u8;32],url:&str)->String{
+    let mut mac_input=Vec::with_capacity(32+url.len()+32);
+    mac_input.extend_from_slice(b"Minternet Secret URL equality v2");
+    mac_input.extend_from_slice(index_key);
+    mac_input.extend_from_slice(url.as_bytes());
+    let digest=Sha256::digest(&mac_input);
+    mac_input.zeroize();
+    digest.iter().map(|x|format!("{x:02x}")).collect()
+}
+fn encrypted_link(id:&str,title:&str,url:&str,code:&str,
+    fingerprint:String)->Result<SealedEntry,String>{
+    let mut salt=[0u8;16];OsRng.fill_bytes(&mut salt);
+    let mut key=derive(code,&salt)?;
+    let mut nonce=[0u8;24];OsRng.fill_bytes(&mut nonce);
+    let payload=SensitiveLink{title:title.to_owned(),url:url.to_owned()};
+    let mut clear=serde_json::to_vec(&payload).map_err(|e|e.to_string())?;
+    let cipher=XChaCha20Poly1305::new_from_slice(&key).map_err(|_|"Cipher init failed")?;
+    let result=cipher.encrypt(XNonce::from_slice(&nonce),
+        Payload{msg:&clear,aad:&item_aad(id)}).map_err(|_|"Bookmark encryption failed".to_string());
+    key.zeroize();clear.zeroize();
+    Ok(SealedEntry{salt,nonce,ciphertext:result?,fingerprint})
+}
+fn decrypt_item(id:&str,sealed:&SealedEntry,key:&[u8;32])->Result<SensitiveLink,String>{
+    let cipher=XChaCha20Poly1305::new_from_slice(key)
+        .map_err(|_|"Cipher init failed")?;
+    let mut clear=cipher.decrypt(XNonce::from_slice(&sealed.nonce),
+        Payload{msg:&sealed.ciphertext,aad:&item_aad(id)})
+        .map_err(|_|"Wrong bookmark code or encrypted entry authentication failed".to_string())?;
+    let parsed=serde_json::from_slice::<SensitiveLink>(&clear)
+        .map_err(|_|"Encrypted bookmark payload is damaged".to_string());
+    clear.zeroize();
+    parsed
+}
+
 impl SecretVault{
     pub fn unlocked(&self)->bool{self.key.is_some()}
     pub fn lock(&mut self){
@@ -91,9 +147,15 @@ impl SecretVault{
         self.retry_after=Some(Instant::now()+Duration::from_secs(seconds));
     }
     pub fn status(&self,path:&PathBuf)->Result<Value,String>{
-        if !path.exists(){return Ok(json!({"exists":false,"unlocked":false,"items":[]}));}
-        let disk=load(path)?;
-        Ok(json!({"exists":true,"unlocked":self.unlocked(),"items":disk.visible}))
+        if !path.exists(){return Ok(json!({"exists":false,"unlocked":false,"items":[],"legacyCount":0}));}
+        if !self.unlocked(){
+            // Never disclose optional labels or hierarchy from disk or UI
+            // while the outer folder is locked.
+            return Ok(json!({"exists":true,"unlocked":false,"items":[],"legacyCount":0}));
+        }
+        Ok(json!({"exists":true,"unlocked":true,
+            "items":visible_json(&self.entries),
+            "legacyCount":self.entries.iter().filter(|e|e.kind=="link"&&e.sealed.is_none()).count()}))
     }
     pub fn open(&mut self,path:&PathBuf,code:&str,create:bool)->Result<Value,String>{
         if let Some(deadline)=self.retry_after{
@@ -119,7 +181,8 @@ impl SecretVault{
         let parsed=serde_json::from_slice::<Vec<Entry>>(&clear);
         clear.zeroize();
         let entries=parsed.map_err(|_|"Secret vault payload invalid".to_string())?;
-        if entries.len()>MAX_ITEMS || visible_json(&entries)!=disk.visible {
+        if entries.len()>MAX_ITEMS ||
+            (disk.version==1 && visible_json(&entries)!=disk.visible) {
             key.zeroize();return Err("Secret vault metadata failed integrity validation".into());
         }
         self.lock();self.key=Some(key);self.salt=Some(disk.salt);self.entries=entries;
@@ -136,9 +199,11 @@ impl SecretVault{
         let encrypted=cipher.encrypt(XNonce::from_slice(&nonce),
             Payload{msg:clear.as_slice(),aad:AAD});
         clear.zeroize();
-        let disk=Disk{version:1,salt,nonce,ciphertext:encrypted
+        // New format never stores even the visible labels unencrypted.
+        // Legacy v1 files remain readable and are upgraded on next write.
+        let disk=Disk{version:2,salt,nonce,ciphertext:encrypted
             .map_err(|_|"Secret encryption failed".to_string())?,
-            visible:visible_json(&self.entries)};
+            visible:Vec::new()};
         let bytes=serde_json::to_vec(&disk).map_err(|e|e.to_string())?;
         if let Some(dir)=path.parent(){fs::create_dir_all(dir).map_err(|e|e.to_string())?;}
         let tmp=path.with_extension("tmp");
