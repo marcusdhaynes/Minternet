@@ -5,7 +5,7 @@
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.MinternetBookmarks = api;
 })(typeof window !== 'undefined' ? window : null, () => {
-  const MAX_ITEMS = 2000, MAX_DEPTH = 12, MAX_IMAGE_LENGTH = 45000;
+  const MAX_ITEMS = 2000, MAX_DEPTH = 13, MAX_IMAGE_LENGTH = 45000;
   const BOOKMARK_BAR_ID = 'minternet-bookmark-bar';
   const makeBar = children => ({ id: BOOKMARK_BAR_ID, kind:'folder', name:'Bookmark Bar', icon:'📁', children });
   const imageRE = /^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=]+$/i;
