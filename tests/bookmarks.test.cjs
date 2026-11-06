@@ -123,3 +123,47 @@ test('Bookmark Bar is a permanent real folder with automatic legacy migration',(
  assert.equal(b.location(copy,link.id).parent.id,b.BOOKMARK_BAR_ID);
  assert.equal(b.byUrl(copy,'https://youtube.com/watch?v=123').id,'saved');
 });
+
+
+test('drag ordering moves original bar folders and links without touching contents',()=>{
+ const s=b.blank();
+ const a=b.add(s,'folder',null,{name:'A',icon:'🌌'});
+ const link=b.add(s,'link',null,{name:'Google',url:'https://google.com/'});
+ const bFolder=b.add(s,'folder',null,{name:'B',icon:'🌿'});
+ const c=b.add(s,'folder',null,{name:'C'});
+ const nested=b.add(s,'folder',a.id,{name:'Inside A'});
+ const page=b.add(s,'link',nested.id,{name:'Preserved',url:'https://example.org/private'});
+ const ids=()=>b.barItems(s).map(x=>x.id);
+ assert.deepEqual(ids(),[a.id,link.id,bFolder.id,c.id]);
+
+ // Drop C before A, then A after B, then the web link between two folders.
+ assert.equal(b.reorderBar(s,c.id,a.id,false),true);
+ assert.deepEqual(ids(),[c.id,a.id,link.id,bFolder.id]);
+ assert.equal(b.reorderBar(s,a.id,bFolder.id,true),true);
+ assert.deepEqual(ids(),[c.id,link.id,bFolder.id,a.id]);
+ assert.equal(b.reorderBar(s,link.id,a.id,false),true);
+ assert.deepEqual(ids(),[c.id,bFolder.id,link.id,a.id]);
+
+ // Dropping onto the same item or the adjacent position is a no-op.
+ assert.equal(b.reorderBar(s,a.id,a.id,true),false);
+ assert.equal(b.reorderBar(s,bFolder.id,link.id,false),false);
+ assert.deepEqual(ids(),[c.id,bFolder.id,link.id,a.id]);
+
+ // Dropping at the end works, including after the rightmost item.
+ assert.equal(b.reorderBar(s,c.id),true);
+ assert.deepEqual(ids(),[bFolder.id,link.id,a.id,c.id]);
+ assert.equal(b.reorderBar(s,c.id),false);
+
+ // Root and nested entries must not be moved by bar-only drop operations.
+ assert.equal(b.reorderBar(s,b.BOOKMARK_BAR_ID,a.id,true),false);
+ assert.equal(b.reorderBar(s,nested.id,a.id,true),false);
+ assert.equal(b.reorderBar(s,a.id,nested.id,true),false);
+ assert.equal(b.reorderBar(s,a.id,'does-not-exist',true),false);
+ assert.equal(b.find(s,page.id).url,'https://example.org/private');
+ assert.equal(b.location(s,nested.id).parent.id,a.id);
+ assert.equal(b.find(s,a.id).icon,'🌌');
+ assert.equal(b.count(s),6);
+ const restored=b.hydrate(JSON.stringify(s));
+ assert.deepEqual(b.barItems(restored).map(x=>x.id),ids());
+ assert.equal(b.location(restored,page.id).parent.id,nested.id);
+});

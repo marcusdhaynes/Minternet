@@ -3146,6 +3146,9 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 if value.get("secretOnlyInManager").and_then(Value::as_bool)!=Some(true){
                     return Err("Secret Bookmarks must appear only inside Manage Bookmarks".into());
                 }
+                if value.get("reorderVerified").and_then(Value::as_bool)!=Some(true){
+                    return Err("Bookmark Bar folder drag reorder did not persist original folders".into());
+                }
             }
             let folders=value.get("items").and_then(Value::as_array).ok_or("Bookmark data missing")?;
             let bar=folders.iter().find(|x|
@@ -3866,7 +3869,45 @@ fn main() {
                                       bubbles:true,cancelable:true,dataTransfer:transfer
                                     }));
                                     await new Promise(resolve=>setTimeout(resolve,420));
+                                    // Drag one real Bookmark Bar folder to the RIGHT of
+                                    // the imported folder. Use the same WebView2 event
+                                    // path as human drags, including insertion hit tests.
+                                    const before=window.minternetBookmarks.getState();
+                                    const beforeBar=window.MinternetBookmarks.barItems(before);
+                                    const importedFolder=beforeBar.find(n=>n.name==='Dragged Firefox Folder');
+                                    const source=[...document.querySelectorAll('#bookmarkItems .bookmark-item')]
+                                      .find(n=>n.dataset.bookmarkId===root.id);
+                                    const target=[...document.querySelectorAll('#bookmarkItems .bookmark-item')]
+                                      .find(n=>n.dataset.bookmarkId===importedFolder?.id);
+                                    let reorderVerified=false;
+                                    if(source?.draggable&&target?.draggable&&
+                                      beforeBar.findIndex(n=>n.id===root.id)<
+                                      beforeBar.findIndex(n=>n.id===importedFolder.id)){
+                                      const drag=new DataTransfer();
+                                      source.dispatchEvent(new DragEvent('dragstart',{
+                                        bubbles:true,cancelable:true,dataTransfer:drag
+                                      }));
+                                      const rect=target.getBoundingClientRect();
+                                      const clientX=rect.right-1;
+                                      target.dispatchEvent(new DragEvent('dragover',{
+                                        bubbles:true,cancelable:true,dataTransfer:drag,clientX
+                                      }));
+                                      target.dispatchEvent(new DragEvent('drop',{
+                                        bubbles:true,cancelable:true,dataTransfer:drag,clientX
+                                      }));
+                                      source.dispatchEvent(new DragEvent('dragend',{
+                                        bubbles:true,dataTransfer:drag
+                                      }));
+                                      const after=window.minternetBookmarks.getState();
+                                      const order=window.MinternetBookmarks.barItems(after)
+                                        .map(n=>n.id);
+                                      reorderVerified=order.indexOf(root.id)>order.indexOf(importedFolder.id)
+                                        && order.indexOf(importedFolder.id)>=0
+                                        && !!window.MinternetBookmarks.find(after,root.id)
+                                          ?.children?.find(n=>n.icon==='🪐');
+                                    }
                                     const state = JSON.parse(localStorage.getItem('minternet.bookmark-tree.v1'));
+                                    state.reorderVerified=reorderVerified;
                                     state.settingsKeepBookmarks=settingsKeepBookmarks;
                                     state.secretOnlyInManager=secretOnlyInManager;
                                     await window.minternet?.command('bookmarks-smoke-proof', state);
