@@ -2106,6 +2106,13 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             _ => unreachable!()
         };
     }
+    if name=="secret-preview"{
+        let title=value.get("title").and_then(Value::as_str).unwrap_or("");
+        let url=value.get("url").and_then(Value::as_str).unwrap_or("");
+        let state=app.state::<Mutex<secret_bookmarks::SecretVault>>();
+        let vault=state.lock().map_err(|e|e.to_string())?;
+        return vault.preview(title,url);
+    }
     if name=="secret-open"{
         let wanted=value.get("ids").and_then(Value::as_array)
             .ok_or("Choose Secret Bookmarks")?;
