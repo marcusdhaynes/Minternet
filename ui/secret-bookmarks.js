@@ -40,14 +40,34 @@
   catch{setGroupPreference('#####');}
   $('secretGroupName').addEventListener('change',savePreference);
   $('secretGroupNameSettings')?.addEventListener('change',event=>setGroupPreference(event.target.value));
-  function securePreview(){
-    const bytes=new Uint8Array(18);
-    crypto.getRandomValues(bytes);
-    return [...bytes].map(b=>b.toString(16).padStart(2,'0')).join('');
-  }
+  let previewRevision=0,previewTimer=null;
   function refreshPreview(){
-    $('secretScrambledName').textContent=securePreview();
-    $('secretScrambledLink').textContent=securePreview();
+    // A preview uses the real native XChaCha20-Poly1305 key and a fresh nonce.
+    // Neither the key nor the unencrypted address is ever returned by native.
+    const revision=++previewRevision;
+    clearTimeout(previewTimer);
+    $('secretScrambledName').textContent='Encrypting…';
+    $('secretScrambledLink').textContent='Encrypting…';
+    if(!window.__TAURI__||!status.unlocked){
+      $('secretScrambledName').textContent='Unlock required';
+      $('secretScrambledLink').textContent='Unlock required';
+      return;
+    }
+    previewTimer=setTimeout(async()=>{
+      try{
+        const preview=await request('secret-preview',{
+          title:editorTrueTitle||$('secretVisibleName').value,
+          url:editMode==='folder'?'':$('secretUrl').value
+        });
+        if(revision!==previewRevision||$('secretEditor').hidden)return;
+        $('secretScrambledName').textContent=preview.scrambledName||'—';
+        $('secretScrambledLink').textContent=preview.scrambledLink||'—';
+      }catch{
+        if(revision!==previewRevision||$('secretEditor').hidden)return;
+        $('secretScrambledName').textContent='Preview unavailable';
+        $('secretScrambledLink').textContent='Enter a valid website address';
+      }
+    },180);
   }
   function updateState(next){
     if(next?.message)throw new Error(next.message);
@@ -473,6 +493,8 @@
   $('secretAddLink').addEventListener('click',()=>editor('link'));
   $('secretOpenSelected').addEventListener('click',()=>void openMany([...selected]));
   $('secretEditor').addEventListener('submit',event=>void saveEditor(event));
+  $('secretVisibleName').addEventListener('input',refreshPreview);
+  $('secretUrl').addEventListener('input',refreshPreview);
   $('secretDiscard').addEventListener('click',()=>{
     $('secretUrl').value='';$('secretEditor').hidden=true;
     $('secretUnlocked').hidden=false;editId=null;editMode=null;
