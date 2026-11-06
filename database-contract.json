@@ -1,0 +1,32 @@
+{
+  "contract_version": 1,
+  "repository": "marcusdhaynes/Minternet",
+  "backend": {
+    "provider": "supabase",
+    "project_ref": "tbrqqjrzknhdnwcpkqro",
+    "schema": "app_minternet",
+    "service_role": "app_minternet_executor",
+    "service_role_login_enabled": false,
+    "client_access": "disabled_until_per_app_auth_and_rls_are_verified",
+    "default_runtime_cutover": false
+  },
+  "usage": {
+    "persistent_shared_records": "use_this_schema_after_backend_authorization_and_migration",
+    "new_tables_and_migrations": "only_schema_qualified_SQL_in_this_schema",
+    "local_ephemeral_ui_state": "keep_local_unless_sync_requested",
+    "existing_live_backend": "preserve_until_source_data_and_auth_are_verified",
+    "cross_app_access": "deny"
+  },
+  "security": {
+    "no_plaintext_secrets_in_repo": true,
+    "no_service_role_key_in_client": true,
+    "auth_per_app_required": true,
+    "row_level_security_and_minimum_grants_required": true,
+    "do_not_expose_schema_to_data_api_without_review": true,
+    "no_cross_schema_fallback": true
+  },
+  "current_stage": "database_reserved_not_live",
+  "source_data_migrated": false,
+  "docs": "AGENTS.md",
+  "canonical_map": "marcusdhaynes/somniel-holdings/database-routing.json"
+}
