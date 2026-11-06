@@ -100,12 +100,19 @@ fn item_aad(id:&str)->Vec<u8>{
 }
 // This key-separated digest is only inside the outer encrypted vault. It
 // detects duplicate URLs without keeping the URL available to a folder unlock.
-fn blind_fingerprint(index_key:&[u8;32],url:&str)->String{
-    let mut mac=<Hmac<Sha256> as Mac>::new_from_slice(index_key)
+fn blind_fingerprint(entry_code:&str,folder_salt:&[u8;16],url:&str)->Result<String,String>{
+    // This lookup index is derived from the *second* code, never the folder
+    // key. The outer-folder unlock alone cannot test guesses about websites.
+    // Deduplication is possible only among links sharing this entry code.
+    let mut key=derive(entry_code,folder_salt)?;
+    let mut mac=<Hmac<Sha256> as Mac>::new_from_slice(&key)
         .expect("HMAC-SHA256 accepts 32-byte secret keys");
-    mac.update(b"Minternet Secret URL equality v2");
+    mac.update(b"Minternet Independent Secret URL equality v3");
     mac.update(url.as_bytes());
-    mac.finalize().into_bytes().iter().map(|x|format!("{x:02x}")).collect()
+    let value=mac.finalize().into_bytes().iter()
+        .map(|x|format!("{x:02x}")).collect();
+    key.zeroize();
+    Ok(value)
 }
 fn encrypted_link(id:&str,title:&str,url:&str,code:&str,
     fingerprint:String)->Result<SealedEntry,String>{
@@ -248,7 +255,7 @@ impl SecretVault{
             let canonical=tauri::Url::parse(target).map_err(|_|"Invalid website URL")?.to_string();
             let code=entry_code.ok_or("Set a separate code for this Secret Bookmark")?;
             self.ensure_distinct(code)?;
-            let fingerprint=blind_fingerprint(self.key.as_ref().ok_or("Folder locked")?,&canonical);
+            let fingerprint=blind_fingerprint(code,&self.salt.ok_or("Folder locked")?,&canonical)?;
             if self.entries.iter().any(|e|e.sealed.as_ref().is_some_and(|x|x.fingerprint==fingerprint)
                 ||e.url.as_deref()==Some(canonical.as_str())){
                 return Err("Bookmark already exists in Secret Bookmarks".into());
@@ -326,10 +333,10 @@ impl SecretVault{
         if !self.unlocked(){return Err("Unlock Secret Bookmarks first".into());}
         self.ensure_distinct(code)?;
         let mut replacement=self.entries.clone();
-        let outer=self.key.as_ref().ok_or("Folder locked")?;
+        let salt=self.salt.ok_or("Folder locked")?;
         for entry in replacement.iter_mut().filter(|e|e.kind=="link"&&e.sealed.is_none()){
             let url=entry.url.as_deref().ok_or("Legacy secret URL missing")?;
-            let fingerprint=blind_fingerprint(outer,url);
+            let fingerprint=blind_fingerprint(code,&salt,url)?;
             entry.sealed=Some(encrypted_link(&entry.id,&entry.true_title,url,code,fingerprint)?);
             if let Some(url)=entry.url.as_mut(){url.zeroize();}
             entry.url=None;entry.true_title.zeroize();entry.true_title.clear();
