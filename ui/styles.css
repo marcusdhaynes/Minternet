@@ -1285,3 +1285,72 @@ html.minternet-overlay-active .group-editor-backdrop {
 .downloads-actions button:disabled{opacity:.35;cursor:default;}
 .downloads-actions .downloads-open{min-width:37px;padding:0 5px;font-weight:650;}
 .downloads-actions .downloads-reveal{width:22px;min-width:22px;display:grid;place-items:center;font-size:14px;}
+
+
+/* Secret Bookmarks — visible aliases are metadata, never decrypted URLs. */
+.secret-root-trigger{color:#c8b2ff!important;font-size:17px!important;border-color:#8565b13b!important;flex:0 0 25px;min-width:25px;max-width:25px;}
+.secret-root-manager{display:flex!important;align-items:center;gap:8px;min-height:30px;border:1px solid #906bd155;background:#67488c25!important;color:#dccbff!important;border-radius:5px;margin:3px 5px 6px;width:calc(100% - 10px);padding:5px 9px;text-align:left;}
+.secret-root-manager span{margin-left:auto}
+.secret-root-manager:hover,.secret-root-trigger:hover{background:#7a5aca4d!important}
+.secret-screen[hidden],.secret-pending-screen[hidden],.secret-editor[hidden],.secret-auth[hidden]{display:none!important}
+.secret-screen{position:fixed;z-index:160;inset:45px 0 0;pointer-events:auto;}
+.secret-backdrop{position:absolute;inset:0;background:#050713a6;backdrop-filter:blur(12px);}
+.secret-panel{position:relative;margin:5vh auto;width:min(450px,calc(100vw - 24px));max-height:calc(90vh - 50px);
+  overflow:auto;background:linear-gradient(148deg,#272442,#17182e 70%,#171828);color:#f0eaff;
+  border:1px solid #806bb1;border-radius:13px;box-shadow:0 22px 70px #000d,inset 0 1px 0 #ffffff18;
+  font-family:inherit;padding:0 0 12px}
+.secret-heading{display:flex;align-items:center;gap:9px;height:44px;border-bottom:1px solid #7b67943a;padding:0 13px}
+.secret-heading strong{font-size:13px;letter-spacing:.01em}
+.secret-heading-icon{font-size:21px;color:#bb9dff}
+.secret-heading button{border:1px solid #836b9b66;background:#3c3455;color:#ddd4ec;border-radius:6px;padding:5px 8px;font-size:11px;cursor:pointer}
+.secret-heading #secretLock{margin-left:auto}.secret-heading #secretClose{font-size:18px;line-height:1;padding:1px 8px}
+.secret-description{font-size:11px;color:#c6badb;line-height:1.45;margin:11px 15px 8px;min-height:18px}
+.secret-auth,.secret-editor{display:grid;gap:10px;margin:13px 15px}
+.secret-auth label,.secret-editor label,.secret-group-setting{display:grid;gap:5px;font-size:11px;color:#dcd0f0}
+.secret-auth label small,.secret-editor label small{font-size:10px;color:#bda7d8}
+.secret-auth input,.secret-editor input,.secret-group-setting input{width:100%;box-sizing:border-box;background:#100f21;color:#f6f0ff;
+  border:1px solid #776493;border-radius:6px;height:31px;padding:5px 9px;font-size:12px;outline:0}
+.secret-auth input:focus,.secret-editor input:focus,.secret-group-setting input:focus{border-color:#b69bed;box-shadow:0 0 0 2px #b79af53a}
+.secret-auth button,.secret-toolbar button,.secret-form-actions button,.secret-editor button{
+ border:1px solid #8a73b7;border-radius:6px;background:#45365d;color:#efe6ff;cursor:pointer;font-size:11px;padding:8px 10px}
+.secret-auth button[type=submit],.secret-form-actions #secretSave{background:#b6a1f0;color:#18122b;font-weight:700}
+.secret-advice,.secret-crypto-note,.secret-foot{font-size:10px;line-height:1.4;color:#b9aacd;margin:0}
+.secret-toolbar{display:flex;flex-wrap:wrap;gap:6px;padding:8px 12px}
+.secret-toolbar button{padding:5px 8px}
+.secret-toolbar button:disabled{opacity:.4;cursor:default}
+.secret-breadcrumb{display:flex;gap:3px;flex-wrap:wrap;border-bottom:1px solid #ffffff1b;margin:0 12px 5px;padding-bottom:6px}
+.secret-breadcrumb button{background:none;border:0;color:#d7c2f9;font-size:10px;cursor:pointer}
+.secret-tree{padding:3px 12px;max-height:36vh;overflow:auto;min-height:55px}
+.secret-row{display:flex;align-items:center;gap:7px;min-height:32px;border-radius:6px;padding:3px 5px;color:#f1eaff;border:1px solid transparent}
+.secret-row:hover{background:#71599c2f;border-color:#7964a744}
+.secret-row-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;
+  color:#ecdefe;font-size:11px;border:0;background:transparent;padding:5px 2px;cursor:pointer}
+.secret-row-action{border:0;background:transparent;color:#b2a0cb;font-size:13px;padding:4px;cursor:pointer}
+.secret-row-action:hover{color:#fff}
+.secret-pick{accent-color:#ad8cff}.secret-folder-icon{font-size:14px}
+.secret-empty{color:#aea2c6;font-size:11px;padding:12px 6px}
+.secret-scrambled{display:grid;gap:4px;border:1px solid #80669b42;border-radius:6px;padding:6px 9px;font-size:10px;color:#bbaadd}
+.secret-scrambled code{font-family:ui-monospace,Consolas,monospace;color:#d9c0ff;overflow:hidden;text-overflow:ellipsis;font-size:10px;letter-spacing:.7px}
+.secret-form-actions{display:flex;justify-content:flex-end;gap:7px}
+.secret-group-setting{margin:10px 14px;border-top:1px solid #ffffff16;padding-top:10px}
+.secret-foot{display:block;margin:0 14px 5px}
+.secret-star-menu{position:fixed;z-index:200;display:grid;gap:3px;width:228px;
+ background:linear-gradient(155deg,#2e2843,#191b2f);border:1px solid #8773a8;border-radius:8px;
+ box-shadow:0 14px 40px #050516bc;padding:6px}
+.secret-star-menu button{background:transparent;border:0;color:#f4efff;font-size:11px;padding:8px 9px;text-align:left;cursor:pointer;border-radius:5px}
+.secret-star-menu button:hover{background:#785eaa66}
+.address-star.secret-star-flash{animation:secret-star-blink .16s ease-in-out 3 alternate;color:#d6a9ff!important}
+@keyframes secret-star-blink{from{filter:brightness(1);background:transparent}to{filter:brightness(2.3);background:#995bda88;box-shadow:0 0 15px #af70ef}}
+.secret-pending-screen{position:fixed;z-index:25;inset:var(--chrome-height,52px) 0 0;display:grid;place-items:center;
+ background:radial-gradient(ellipse at 50% 39%,#53427a 0%,#272741 32%,#0c111ecf 75%);
+ backdrop-filter:blur(30px)}
+.secret-pending-content{display:grid;justify-items:center;gap:16px;color:#d6c3ec;text-align:center;font-size:12px}
+.secret-pending-caption{font-size:10px;letter-spacing:2px;color:#a98aca}
+.secret-reveal-eye{display:grid;place-items:center;width:116px;height:116px;border-radius:50%;
+ border:1px solid #9876ba;background:linear-gradient(145deg,#6b517c66,#2c25495e);
+ box-shadow:0 0 30px #a987ca25,inset 0 0 25px #a07bcb24;color:#dcc7ff;cursor:pointer;
+ transition:transform .16s,box-shadow .16s}
+.secret-reveal-eye:hover{transform:scale(1.05);box-shadow:0 0 42px #a987ca58}
+.secret-reveal-eye svg{width:59px;height:59px}
+:root.secret-active .tab.selected{border-bottom:2px solid #b18ced}
+@media(max-width:600px){.secret-panel{margin:9px auto;max-height:calc(100vh - 100px)}.secret-tree{max-height:30vh}}
