@@ -183,7 +183,16 @@
       <div class="secret-heading">
         <span class="secret-heading-icon">◈</span><strong>Secret Bookmarks</strong>
         <button type="button" id="secretChangePassword" title="Change the Secret Folder password" hidden>Password…</button>
-        <button type="button" id="secretLock" title="Lock secret vault">Lock</button>
+        <label class="secret-close-lock" title="Automatically lock Secret Bookmarks this long after closing the vault. Zero locks instantly.">
+          <span>Lock in</span>
+          <input id="secretAutoLockAmount" type="number" min="0" max="999999" step="1" value="0" inputmode="numeric" aria-label="Delay after closing before Secret Bookmarks lock">
+          <select id="secretAutoLockUnit" aria-label="Secret Bookmarks lock delay unit">
+            <option value="seconds">sec</option>
+            <option value="minutes">min</option>
+            <option value="hours">hours</option>
+          </select>
+        </label>
+        <button type="button" id="secretLock" title="Lock secret vault immediately">Lock</button>
         <button type="button" id="secretClose" aria-label="Close Secret Bookmarks">×</button>
       </div>
       <p id="secretMessage" class="secret-description">A separate encrypted vault. Site addresses and real titles never appear in the bookmark list.</p>
@@ -276,7 +285,7 @@
       <label class="secret-group-setting">Secret Tabs Group Name
         <input id="secretGroupName" type="text" maxlength="42" value="#####" placeholder="#####">
       </label>
-      <small class="secret-foot">Private tabs start unloaded. Press the eye to permit loading. Secret URLs are excluded from normal bookmark storage, saved history and sync.</small>
+      <small class="secret-foot">Private tabs open unloaded inside your named Secret Group, showing only their optional Visible Names. Press the eye to load the website. Closing this vault locks immediately by default; change the delay beside Lock. Secret URLs never enter normal bookmark storage, history or sync.</small>
     </aside>
   </section>
   <section id="secretPendingScreen" class="secret-pending-screen" hidden aria-label="Secret tab is concealed">
