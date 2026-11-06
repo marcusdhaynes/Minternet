@@ -62,6 +62,9 @@
   async function open(){
     if(!window.__TAURI__){tell('Secret Bookmarks requires the installed Minternet application.');return;}
     await readStatus();
+    // The secret dialog takes over the trusted chrome; leave no ordinary
+    // bookmark manager behind it that could receive dropped secret content.
+    window.minternetBookmarks?.closeOverlay();
     overlay(true);
     if(status.unlocked)render();
     else{
