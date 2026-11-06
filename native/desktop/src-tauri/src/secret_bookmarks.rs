@@ -204,6 +204,30 @@ impl SecretVault{
         self.save(path)?;
         Ok(json!({"items":visible_json(&self.entries)}))
     }
+    /// Return a genuine authenticated-encryption preview without storing
+    /// plaintext or returning the key. Preview nonces are independent of those
+    /// used on save, so the final ciphertext intentionally differs.
+    pub fn preview(&self,title:&str,url:&str)->Result<Value,String>{
+        let key=self.key.as_ref().ok_or("Unlock Secret Bookmarks first")?;
+        if title.len()>512||url.len()>4096{return Err("Secret preview too large".into());}
+        if !url.is_empty()&&!url_valid(url){return Err("Invalid secret website URL".into());}
+        let cipher=XChaCha20Poly1305::new_from_slice(key)
+            .map_err(|_|"Cipher initialization failed")?;
+        fn encode_preview(cipher:&XChaCha20Poly1305,plain:&[u8])->Result<String,String>{
+            let mut nonce=[0u8;24];OsRng.fill_bytes(&mut nonce);
+            let bytes=cipher.encrypt(XNonce::from_slice(&nonce),
+                Payload{msg:plain,aad:AAD})
+                .map_err(|_|"Encryption preview failed".to_string())?;
+            // Ciphertext, not a fake random label. The 128-bit Poly1305 tag
+            // is included, and every preview uses a fresh random nonce.
+            Ok(bytes.iter().take(28).map(|b|format!("{b:02x}")).collect())
+        }
+        Ok(json!({
+            "scrambledName":encode_preview(&cipher,title.as_bytes())?,
+            "scrambledLink":encode_preview(&cipher,url.as_bytes())?,
+            "ephemeral":true
+        }))
+    }
     pub fn link(&self,id:&str)->Result<String,String>{
         if !self.unlocked(){return Err("Unlock Secret Bookmarks first".into());}
         self.entries.iter().find(|entry|entry.id==id&&entry.kind=="link")
