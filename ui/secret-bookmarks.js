@@ -53,11 +53,6 @@
       $('secretScrambledLink').textContent='Encrypted separately from the folder';
       return;
     }
-    if(false){
-      $('secretScrambledName').textContent='Unlock required';
-      $('secretScrambledLink').textContent='Unlock required';
-      return;
-    }
     previewTimer=setTimeout(async()=>{
       try{
         const preview=await request('secret-preview',{
@@ -403,17 +398,23 @@
     event.preventDefault();
     if(!status.unlocked)return;
     const visibleName=$('secretVisibleName').value.trim();
+    let entryCode=editMode==='link'&&!editId?$('secretEntryCode').value:'';
+    if(editMode==='link'&&!editId&&([...entryCode].length<1||[...entryCode].length>16)){
+      return tell('A separate bookmark entry code of 1–16 characters is required.');
+    }
     try{
       const result=editId
         ?await request('secret-edit',{id:editId,visibleName})
         :await request('secret-put',{kind:editMode,parent:folder,
-          visibleName,url:editMode==='link'?$('secretUrl').value:'',title:editorTrueTitle});
+          visibleName,url:editMode==='link'?$('secretUrl').value:'',
+          title:editorTrueTitle,entryCode});
       updateState(result);
       const savedUrl=editMode==='link'&&!editId?$('secretUrl').value:'';
       // Best-effort removal from ordinary local history after the encrypted
       // write succeeds. It cannot erase network/OS logs or cloud backups.
       if(savedUrl)void api.command('history-remove',savedUrl);
       $('secretUrl').value='';
+      $('secretEntryCode').value='';entryCode='';
       if(pendingNormalId){
         window.minternetBookmarks?.deleteBookmark(pendingNormalId,true);
         pendingNormalId=null;
@@ -423,8 +424,9 @@
       $('secretUnlocked').hidden=false;
       editId=null;editMode=null;
       render();armLock();
-      tell('Saved with authenticated encryption. The actual URL is not displayed or stored in ordinary bookmarks.');
+      tell('Saved under a separate per-bookmark code. The folder unlock alone cannot read this URL.');
     }catch(error){tell(error.message);}
+    finally{entryCode='';}
   }
   async function authenticate(event){
     event.preventDefault();
@@ -439,18 +441,7 @@
       updateState(result);
       armLock();
       tell('Secret Bookmarks unlocked.');
-      if(pendingAdd){
-        const item=pendingAdd;pendingAdd=null;
-        editor(item.kind,item.url,item.title);
-      }else if(pendingDrop){
-        const task=pendingDrop;pendingDrop=null;
-        if(task.openIds)await openMany(task.openIds);
-        else await saveDropped(task);
-      }else if(pendingReveal!=null){
-        const id=pendingReveal;pendingReveal=null;
-        const current=lastState?.tabs.find(x=>x.id===lastState?.activeId);
-        if(current?.id===id)await reveal();
-      }
+      await finishFolderUnlock();
     }catch(error){
       $('secretCode').value='';
       tell(error.message);
@@ -469,8 +460,9 @@
     const imported=window.MinternetBookmarkImport?.parseTransfer(dt)||[];
     return imported;
   }
-  async function saveDropped({nodes,parent}){
+  async function saveDropped({nodes,parent},entryCode=null){
     if(!status.unlocked){pendingDrop={nodes,parent};await open();return;}
+    if(!entryCode){promptEntry({kind:'import',nodes,parent});return;}
     let saved=0;
     async function go(node,where,depth){
       if(depth>=12||saved>=100)return;
@@ -481,7 +473,8 @@
         for(const child of node.children||[])await go(child,result.id,depth+1);
       }else if(node.kind==='link'&&model?.url(node.url)){
         await request('secret-put',{kind:'link',parent:where,
-          visibleName:node.name||'',url:node.url,title:node.name||''});
+          visibleName:node.name||'',url:node.url,title:node.name||'',
+          entryCode});
         saved++;
         void api.command('history-remove',node.url);
         if(node.sourceId)window.minternetBookmarks?.deleteBookmark(node.sourceId,true);
@@ -490,7 +483,8 @@
     try{
       for(const node of nodes.slice(0,100))await go(node,parent,0);
       updateState(await request('secret-status'));
-      tell('Encrypted '+saved+' dropped item'+(saved===1?'':'s')+'.');
+      tell('Encrypted '+saved+' dropped item'+(saved===1?'':'s')+
+        ' with the separately supplied entry code.');
       armLock();
     }catch(error){tell('Imported '+saved+' items before error: '+error.message);}
   }
@@ -595,6 +589,8 @@
   $('secretSettingsOpen')?.addEventListener('click',()=>void open().catch(e=>tell(e.message)));
   $('secretBookmarksManager')?.addEventListener('click',()=>void open().catch(e=>tell(e.message)));
   $('secretAuthForm').addEventListener('submit',event=>void authenticate(event));
+  $('secretAccessForm').addEventListener('submit',event=>void authorizeEntries(event));
+  $('secretAccessCancel').addEventListener('click',cancelEntry);
   $('secretClose').addEventListener('click',close);
   $('secretBackdrop').addEventListener('click',close);
   $('secretLock').addEventListener('click',()=>void lock());
@@ -605,8 +601,10 @@
   $('secretEditor').addEventListener('submit',event=>void saveEditor(event));
   $('secretVisibleName').addEventListener('input',refreshPreview);
   $('secretUrl').addEventListener('input',refreshPreview);
+  $('secretEntryCode').addEventListener('input',refreshPreview);
   $('secretDiscard').addEventListener('click',()=>{
-    $('secretUrl').value='';$('secretEditor').hidden=true;
+    $('secretUrl').value='';$('secretEntryCode').value='';
+    $('secretEditor').hidden=true;
     $('secretUnlocked').hidden=false;editId=null;editMode=null;
     editorTrueTitle='';pendingNormalId=null;
   });
