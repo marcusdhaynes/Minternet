@@ -9,7 +9,8 @@ use serde::{Serialize,Deserialize};
 use serde_json::{Value,json};
 use tauri::Manager;
 use zeroize::Zeroize;
-use sha2::{Sha256,Digest};
+use sha2::Sha256;
+use hmac::{Hmac,Mac};
 
 const MAX_ITEMS:usize=1800;
 const MAX_BYTES:usize=1_900_000;
@@ -100,13 +101,11 @@ fn item_aad(id:&str)->Vec<u8>{
 // This key-separated digest is only inside the outer encrypted vault. It
 // detects duplicate URLs without keeping the URL available to a folder unlock.
 fn blind_fingerprint(index_key:&[u8;32],url:&str)->String{
-    let mut mac_input=Vec::with_capacity(32+url.len()+32);
-    mac_input.extend_from_slice(b"Minternet Secret URL equality v2");
-    mac_input.extend_from_slice(index_key);
-    mac_input.extend_from_slice(url.as_bytes());
-    let digest=Sha256::digest(&mac_input);
-    mac_input.zeroize();
-    digest.iter().map(|x|format!("{x:02x}")).collect()
+    let mut mac=<Hmac<Sha256> as Mac>::new_from_slice(index_key)
+        .expect("HMAC-SHA256 accepts 32-byte secret keys");
+    mac.update(b"Minternet Secret URL equality v2");
+    mac.update(url.as_bytes());
+    mac.finalize().into_bytes().iter().map(|x|format!("{x:02x}")).collect()
 }
 fn encrypted_link(id:&str,title:&str,url:&str,code:&str,
     fingerprint:String)->Result<SealedEntry,String>{
@@ -215,7 +214,8 @@ impl SecretVault{
         Ok(())
     }
     pub fn put(&mut self,path:&PathBuf,kind:&str,parent:Option<&str>,
-        label:&str,url:Option<&str>,true_title:Option<&str>)->Result<Value,String>{
+        label:&str,url:Option<&str>,true_title:Option<&str>,entry_code:Option<&str>)
+        ->Result<Value,String>{
         if !self.unlocked(){return Err("Unlock Secret Bookmarks first".into());}
         if self.entries.len()>=MAX_ITEMS{return Err("Secret Bookmarks is full".into());}
         if !matches!(kind,"folder"|"link"){return Err("Invalid bookmark type".into());}
@@ -231,21 +231,24 @@ impl SecretVault{
                 current=entry.parent.as_deref();
             }
         }
-        let address=if kind=="link"{
+        let id=id();
+        let mut entry=Entry{
+            id:id.clone(),parent:parent.map(str::to_owned),kind:kind.into(),
+            visible_name:label,true_title:String::new(),url:None,sealed:None,
+        };
+        if kind=="link"{
             let target=url.ok_or("Missing website URL")?;
             if !url_valid(target){return Err("Enter a valid HTTP(S) bookmark URL".into());}
-            let canonical=tauri::Url::parse(target).map_err(|_|"Invalid website URL")?
-                .to_string();
-            if self.entries.iter().any(|entry|entry.url.as_deref()==Some(canonical.as_str())){
+            let canonical=tauri::Url::parse(target).map_err(|_|"Invalid website URL")?.to_string();
+            let code=entry_code.ok_or("Set a separate code for this Secret Bookmark")?;
+            self.ensure_distinct(code)?;
+            let fingerprint=blind_fingerprint(self.key.as_ref().ok_or("Folder locked")?,&canonical);
+            if self.entries.iter().any(|e|e.sealed.as_ref().is_some_and(|x|x.fingerprint==fingerprint)
+                ||e.url.as_deref()==Some(canonical.as_str())){
                 return Err("Bookmark already exists in Secret Bookmarks".into());
             }
-            Some(canonical)
-        }else{None};
-        let entry=Entry{
-            id:id(),parent:parent.map(str::to_owned),kind:kind.into(),
-            visible_name:label,true_title:true_title.unwrap_or("").chars().take(256).collect(),
-            url:address,
-        };
+            entry.sealed=Some(encrypted_link(&id,true_title.unwrap_or(""),&canonical,code,fingerprint)?);
+        }
         let new_id=entry.id.clone();
         self.entries.push(entry);
         if let Err(e)=self.save(path){self.entries.pop();return Err(e);}
@@ -272,8 +275,11 @@ impl SecretVault{
     /// Return a genuine authenticated-encryption preview without storing
     /// plaintext or returning the key. Preview nonces are independent of those
     /// used on save, so the final ciphertext intentionally differs.
-    pub fn preview(&self,title:&str,url:&str)->Result<Value,String>{
-        let key=self.key.as_ref().ok_or("Unlock Secret Bookmarks first")?;
+    pub fn preview(&self,title:&str,url:&str,code:&str)->Result<Value,String>{
+        if !self.unlocked(){return Err("Unlock Secret Bookmarks first".into());}
+        self.ensure_distinct(code)?;
+        let mut salt=[0u8;16];OsRng.fill_bytes(&mut salt);
+        let mut key=derive(code,&salt)?;
         if title.len()>512||url.len()>4096{return Err("Secret preview too large".into());}
         if !url.is_empty()&&!url_valid(url){return Err("Invalid secret website URL".into());}
         let cipher=XChaCha20Poly1305::new_from_slice(key)
@@ -287,17 +293,82 @@ impl SecretVault{
             // is included, and every preview uses a fresh random nonce.
             Ok(bytes.iter().take(28).map(|b|format!("{b:02x}")).collect())
         }
+        let name=encode_preview(&cipher,title.as_bytes())?;
+        let link=encode_preview(&cipher,url.as_bytes())?;
+        key.zeroize();
         Ok(json!({
-            "scrambledName":encode_preview(&cipher,title.as_bytes())?,
-            "scrambledLink":encode_preview(&cipher,url.as_bytes())?,
-            "ephemeral":true
+            "scrambledName":name,"scrambledLink":link,"ephemeral":true
         }))
     }
-    pub fn link(&self,id:&str)->Result<String,String>{
+    fn ensure_distinct(&self,code:&str)->Result<(),String>{
+        let salt=self.salt.ok_or("Folder not unlocked")?;
+        let mut derived=derive(code,&salt)?;
+        let outer=self.key.as_ref().ok_or("Folder not unlocked")?;
+        let mut difference=0u8;
+        for i in 0..32{difference|=derived[i]^outer[i];}
+        derived.zeroize();
+        if difference==0{return Err("Bookmark entry code must differ from the folder password".into());}
+        Ok(())
+    }
+    pub fn legacy_count(&self)->usize{
+        self.entries.iter().filter(|e|e.kind=="link"&&e.sealed.is_none()).count()
+    }
+    /// Older Minternet builds protected URLs only with the folder password.
+    /// Rewrap them under an independent item code, preserving IDs and folders.
+    /// Do not auto-upgrade without a user-supplied, distinct second code.
+    pub fn migrate(&mut self,path:&PathBuf,code:&str)->Result<Value,String>{
         if !self.unlocked(){return Err("Unlock Secret Bookmarks first".into());}
-        self.entries.iter().find(|entry|entry.id==id&&entry.kind=="link")
-            .and_then(|entry|entry.url.clone())
-            .ok_or("Secret bookmark not found".into())
+        self.ensure_distinct(code)?;
+        let mut replacement=self.entries.clone();
+        let outer=self.key.as_ref().ok_or("Folder locked")?;
+        for entry in replacement.iter_mut().filter(|e|e.kind=="link"&&e.sealed.is_none()){
+            let url=entry.url.as_deref().ok_or("Legacy secret URL missing")?;
+            let fingerprint=blind_fingerprint(outer,url);
+            entry.sealed=Some(encrypted_link(&entry.id,&entry.true_title,url,code,fingerprint)?);
+            if let Some(url)=entry.url.as_mut(){url.zeroize();}
+            entry.url=None;entry.true_title.zeroize();entry.true_title.clear();
+        }
+        let old=std::mem::replace(&mut self.entries,replacement);
+        if let Err(e)=self.save(path){self.entries=old;return Err(e);}
+        // old plaintext is zeroized as the old entries are dropped here.
+        drop(old);
+        self.status(path)
+    }
+    /// A successful folder unlock never authorizes access to link contents.
+    /// Each entry has its own salt and authentication tag. The same entry code
+    /// can authorize a batch, but wrong/different codes fail the entire batch.
+    pub fn authorize(&mut self,ids:&[String],code:&str)->Result<Vec<[u8;32]>,String>{
+        if !self.unlocked(){return Err("Unlock the Secret Bookmarks folder first".into());}
+        if self.retry_after.is_some_and(|deadline|Instant::now()<deadline){
+            return Err("Too many incorrect attempts; try again shortly".into());
+        }
+        if ids.is_empty()||ids.len()>35{return Err("Select 1–35 bookmarks".into());}
+        let mut keys=Vec::with_capacity(ids.len());
+        for id in ids{
+            let entry=self.entries.iter().find(|e|e.id==*id&&e.kind=="link")
+                .ok_or("Secret Bookmark not found")?;
+            let sealed=entry.sealed.as_ref()
+                .ok_or("This older bookmark needs an independent entry code before it can open")?;
+            let mut key=derive(code,&sealed.salt)?;
+            if decrypt_item(id,sealed,&key).is_err(){
+                key.zeroize();
+                for value in &mut keys {value.zeroize();}
+                self.bad_code();
+                return Err("Incorrect bookmark entry code or encrypted data failed authentication".into());
+            }
+            keys.push(key);
+        }
+        self.failed_attempts=0;self.retry_after=None;
+        Ok(keys)
+    }
+    pub fn link_with_key(&self,id:&str,key:&[u8;32])->Result<String,String>{
+        if !self.unlocked(){return Err("Unlock the Secret Bookmarks folder first".into());}
+        let entry=self.entries.iter().find(|e|e.id==id&&e.kind=="link")
+            .ok_or("Secret bookmark not found")?;
+        let sealed=entry.sealed.as_ref().ok_or("Bookmark still requires migration")?;
+        let decrypted=decrypt_item(id,sealed,key)?;
+        if !url_valid(&decrypted.url){return Err("Decrypted bookmark URL is invalid".into());}
+        Ok(decrypted.url.clone())
     }
     pub fn edit(&mut self,path:&PathBuf,id:&str,label:&str)->Result<Value,String>{
         if !self.unlocked(){return Err("Unlock Secret Bookmarks first".into());}
