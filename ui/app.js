@@ -29,6 +29,7 @@ function toast(message) {
   toast.timer = setTimeout(() => el.classList.remove('visible'), 3800);
 }
 function tabTooltip(tab) {
+  if(tab.secretTab)return (tab.secretPending?'Unloaded · ':'')+'Secret Tab';
   const title=tab.title || (tab.url?.startsWith('https://') ? new URL(tab.url).hostname : 'New Tab');
   return (tab.suspended ? 'Unloaded · ' : tab.loading ? 'Loading · ' : '') + title;
 }
@@ -92,6 +93,13 @@ function discoverSiteIcon(host,page){
 }
 function renderSiteIcon(tab,slot){
   slot.replaceChildren();
+  if(tab.secretTab){
+    slot.textContent='◈';
+    slot.classList.add('secret-tab-icon');
+    slot.removeAttribute('data-site-host');
+    return;
+  }
+  slot.classList.remove('secret-tab-icon');
   slot.classList.remove('private-eye');
   slot.removeAttribute('data-site-host');
   if(!tab.url||!/^https?:\/\//i.test(tab.url)){
@@ -116,7 +124,8 @@ function renderSiteIcon(tab,slot){
 function buildTab(tab, active) {
   const root = document.createElement('div');
   root.className = 'tab' + (active ? ' selected' : '') +
-    (tab.private ? ' private-tab' : '') + (tab.pinned ? ' pinned-tab' : '') + (tab.suspended ? ' unloaded-tab' : '');
+    (tab.private ? ' private-tab' : '') + (tab.pinned ? ' pinned-tab' : '') +
+    (tab.suspended ? ' unloaded-tab' : '') + (tab.secretTab?' secret-tab':'');
   root.setAttribute('role', 'tab');
   root.setAttribute('aria-selected', String(active));
   root.title = tabTooltip(tab);
@@ -162,11 +171,11 @@ window.minternetRenderTabs = () => {
 function render(data) {
   const previouslyKnown=new Set(snapshot.tabs.map(tab=>tab.id));
   const isNewTab=data.activeId && !previouslyKnown.has(data.activeId) &&
-    data.tabs.some(tab=>tab.id===data.activeId&&tab.url==='about:blank');
+    data.tabs.some(tab=>tab.id===data.activeId&&tab.url==='about:blank'&&!tab.secretTab);
   snapshot = data;
   const tabs = byId('tabs');
   const active = data.tabs.find(t => t.id === data.activeId);
-  const signature = data.tabs.map(t => [t.id,t.title,t.url,t.private,t.pinned,t.suspended,t.loading,t.audioPlaying,t.audioMuted]).join(';');
+  const signature = data.tabs.map(t => [t.id,t.title,t.url,t.private,t.pinned,t.suspended,t.loading,t.audioPlaying,t.audioMuted,t.secretTab,t.secretPending]).join(';');
   if (window.minternetGroups?.renderTabs) {
     window.minternetGroups.renderTabs(data,tabs,buildTab);
     render.lastSignature = null;
@@ -180,7 +189,8 @@ function render(data) {
       const el = tabs.children[i];
       const activeTab = tab.id === data.activeId;
       el.className = 'tab' + (activeTab ? ' selected' : '') +
-        (tab.private ? ' private-tab' : '')+(tab.pinned ? ' pinned-tab' : '')+(tab.suspended ? ' unloaded-tab' : '');
+        (tab.private ? ' private-tab' : '')+(tab.pinned ? ' pinned-tab' : '')+(tab.suspended ? ' unloaded-tab' : '')+
+        (tab.secretTab?' secret-tab':'');
       el.setAttribute('aria-selected', String(activeTab));
       el.title = tabTooltip(tab);
       const symbol=el.querySelector('.tab-symbol');
@@ -198,11 +208,12 @@ function render(data) {
   }
     byId('back').disabled = !active?.canBack;
   byId('forward').disabled = !active?.canForward;
-  byId('reload').disabled = !active || active.url === 'about:blank';
-  const isBlank = !active || active.url === 'about:blank';
+  byId('reload').disabled = !active || active.secretTab || active.url === 'about:blank';
+  const isBlank = !active || (active.url === 'about:blank'&&!active.secretTab);
   byId('homeScreen').hidden = !isBlank;
   byId('address').setAttribute('aria-label', active?.url?.startsWith('http://') ? 'Insecure HTTP address' : 'Search or enter address');
-  if (!addressFocused) byId('address').value = isBlank ? '' : active.url;
+  if (!addressFocused) byId('address').value = isBlank||active?.secretTab ? '' : active.url;
+  byId('address').placeholder=active?.secretTab?'Secret Tab · URL Concealed':'Search privately or enter a secure address';
   if (lastUrl !== active?.url) {
     lastUrl = active?.url;
     document.title = active?.title ? active.title + ' — Minternet' : 'Minternet';
