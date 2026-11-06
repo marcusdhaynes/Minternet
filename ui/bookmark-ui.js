@@ -156,8 +156,14 @@
     }else if(value){
       slot.textContent=value;
     }else if(!isFolder && model.url(item?.url)){
-      slot.textContent='🔖';
       const safe=model.url(item.url);
+      const hostname=new URL(safe).hostname.replace(/^www\./,'');
+      // A missing favicon is represented by this site's own initial and
+      // stable host color, never by a generic bookmark icon.
+      slot.classList.add('bookmark-site-fallback');
+      slot.textContent=(hostname[0]||'◆').toUpperCase();
+      let hue=0;for(const letter of hostname)hue=(hue*31+letter.charCodeAt(0))>>>0;
+      slot.style.setProperty('--bookmark-icon-hue',String(hue%360));
       void iconSources(safe).then(candidates=>tryIcon(slot,safe,candidates));
     }else{
       slot.textContent=isFolder?'📁':'🔖';
@@ -195,6 +201,14 @@
       }
       el.dataset.bookmarkId = item.id;
       el.dataset.bookmarkKind = item.kind;
+      if(item.kind==='link')el.draggable=true;
+      el.addEventListener('dragstart',event=>{
+        if(item.kind!=='link')return;
+        event.dataTransfer?.setData('application/x-minternet-bookmark',
+          JSON.stringify({id:item.id,url:item.url,name:item.name||''}));
+        event.dataTransfer?.setData('text/uri-list',item.url);
+        if(event.dataTransfer)event.dataTransfer.effectAllowed='copyMove';
+      });
       el.title = item.kind === 'folder' ? textFor(item) : (item.name || item.url);
       el.setAttribute('aria-label', item.kind === 'folder' ? 'Open Folder: ' + textFor(item) : 'Open Bookmark: ' + textFor(item));
       el.addEventListener('click', event => {
@@ -237,7 +251,7 @@
       toast('Bookmark removed');
     } else {
       const name = currentTitle && currentTitle !== 'New Tab' ? currentTitle : new URL(url).hostname;
-      if (!model.add(data, 'link', null, { name, url })) return toast('Unable to save bookmark');
+      if (!model.add(data, 'link', null, { name, url })) return toast('This website is already bookmarked.');
       toast('Page bookmarked');
     }
     persist();
@@ -562,6 +576,15 @@
         const row = document.createElement('div');
         row.className = 'bookmark-tree-line';
         row.dataset.bookmarkId=item.id;
+        if(item.kind==='link'){
+          row.draggable=true;
+          row.addEventListener('dragstart',event=>{
+            event.dataTransfer?.setData('application/x-minternet-bookmark',
+              JSON.stringify({id:item.id,url:item.url,name:item.name||''}));
+            event.dataTransfer?.setData('text/uri-list',item.url);
+            if(event.dataTransfer)event.dataTransfer.effectAllowed='copyMove';
+          });
+        }
         row.style.paddingLeft = Math.min(160, depth * 13 + 4) + 'px';
         const icon = iconNode(item);
         const label = document.createElement('button');
@@ -799,7 +822,7 @@
       if(!target)return toast('Open an HTTPS page to bookmark it.');
       if(!model.add(data,'link',parent||null,{
         name:currentTitle||new URL(target).hostname,url:target
-      }))return toast('Unable to save bookmark.');
+      }))return toast('Website already bookmarked; no duplicate created.');
       persist();toast('Page bookmarked');
     },
     openLink, toggleBookmark, manager:()=>{renderManager();setMode('manager');},
