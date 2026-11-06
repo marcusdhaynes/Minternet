@@ -290,6 +290,38 @@
     applyVisibility();
     persist();
   }
+  // Native HTML drag-and-drop in the trusted WebView2 chrome. A drag source
+  // must have started here: never trust an externally supplied bookmark ID.
+  let draggedBarId=null,draggedBarElement=null,barDropIndicator=null;
+  let ignoreBarClick=null;
+  function clearBarIndicator(){
+    barDropIndicator?.classList.remove('bookmark-reorder-before','bookmark-reorder-after');
+    barDropIndicator=null;
+  }
+  function finishBarDrag(){
+    clearBarIndicator();
+    draggedBarElement?.classList.remove('bookmark-reorder-source');
+    draggedBarElement=null;
+    draggedBarId=null;
+  }
+  function barPlacement(event){
+    const target=event.target;
+    if(!target?.closest?.('#bookmarkBar')||target.closest('#bookmarkBarManage'))return null;
+    const holder=$('bookmarkItems');
+    const elements=Array.from(holder.children).filter(el=>el.dataset.bookmarkId);
+    if(!elements.length)return {anchorId:null,after:true,element:null};
+    // Use pointer position rather than DOM nesting: dropping between icons or
+    // into a two-pixel gap is as easy as dropping directly on a folder.
+    for(const element of elements){
+      const rect=element.getBoundingClientRect();
+      if(event.clientX<=rect.right){
+        return {anchorId:element.dataset.bookmarkId,
+          after:event.clientX>=rect.left+rect.width/2,element};
+      }
+    }
+    const last=elements[elements.length-1];
+    return {anchorId:last.dataset.bookmarkId,after:true,element:last};
+  }
   function renderBar() {
     const holder = $('bookmarkItems');
     holder.replaceChildren();
@@ -306,17 +338,35 @@
       }
       el.dataset.bookmarkId = item.id;
       el.dataset.bookmarkKind = item.kind;
-      if(item.kind==='link')el.draggable=true;
+      // Folders and links can both be rearranged, while external URL drags
+      // and Firefox folder imports retain their existing formats.
+      el.draggable=true;
       el.addEventListener('dragstart',event=>{
-        if(item.kind!=='link')return;
-        event.dataTransfer?.setData('application/x-minternet-bookmark',
-          JSON.stringify({id:item.id,url:item.url,name:item.name||''}));
-        event.dataTransfer?.setData('text/uri-list',item.url);
-        if(event.dataTransfer)event.dataTransfer.effectAllowed='copyMove';
+        if(!event.dataTransfer)return;
+        finishBarDrag();
+        draggedBarId=item.id;
+        draggedBarElement=el;
+        el.classList.add('bookmark-reorder-source');
+        event.dataTransfer.setData('application/x-minternet-reorder',item.id);
+        if(item.kind==='link'){
+          event.dataTransfer.setData('application/x-minternet-bookmark',
+            JSON.stringify({id:item.id,url:item.url,name:item.name||''}));
+          event.dataTransfer.setData('text/uri-list',item.url);
+          event.dataTransfer.effectAllowed='copyMove';
+        }else{
+          // Don't export a folder's children or browser URLs during a drag.
+          event.dataTransfer.setData('text/plain','Bookmark folder');
+          event.dataTransfer.effectAllowed='move';
+        }
       });
       el.title = item.kind === 'folder' ? textFor(item) : (item.name || item.url);
       el.setAttribute('aria-label', item.kind === 'folder' ? 'Open Folder: ' + textFor(item) : 'Open Bookmark: ' + textFor(item));
       el.addEventListener('click', event => {
+        if(ignoreBarClick?.id===item.id&&Date.now()<ignoreBarClick.until){
+          ignoreBarClick=null;
+          event.preventDefault();event.stopImmediatePropagation();
+          return;
+        }
         if(item.kind === 'folder') {
           if(window.minternetMenus?.folder) window.minternetMenus.folder(item.id,el);
           else openFolder(item.id);
@@ -512,6 +562,36 @@
     hoverTarget=null;
     document.documentElement.classList.remove('bookmark-drag-over');
   }
+  // Trusted in-browser reordering runs before the external-import listeners.
+  // Edge markers do not change item widths, avoiding jerky rearrangement.
+  document.addEventListener('dragover',event=>{
+    if(!draggedBarId)return;
+    const placement=barPlacement(event);
+    if(!placement){clearBarIndicator();return;}
+    event.preventDefault();event.stopImmediatePropagation();
+    if(event.dataTransfer)event.dataTransfer.dropEffect='move';
+    clearBarIndicator();
+    if(placement.element){
+      barDropIndicator=placement.element;
+      placement.element.classList.add(placement.after
+        ?'bookmark-reorder-after':'bookmark-reorder-before');
+    }
+  },true);
+  document.addEventListener('drop',event=>{
+    if(!draggedBarId)return;
+    const placement=barPlacement(event);
+    if(!placement)return;
+    event.preventDefault();event.stopImmediatePropagation();
+    const id=draggedBarId;
+    ignoreBarClick={id,until:Date.now()+350};
+    // First discard the drag source/indicator, then render once on a change.
+    finishBarDrag();
+    if(model.reorderBar(data,id,placement.anchorId,placement.after)){
+      persist(); // Same profile, Undo and encrypted sync ordering path.
+    }
+  },true);
+  document.addEventListener('dragend',finishBarDrag,true);
+
   document.addEventListener('dragover',event=>{
     // Secret Bookmarks drop targets belong exclusively to the encrypted
     // importer. Never copy their dropped URL into normal bookmark storage.
