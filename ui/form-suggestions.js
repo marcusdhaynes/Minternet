@@ -111,12 +111,12 @@
         }
         if(ctx.hasValue){
           panel.append(action('＋ Save to '+entry.label,async()=>{
-            await approved('vault-identity-capture',{id:entry.id,key:ctx.key},'Saved to '+entry.label);
+            await approved('vault-identity-capture',{id:entry.id,key:ctx.key,index:ctx.fieldIndex},'Saved to '+entry.label);
           },'form-suggestion-option'));
         }
       }
       if(ctx.hasValue)panel.append(action('＋ Save as New Identity',async()=>{
-        await approved('vault-identity-capture',{key:ctx.key},'Identity encrypted and saved. Edit it in Settings.');
+        await approved('vault-identity-capture',{key:ctx.key,index:ctx.fieldIndex},'Identity encrypted and saved. Edit it in Settings.');
       },'form-suggestion-option'));
       panel.append(action('✎ Edit Identities',()=>openManager('identity'),'form-suggestion-option'));
     }
