@@ -1619,7 +1619,7 @@ fn refresh_layout(app: &tauri::AppHandle) {
         if state.bookmark_bar_visible == bar_visible && state.overlay_open == overlay_open {
             state.size_and_home = if applied {Some(signature)} else {None};
         }
-    }
+    };
 }
 fn display_active(app: &tauri::AppHandle) {
     let mut targets=HashSet::new();
