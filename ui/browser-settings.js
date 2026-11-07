@@ -9,14 +9,15 @@
   const home=$('homePageUrl'),saveHome=$('homePageSave');
   const folder=$('downloadFolderPath'),saveFolder=$('downloadFolderSave');
   const reset=$('downloadFolderDefault'),status=$('browserPreferencesStatus');
-  if(!home||!saveHome||!folder||!saveFolder||!reset||!status)return;
+  const tabLimit=$('tabLimit'),saveTabLimit=$('tabLimitSave');
+  if(!home||!saveHome||!folder||!saveFolder||!reset||!status||!tabLimit||!saveTabLimit)return;
   const defaultHome='https://www.google.com/';
   const report=message=>{
     status.hidden=!message;status.textContent=String(message||'');
     if(message?.length)window.minternetToast?.(message);
   };
   function setBusy(busy){
-    saveHome.disabled=saveFolder.disabled=reset.disabled=Boolean(busy);
+    saveHome.disabled=saveFolder.disabled=reset.disabled=saveTabLimit.disabled=Boolean(busy);
   }
   async function invoke(command,payload){
     const result=await api.command(command,payload);
@@ -32,11 +33,16 @@
     if(!window.__TAURI__){
       home.value=defaultHome;
       folder.placeholder='System Downloads folder (native app only)';
+      try {
+        const result=await invoke('tab-limit-get');
+        tabLimit.value=String(result?.tabLimit??0);
+      } catch { tabLimit.value='0'; }
       return;
     }
     try{
       const settings=await invoke('browser-preferences');
       home.value=settings.homepage||defaultHome;
+      tabLimit.value=String(settings.tabLimit??0);
       folder.value=settings.usingSystemDownloads?'':settings.downloadFolder||'';
       folder.placeholder=settings.usingSystemDownloads
         ?settings.downloadFolder||'System Downloads folder'
@@ -68,6 +74,25 @@
     }catch(e){report('Downloads folder was not changed: '+String(e.message||e));}
     finally{setBusy(false);}
   }
+  async function updateTabLimit(){
+    const n=Number(tabLimit.value);
+    if(tabLimit.value.trim()===''||!Number.isSafeInteger(n)||n<0||n>1000000){
+      report('Tab Limit must be a whole number from 0 to 1000000.');
+      return;
+    }
+    setBusy(true);
+    try{
+      const result=await invoke('tab-limit-set',n);
+      if(!result?.ok)throw Error('Tab Limit was not saved');
+      tabLimit.value=String(result.tabLimit);
+      report(n===0?'Tab Limit saved: Unlimited.':'Tab Limit saved: '+n+'.');
+    }catch(e){report('Tab Limit was not changed: '+String(e.message||e));}
+    finally{setBusy(false);}
+  }
+  saveTabLimit.addEventListener('click',()=>void updateTabLimit());
+  tabLimit.addEventListener('keydown',event=>{
+    if(event.key==='Enter'){event.preventDefault();void updateTabLimit();}
+  });
   saveHome.addEventListener('click',()=>void updateHome());
   home.addEventListener('keydown',event=>{
     if(event.key==='Enter'){event.preventDefault();void updateHome();}
