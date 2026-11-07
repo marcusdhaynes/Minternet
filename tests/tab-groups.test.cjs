@@ -88,3 +88,18 @@ test('group chips use one compact centered width on every viewport',()=>{
  assert.match(css,/@media\(max-width:600px\)\{[^\n]*\.group-chip\{--group-chip-width:56px\}/);
  assert.doesNotMatch(css,/--group-chip-width:(?:94\.4|60)px/);
 });
+
+test('native resize keeps existing pages alive and coalesces redundant WebView updates',()=>{
+ const native=require('node:fs').readFileSync(
+   require('node:path').join(__dirname,'../native/desktop/src-tauri/src/main.rs'),'utf8');
+ // Transient minimize/restore sizes must not be cached as a real viewport.
+ assert.match(native,/if physical\.width < 64 \|\| physical\.height < 64/);
+ assert.match(native,/invalidate_layout\(app\);\s*return;/);
+ // Rapid resize events are coalesced, not one synchronous WebView2 resize per event.
+ assert.match(native,/resize_pending\.swap\(true, Ordering::AcqRel\)/);
+ assert.match(native,/Duration::from_millis\(16\)/);
+ assert.match(native,/run_on_main_thread\(move \|\|/);
+ // Returning to the app forces repaint even if the window size is unchanged.
+ assert.match(native,/tauri::WindowEvent::Focused\(true\)/);
+ assert.match(native,/invalidate_layout\(&handle\);\s*refresh_layout\(&handle\);/);
+});
