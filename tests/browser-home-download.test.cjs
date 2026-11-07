@@ -30,14 +30,14 @@ test('all browser downloads honor a configurable trusted destination',()=>{
 });
 test('homepage and Downloads Folder are editable in Settings',()=>{
   for(const id of ['homePageUrl','homePageSave','downloadFolderPath',
-    'downloadFolderSave','downloadFolderDefault','browserPreferencesStatus']){
+    'downloadFolderSave','downloadFolderDefault','browserPreferencesStatus','tabLimit','tabLimitSave']){
     assert.match(index,new RegExp('id="'+id+'"'));
   }
 });
 test('browser preference UI persists only through the native settings bridge',async()=>{
   const js=read('ui/browser-settings.js');
   const ids=['homePageUrl','homePageSave','downloadFolderPath',
-    'downloadFolderSave','downloadFolderDefault','browserPreferencesStatus'];
+    'downloadFolderSave','downloadFolderDefault','browserPreferencesStatus','tabLimit','tabLimitSave'];
   const elements=Object.fromEntries(ids.map(id=>[id,{
     value:'',disabled:false,hidden:false,placeholder:'',textContent:'',
     events:{},addEventListener(k,fn){this.events[k]=fn;},dispatch(k){this.events[k]?.({key:k,preventDefault(){}})}
@@ -49,8 +49,9 @@ test('browser preference UI persists only through the native settings bridge',as
       async command(name,value){
         events.push([name,value]);
         if(name==='browser-preferences')return {homepage:'https://www.google.com/',
-          downloadFolder:'C:\\Users\\example\\Downloads',usingSystemDownloads:true};
+          downloadFolder:'C:\\Users\\example\\Downloads',usingSystemDownloads:true,tabLimit:0};
         if(name==='browser-homepage-set')return {ok:true,homepage:value};
+        if(name==='tab-limit-set')return {ok:true,tabLimit:value};
         if(name==='downloads-folder-set')return {ok:true,downloadFolder:
           value||'C:\\Users\\example\\Downloads',usingSystemDownloads:!value};
         return {message:'Unexpected command'};
@@ -61,6 +62,15 @@ test('browser preference UI persists only through the native settings bridge',as
   vm.runInNewContext(js,{window,document:{getElementById:id=>elements[id]}});
   for(let i=0;i<5;i++)await Promise.resolve();
   assert.equal(elements.homePageUrl.value,'https://www.google.com/');
+  assert.equal(elements.tabLimit.value,'0');
+  elements.tabLimit.value='55';
+  elements.tabLimitSave.dispatch('click');
+  for(let i=0;i<8;i++)await Promise.resolve();
+  assert(events.some(([name,value])=>name==='tab-limit-set'&&value===55));
+  elements.tabLimit.value='0';
+  elements.tabLimitSave.dispatch('click');
+  for(let i=0;i<8;i++)await Promise.resolve();
+  assert(events.some(([name,value])=>name==='tab-limit-set'&&value===0));
   elements.homePageUrl.value='example.org/home';
   elements.homePageSave.dispatch('click');
   for(let i=0;i<8;i++)await Promise.resolve();
