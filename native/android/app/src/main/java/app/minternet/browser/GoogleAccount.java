@@ -10,7 +10,6 @@ import androidx.credentials.GetCredentialResponse;
 import androidx.credentials.exceptions.GetCredentialException;
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption;
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential;
-import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException;
 import java.util.function.Consumer;
 
 /** Explicit user-driven Google sign-in via Android Credential Manager.
@@ -50,7 +49,7 @@ final class GoogleAccount {
                                 onError.accept("Google returned an empty identity token");return;
                             }
                             onToken.accept(token);
-                        }catch(GoogleIdTokenParsingException ex){
+                        }catch(RuntimeException ex){
                             onError.accept("Google identity token could not be verified");
                         }
                     }
