@@ -116,11 +116,22 @@
   }
   function ungroup(tabId){return assign(tabId,null);}
   async function pin(tabId,willPin=true) {
-    if(!latest.tabs.some(t=>t.id===tabId))return false;
-    // Pinning detaches the page from its group; never close or reload it.
-    if(willPin)model.assign(state,tabId,null);
+    const tab=latest.tabs.find(t=>t.id===tabId);
+    if(!tab)return false;
+    if(tab.secretTab){
+      window.minternetToast?.('Secret Tabs cannot be pinned outside the encrypted vault.');
+      return false;
+    }
+    if(tab.pinned===willPin)return true;
+    // The native operation must succeed BEFORE group membership changes.
+    // Otherwise a failed pin permanently strips a tab out of its group.
     const response=await api.command(willPin?'pin':'unpin',tabId);
-    if(response?.message){window.minternetToast?.(response.message);return false;}
+    if(response?.message||response?.ok!==true){
+      window.minternetToast?.(response?.message||'Could not change tab pin.');
+      return false;
+    }
+    // Preserve the live WebView; move its favicon-only pinned tab left of all groups.
+    if(willPin)model.assign(state,tabId,null);
     persist();
     return true;
   }
@@ -139,7 +150,7 @@
       if(window.__TAURI__)void api.command('chrome-overlay',false);
     }
     document.body.classList.remove('tab-dragging');
-    tabStrip.classList.remove('drag-ungroup-over');
+    tabStrip.classList.remove('drag-ungroup-over','drag-pin-over');
     ungroupTarget?.classList.remove('drag-target');
     document.querySelectorAll('.drag-target,.group-drop-target,.tab-drag-source,.drop-before,.drop-after')
       .forEach(node=>node.classList.remove('drag-target','group-drop-target','tab-drag-source','drop-before','drop-after'));
@@ -345,7 +356,7 @@
   function updateHover(x,y){
     tabStrip.querySelectorAll('.drag-target,.group-drop-target,.drop-before,.drop-after')
       .forEach(node=>node.classList.remove('drag-target','group-drop-target','drop-before','drop-after'));
-    tabStrip.classList.remove('drag-ungroup-over');
+    tabStrip.classList.remove('drag-ungroup-over','drag-pin-over');
     ungroupTarget?.classList.remove('drag-target');
     const hit=document.elementFromPoint(x,y);
     const chip=hit?.closest('.group-chip[data-group-id]');
@@ -360,7 +371,13 @@
       return;
     }
     if(hit?.closest('#tabUngroupDrop'))ungroupTarget?.classList.add('drag-target');
-    else if(hit?.closest('#tabs'))tabStrip.classList.add('drag-ungroup-over');
+    else if(hit?.closest('#tabs')){
+      const rect=tabStrip.getBoundingClientRect();
+      const source=latest.tabs.find(t=>t.id===draggingTabId);
+      // Dropping on the leftmost edge pins even when no tab is pinned yet.
+      if(source&&!source.pinned&&x<=rect.left+24)tabStrip.classList.add('drag-pin-over');
+      else tabStrip.classList.add('drag-ungroup-over');
+    }
   }
   function movePointer(event){
     if(!gesture||event.pointerId!==gesture.pointerId)return;
@@ -426,8 +443,14 @@
     }else if(groupId)dropIntoGroup(event,groupId);
     else if(tab&&Number(tab.dataset.tabId)!==finished.id)
       dropNextTo(event,Number(tab.dataset.tabId),tab);
-    else if(hit?.closest('#tabUngroupDrop')||hit?.closest('#tabs'))
-      dropOutsideGroup(event);
+    else if(hit?.closest('#tabs')){
+      const rect=tabStrip.getBoundingClientRect();
+      const source=latest.tabs.find(t=>t.id===finished.id);
+      if(source&&!source.pinned&&event.clientX<=rect.left+24){
+        event.preventDefault();event.stopPropagation();
+        void pin(finished.id,true);
+      }else dropOutsideGroup(event);
+    }else if(hit?.closest('#tabUngroupDrop'))dropOutsideGroup(event);
     try {if(tabStrip.hasPointerCapture(event.pointerId))tabStrip.releasePointerCapture(event.pointerId);}catch{}
     clearDropState();
   }

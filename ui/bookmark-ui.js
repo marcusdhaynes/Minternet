@@ -383,6 +383,19 @@
     const last=elements[elements.length-1];
     return {anchorId:last.dataset.bookmarkId,after:true,element:last};
   }
+  let openBookmarkUrls=new Set();
+  function updateOpenBookmarkIcons(){
+    const holder=$('bookmarkItems');
+    if(!holder)return;
+    // Only ordinary visible-tab URLs count. Secret Bookmark URLs never pass
+    // through normal bookmark UI and must never be inspected or exposed here.
+    for(const el of holder.children){
+      const id=el.dataset.bookmarkId;
+      const entry=model.find(data,id);
+      el.classList.toggle('bookmark-open-page',Boolean(
+        entry?.kind==='link'&&openBookmarkUrls.has(model.url(entry.url))));
+    }
+  }
   function renderBar() {
     const holder = $('bookmarkItems');
     holder.replaceChildren();
@@ -399,6 +412,8 @@
       }
       el.dataset.bookmarkId = item.id;
       el.dataset.bookmarkKind = item.kind;
+      el.classList.toggle('bookmark-open-page',item.kind==='link'&&
+        openBookmarkUrls.has(model.url(item.url)));
       // Folders and links can both be rearranged, while external URL drags
       // and Firefox folder imports retain their existing formats.
       el.draggable=true;
@@ -433,6 +448,7 @@
       });
       holder.append(el);
     }
+    updateOpenBookmarkIcons();
   }
   function renderStar() {
     const star = $('bookmarkThisPage');
@@ -1132,6 +1148,9 @@
     const tab = state.tabs.find(t => t.id === state.activeId);
     currentUrl = tab?.url || '';
     currentTitle = tab?.title || '';
+    openBookmarkUrls=new Set((state.tabs||[]).filter(t=>!t.secretTab)
+      .map(t=>model.url(t.url)).filter(Boolean));
+    updateOpenBookmarkIcons();
     renderStar();
   });
   // Persist the one-time flat-root to Bookmark Bar migration without Undo.

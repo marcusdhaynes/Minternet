@@ -95,6 +95,12 @@
     for(const group of g.getState().groups)
       assignOptions.push(item((belonging?.id===group.id?'✓  ':'●  ')+g.displayName(group),()=>g.assign(tabId,group.id)));
     return [
+      // Pin is a first-class right-click action, not a hidden icon in a
+      // submenu. Pinned tabs shrink to a favicon and remain left of groups.
+      ...(tab.secretTab?[disabled('Secret Tabs cannot be pinned')]:
+        [item(tab.pinned?'📌  Unpin Tab':'📌  Pin Tab',
+          ()=>g.pin(tabId,!tab.pinned))]),
+      sep(),
       item('＋  New Group With This Tab',()=>g.openEditor(null,tabId)),
       sub('▣  Move To Group',assignOptions.slice(1)),
       ...(belonging?[item('↙  Remove From '+g.displayName(belonging),()=>g.ungroup(tabId))]:[]),
@@ -126,7 +132,8 @@
       {title:'Reload Tab',glyph:'reload',action:()=>window.minternet?.command('reload-tab',id)},
       {title:tab.suspended?'Already Unloaded':'Unload Tab',glyph:'unload',action:()=>window.minternet?.command('unload-tab',id)},
       {title:'Duplicate Tab',glyph:'duplicate',action:()=>window.minternet?.command('duplicate',id)},
-      {title:tab.pinned?'Unpin Tab':'Pin Tab',glyph:'pin',action:()=>groups()?.pin(id,!tab.pinned)}
+      ...(!tab.secretTab?[{title:tab.pinned?'Unpin Tab':'Pin Tab',
+        glyph:'pin',action:()=>groups()?.pin(id,!tab.pinned)}]:[])
     ];
   }
   function bookmarkMenu(bookmarkId){
@@ -167,7 +174,10 @@
   // For the GitHub Pages UI-only demo, use a small DOM popup and cascading
   // submenus. The actual installed browser uses the native OS menu above.
   let fallback=null,customOpen=false;
+  let openFolderButton=null;
   function closeFallback(){
+    openFolderButton?.classList.remove('bookmark-open-folder');
+    openFolderButton=null;
     fallback?.remove();fallback=null;
     document.removeEventListener('pointerdown',outside,true);
     document.removeEventListener('keydown',esc,true);
@@ -388,7 +398,19 @@
     ];
   }
   const handlers={
-    folder:(id,button)=>popup(folderItems(id),fromElement(button),window.__minternetMenuSmoke?{}:{custom:true,heading:'FOLDER'}),
+    folder:(id,button)=>{
+      closeFallback();
+      return popup(folderItems(id),fromElement(button),
+        window.__minternetMenuSmoke?{}:{custom:true,heading:'FOLDER'}).then(result=>{
+        // popup() builds the fallback after clearing the previous menu.
+        // Apply the active-folder color only while its menu is displayed.
+        if(result&&fallback&&button){
+          openFolderButton=button;
+          button.classList.add('bookmark-open-folder');
+        }
+        return result;
+      });
+    },
     bookmark:(id,event)=>popup(bookmarkMenu(id),{x:event.clientX,y:event.clientY},{custom:true,compactTab:true,heading:'BOOKMARK'}),
     bar:event=>popup(barMenu(),{x:event.clientX,y:event.clientY},{custom:true,heading:'BOOKMARKS'}),
     groups:point=>groupsOverview(point),
