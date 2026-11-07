@@ -57,7 +57,7 @@ fn check_identity(label:&str,fields:&BTreeMap<String,String>)->Result<(),String>
     if label.trim().is_empty()||label.len()>80||fields.len()>40||
        fields.is_empty(){return Err("Identity needs a label and one or more fields".into());}
     for (name,value) in fields {
-        if !valid_identity_field(name)||value.len()>400||value.chars().any(|c|c=='\\0'){
+        if !valid_identity_field(name)||value.len()>400||value.chars().any(|c|c=='\0'){
             return Err("Invalid identity field or value".into());
         }
     }
