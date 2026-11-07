@@ -19,13 +19,13 @@ test('payment method button opens the encrypted native vault, not an untrusted w
 test('new normal and private blank tabs focus the address bar',()=>{
  const ui=get('ui/app.js');
  assert.match(ui,/const isNewTab=/);
- assert.match(ui,/data\.tabs\.some\(tab=>tab\.id===data\.activeId&&tab\.url==='about:blank'\)/);
+ assert.match(ui,/data\.tabs\.some\(tab=>tab\.id===data\.activeId&&tab\.url==='about:blank'&&\!tab\.secretTab\)/);
  assert.match(ui,/address\?\.focus\(\)/);
  assert.match(ui,/\['newPrivate','new-private'\]/);
 });
 test('private tab history cannot be saved or queried in the native browser',()=>{
  const source=get('native/desktop/src-tauri/src/main.rs');
- assert.match(source,/if tab\.private\{return;\}/);
+ assert.match(source,/if tab\.private\|\|tab\.secret_id\.is_some\(\)\{return;\}/);
  assert.match(source,/if private\{return Ok\(json!\(\[\]\)\);\}/);
  assert.match(source,/\.incognito\(private\)/);
  assert.match(source,/new-private-background-url/);
