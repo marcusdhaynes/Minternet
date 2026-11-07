@@ -2042,7 +2042,7 @@ fn fill_identity(app:&tauri::AppHandle,id:&str)->Result<bool,String>{
         let vault=state.lock().map_err(|e|e.to_string())?;
         vault.identity(id).ok_or("Unlock the vault and choose an identity")?
     };
-    let payload=json!({"origin":origin,"fields":identity.fields}).to_string();
+    let payload=json!({"origin":origin,"fields":identity.fields.clone()}).to_string();
     // A script cannot be evaluated for a different origin, even if the page
     // navigates between the click and the browser's native evaluate call.
     view.eval(&IDENTITY_FILL_JS.replace("__MINTERNET_IDENTITY_PAYLOAD__",&payload))
@@ -3188,7 +3188,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 let mut fields=existing.as_ref()
                     .map(|item|item.fields.clone()).unwrap_or_default();
                 fields.insert(key,value);
-                let name=existing.map(|item|item.label)
+                let name=existing.as_ref().map(|item|item.label.clone())
                     .unwrap_or_else(||"New Identity".into());
                 let id=vault.put_identity(identity_id.as_deref(),name,fields)?;
                 vault.save(&password_vault::file(&handle)?)?;
