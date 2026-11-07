@@ -1346,18 +1346,14 @@ html.minternet-overlay-active .group-editor-backdrop {
 .google-settings button:disabled{opacity:.55;cursor:progress;}
 .gmail-code-badge{flex:0 0 auto;padding:2px 6px;margin:0 3px;height:19px;border-radius:4px;border:1px solid #89a4dd;background:#374d7d;color:#fff;font:600 11px/14px system-ui;letter-spacing:1px;cursor:pointer;max-width:104px;text-overflow:ellipsis;overflow:hidden;white-space:nowrap;}
 
-/* Always-visible website identity: bright monograms while the real favicon
-   loads or on sites whose icons are inaccessible to the host browser. */
+/* A real favicon comes from WebView2 whenever possible. Pages without one
+   get a neutral browser globe instead of a misleading colored letter. */
 .tabs .site-icon-fallback {
-  display:grid;place-items:center;width:16px;height:16px;border-radius:4px;
-  background:hsl(var(--favicon-hue,255) 48% 39%);
-  color:#fff;font-size:11px;font-weight:800;line-height:1;
-  text-shadow:0 1px 1px #0006;flex:none;
+  display:grid;place-items:center;width:16px;height:16px;flex:0 0 16px;
+  border:none;border-radius:0;background:transparent;box-shadow:none;
+  color:#a4b4d2;line-height:1;
 }
-.tabs .site-icon-fallback.site-icon-chatgpt {
-  border-radius:50%;background:#10a37f;color:white;font-size:14px;
-  font-weight:600;text-shadow:none;
-}
+.tabs .site-icon-fallback svg{display:block;width:15px;height:15px;}
 
 /* Completed downloads support native OS drag gestures and direct open/run. */
 .downloads-popup{width:min(350px,calc(100vw - 8px));}
