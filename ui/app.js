@@ -109,7 +109,8 @@ function renderSiteIcon(tab,slot){
   if(tab.secretTab){
     slot.textContent='◈';
     slot.classList.add('secret-tab-icon');
-    slot.removeAttribute('data-site-host');
+    slot.removeAttribute('data-site-key');
+    slot.removeAttribute('data-native-favicon');
     return;
   }
   slot.classList.remove('secret-tab-icon');
