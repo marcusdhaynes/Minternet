@@ -1463,27 +1463,39 @@ html.minternet-overlay-active .group-editor-backdrop {
 .bookmark-emoji img{filter:drop-shadow(0 1px 1px #070c1755);}
 .bookmark-item .bookmark-emoji.bookmark-site-fallback{background:transparent!important;}
 
-/* Folder-only visual treatment: exactly centered artwork, 10% larger than
-   the previous 15px icon, with a restrained outline and inset bevel.
-   Ordinary site favicons keep their transparent, borderless silhouette. */
+/* Precisely centered Bookmark Bar artwork, with NO decorative
+   borders, outlines, bevels or square backgrounds on ANY favicon/folder. */
+.bookmark-bar .bookmark-item .bookmark-emoji{
+  display:grid!important;place-items:center!important;place-content:center!important;
+  flex:0 0 18px!important;width:18px!important;min-width:18px!important;
+  height:19px!important;margin:0!important;padding:0!important;
+  font-size:13px;line-height:1!important;text-align:center;
+  letter-spacing:0;box-sizing:border-box;
+  background:transparent!important;border:0!important;outline:0!important;
+  box-shadow:none!important;border-radius:0!important;
+}
+.bookmark-bar .bookmark-item .bookmark-emoji img{
+  display:block;margin:auto!important;width:15px;height:15px;
+  object-fit:contain;object-position:center center;
+}
 .bookmark-bar .bookmark-item[data-bookmark-kind="folder"] .bookmark-emoji{
-  display:grid;place-items:center;justify-items:center;align-items:center;
-  flex:0 0 19px;width:19px;height:19px;min-width:19px;
-  margin:0;padding:0;box-sizing:border-box;line-height:1;
-  font-size:14.3px; /* Previous 13px folder glyph, enlarged by 10%. */
-  border:1px solid #8b9abd77!important;
-  border-radius:4px;
-  background:transparent!important;
-  box-shadow:inset 0 1px 0 #dbe6ff2e,inset 0 -1px 0 #03071648,0 0 0 .3px #e4edff24!important;
-  text-align:center;
+  font-size:14.3px; /* Folder glyph remains 10% larger than its original 13px. */
 }
 .bookmark-bar .bookmark-item[data-bookmark-kind="folder"] .bookmark-emoji img{
-  display:block;width:16.5px;height:16.5px;object-fit:contain;
-  margin:auto;flex:none;
+  width:16.5px;height:16.5px; /* Folder image remains 10% larger as requested. */
 }
-.bookmark-bar .bookmark-item[data-bookmark-kind="folder"]:hover .bookmark-emoji{
-  border-color:#b9c7e49c!important;
-  box-shadow:inset 0 1px 0 #f0f6ff42,inset 0 -1px 0 #03071654,0 0 0 .3px #e4edff34!important;
+/* An open bookmarked URL, or a folder whose menu is shown, is precisely
+   50% less saturated; keep the text and keyboard focus indicator readable. */
+.bookmark-bar .bookmark-item.bookmark-open-page .bookmark-emoji,
+.bookmark-bar .bookmark-item.bookmark-open-folder .bookmark-emoji{
+  filter:saturate(.5);
+}
+/* Pinning by drag works even when there are no pinned tabs yet. */
+.tabs.drag-pin-over{position:relative;}
+.tabs.drag-pin-over::before{
+  content:"";position:absolute;left:0;top:1px;bottom:1px;width:22px;
+  border:1px dashed #c4b0ff;border-radius:5px;
+  background:#8d74d92a;pointer-events:none;z-index:4;
 }
 
 .tab-symbol.secret-tab-icon{color:#c7a5f8;font-size:14px}
