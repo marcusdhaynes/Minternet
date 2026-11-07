@@ -2,6 +2,8 @@
 // Hosted companion only. The real desktop app supplies window.minternet through preload.
 if (!window.minternet) {
   const tabs=[];
+  let tabLimit=0; // 0 = Unlimited.
+  try{const n=Number(localStorage.getItem('minternet.preview.tabLimit.v1'));if(Number.isSafeInteger(n)&&n>=0&&n<=1000000)tabLimit=n;}catch{}
   let activeId=0,nextId=0,renderedUrl='',listeners=[];
   const $=id=>document.getElementById(id);
   const current=()=>tabs.find(t=>t.id===activeId);
@@ -61,7 +63,7 @@ if (!window.minternet) {
     show();
   }
   function addTab(){
-    if(tabs.length>=35)return false;
+    if(tabLimit>0 && tabs.length>=tabLimit)return false;
     const id=++nextId;tabs.push({id,title:'New Tab',url:'about:blank',private:false,
       pinned:false,history:['about:blank'],at:0});activeId=id;return true;
   }
@@ -73,7 +75,13 @@ if (!window.minternet) {
     onFocusAddress(){return()=>{}},
     async command(name,value){
       switch(name){
-        case 'new':if(!addTab())return {message:'Maximum 35 tabs.'};break;
+        case 'tab-limit-get':return {ok:true,tabLimit};
+        case 'tab-limit-set':{
+          if(!Number.isSafeInteger(value)||value<0||value>1000000)return {message:'Tab Limit must be from 0 to 1000000'};
+          try{localStorage.setItem('minternet.preview.tabLimit.v1',String(value));}catch{return {message:'Unable to save Tab Limit'};}
+          tabLimit=value;return {ok:true,tabLimit};
+        }
+        case 'new':if(!addTab())return {message:'Tab limit reached. Set Tab Limit to 0 for unlimited.'};break;
         case 'activate':if(tabs.some(t=>t.id===value)){activeId=value;const t=current();if(t?.suspended){t.suspended=false;renderedUrl='';}}break;
         case 'deselect':activeId=0;break;
         case 'pin':case 'unpin':case 'toggle-pin':{
@@ -85,7 +93,7 @@ if (!window.minternet) {
         case 'duplicate':{
           const original=tabs.find(t=>t.id===value);
           if(!original)return {message:'Tab not found.'};
-          if(!addTab())return {message:'Maximum 35 tabs.'};
+          if(!addTab())return {message:'Tab limit reached. Set Tab Limit to 0 for unlimited.'};
           const fresh=current();
           fresh.url=original.url;fresh.title=original.title;
           fresh.private=original.private;fresh.history=[original.url];fresh.at=0;
@@ -103,7 +111,7 @@ if (!window.minternet) {
         }
         case 'navigate':{
           const url=parse(value);if(!url)return {message:'Only HTTPS addresses and search terms are permitted.'};
-          if(!current()&&!addTab())return {message:'Maximum 35 tabs.'};
+          if(!current()&&!addTab())return {message:'Tab limit reached. Set Tab Limit to 0 for unlimited.'};
           go(url);
           if (url !== 'about:blank' && restricted(url)) {
             // GitHub Pages cannot embed these websites. Do not silently open
