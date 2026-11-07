@@ -161,6 +161,7 @@ struct Tab {
     url: String,
     private: bool,
     pinned: bool,
+    favicon: Option<String>,
     audio_playing: bool,
     audio_muted: bool,
     view: Option<String>,
@@ -187,6 +188,7 @@ struct PublicTab {
     url: String,
     private: bool,
     pinned: bool,
+    favicon: Option<String>,
     audio_playing: bool,
     audio_muted: bool,
     loading: bool,
@@ -219,6 +221,7 @@ fn scrub_secret_tab(tab:&mut Tab){
     for page in &mut tab.history{page.zeroize();}
     tab.history=vec![HOME.into()];
     tab.title.zeroize();tab.title="Secret Tab".into();
+    tab.favicon=None;
     tab.at=0;tab.secret_revealed=false;tab.loading=false;
     tab.audio_playing=false;tab.audio_muted=false;
 }
@@ -708,7 +711,7 @@ impl Browser {
         self.next_id += 1;
         self.tabs.push(Tab {
             id, title: "New Tab".into(), url: HOME.into(), private,
-            pinned: false, audio_playing:false, audio_muted:false,
+            pinned: false, favicon:None,audio_playing:false, audio_muted:false,
             view: None, history: vec![HOME.into()], at: 0,
             inactive_since: None, loading: false, checking_unload: false,
             opener_id: None, pending_chatgpt: None,
@@ -740,7 +743,9 @@ impl Browser {
                 id:t.id,
                 title:if t.secret_id.is_some(){"Secret Tab".into()}else{t.title.clone()},
                 url:if t.secret_id.is_some(){HOME.into()}else{t.url.clone()},
-                private:t.private,pinned:t.pinned,audio_playing:t.audio_playing,
+                private:t.private,pinned:t.pinned,
+                favicon:if t.secret_id.is_some(){None}else{t.favicon.clone()},
+                audio_playing:t.audio_playing,
                 audio_muted:t.audio_muted,loading:t.loading,
                 can_back:t.secret_id.is_none() && t.at>0,
                 can_forward:t.secret_id.is_none() && t.at+1<t.history.len(),
@@ -1643,6 +1648,7 @@ fn update_from_site(app: &tauri::AppHandle, id: u32, url: &str) {
                 if tab.url!=url {
                     pinned_change=tab.pinned && !tab.private;
                     tab.url=url.into();
+                    tab.favicon=None;
                     if tab.history.get(tab.at).map(|s|s.as_str())!=Some(url) {
                         tab.history.truncate(tab.at+1);
                         tab.history.push(url.into());
@@ -1657,6 +1663,87 @@ fn update_from_site(app: &tauri::AppHandle, id: u32, url: &str) {
     notify(app);
 }
 
+// Prefer the real page favicon reported by WebView2, not guessed
+// /favicon.ico URLs (which are incorrect for many apps and hosted paths).
+// Public chrome receives only a validated icon URL, never a Secret Tab URL.
+fn validated_tab_favicon(raw:&str)->Option<String>{
+    if raw.len()>4096{return None;}
+    let url=tauri::Url::parse(raw).ok()?;
+    if url.scheme()!="https"||url.host_str().is_none()||
+       !url.username().is_empty()||url.password().is_some(){return None;}
+    let host=url.host_str()?.to_ascii_lowercase();
+    if host=="localhost"||host.ends_with(".localhost")||
+       host.ends_with(".local")||host.parse::<std::net::IpAddr>().is_ok(){
+        return None;
+    }
+    Some(url.to_string())
+}
+#[cfg(windows)]
+fn update_native_tab_favicon(app:&tauri::AppHandle,id:u32,raw:&str){
+    let favicon=validated_tab_favicon(raw);
+    let changed={
+        let state=app.state::<Mutex<Browser>>();
+        let Ok(mut b)=state.lock() else{return};
+        let Some(tab)=b.tabs.iter_mut().find(|t|t.id==id) else{return};
+        if tab.secret_id.is_some()||!is_real_page_url(&tab.url){return;}
+        if tab.favicon==favicon{false}else{
+            tab.favicon=favicon;true
+        }
+    };
+    if changed{notify(app);}
+}
+#[cfg(windows)]
+fn listen_native_tab_favicon(app:&tauri::AppHandle,id:u32,view:&tauri::webview::Webview)
+    ->Result<(),String>{
+    let handle=app.clone();
+    view.with_webview(move |native|{
+        use windows::core::{Interface,PWSTR};
+        use webview2_com::{FaviconChangedEventHandler,
+            Microsoft::Web::WebView2::Win32::ICoreWebView2_15};
+        let Ok(core)=(unsafe{native.controller().CoreWebView2()})
+            .and_then(|webview|webview.cast::<ICoreWebView2_15>()) else{return};
+        let callback=FaviconChangedEventHandler::create(Box::new(move |sender,_|{
+            let Some(source)=sender else{return Ok(())};
+            let Ok(webview)=source.cast::<ICoreWebView2_15>() else{return Ok(())};
+            let mut uri=PWSTR::null();
+            if unsafe{webview.FaviconUri(&mut uri)}.is_ok(){
+                if !uri.is_null(){
+                    let icon=unsafe{uri.to_string().unwrap_or_default()};
+                    // WebView2 owns the CoTaskMem-allocated URI until released.
+                    unsafe{windows::Win32::System::Com::CoTaskMemFree(
+                        Some(uri.as_ptr().cast::<std::ffi::c_void>()))};
+                    update_native_tab_favicon(&handle,id,&icon);
+                }else{update_native_tab_favicon(&handle,id,"");}
+            }
+            Ok(())
+        }));
+        let mut token=0i64;
+        let _=unsafe{core.add_FaviconChanged(&callback,&mut token)};
+        // The CoreWebView2 event retains this COM callback until the WebView
+        // is destroyed, including runtime favicon changes in single-page apps.
+    }).map_err(|e|e.to_string())?;
+    Ok(())
+}
+#[cfg(test)]
+mod tab_favicon_tests{
+    use super::*;
+    #[test]
+    fn native_favicon_is_https_only_and_never_a_secret_tab_address(){
+        assert!(validated_tab_favicon("https://example.com/favicon.svg").is_some());
+        assert!(validated_tab_favicon("https://github.io/App/favicon.png?v=4").is_some());
+        assert!(validated_tab_favicon("data:image/png;base64,eA==").is_none());
+        assert!(validated_tab_favicon("http://example.com/favicon.ico").is_none());
+        assert!(validated_tab_favicon("https://127.0.0.1/icon").is_none());
+        let mut b=Browser::new();
+        let id=b.add(true).unwrap();
+        let tab=b.tabs.iter_mut().find(|t|t.id==id).unwrap();
+        tab.secret_id=Some("secret-test".into());
+        tab.favicon=Some("https://hidden.example/private-favicon.ico".into());
+        let public=b.snapshot();
+        assert!(public.tabs[0].favicon.is_none());
+        assert!(!serde_json::to_string(&public).unwrap().contains("hidden.example"));
+    }
+}
 fn record_page_history(app:&tauri::AppHandle,id:u32,url:&str,title_hint:Option<&str>){
     let details={
         let state=app.state::<Mutex<Browser>>();
@@ -1744,7 +1831,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                 let label=format!("auth-popup-{}",
                     NEXT_AUTH_POPUP_ID.fetch_add(1,Ordering::Relaxed));
                 let builder=WebviewWindowBuilder::new(
-                        &for_popup,label,WebviewUrl::External(
+                        &for_popup,label.clone(),WebviewUrl::External(
                             tauri::Url::parse("about:blank").expect("valid blank URL")))
                     .window_features(features)
                     .title("Sign in — Minternet")
@@ -1762,7 +1849,13 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                         if !safe.is_empty(){let _=window.set_title(&safe);}
                     });
                 return match builder.build() {
-                    Ok(window)=>NewWindowResponse::Create{window},
+                    Ok(window)=>{
+                        #[cfg(windows)]
+                        if let Some(view)=for_popup.get_webview(&label){
+                            let _=suppress_native_vendor_status_bar(&view);
+                        }
+                        NewWindowResponse::Create{window}
+                    },
                     Err(error)=>{
                         eprintln!("Cannot create related sign-in popup: {error}");
                         NewWindowResponse::Deny
@@ -1861,6 +1954,11 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
         LogicalSize::new(width, (height - top).max(1.0)),
     ).map_err(|e| e.to_string())?;
     let _=created.set_zoom(zoom);
+    #[cfg(windows)]
+    {
+        let _=suppress_native_vendor_status_bar(&created);
+        let _=listen_native_tab_favicon(app,id,&created);
+    }
     let state = app.state::<Mutex<Browser>>();
     let mut browser = state.lock().map_err(|e| e.to_string())?;
     if let Some(tab) = browser.tabs.iter_mut().find(|tab| tab.id == id) {
@@ -1875,6 +1973,23 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
 }
 
 
+
+// Minternet owns all visible browser chrome. Disable the built-in WebView2
+// lower-left status strip (including on hovered links) on every created view.
+// CSS applied to the chrome WebView cannot affect independent site renderers.
+#[cfg(windows)]
+fn suppress_native_vendor_status_bar(view:&tauri::webview::Webview)->Result<(),String>{
+    view.with_webview(|native|{
+        if let Ok(core)=unsafe{native.controller().CoreWebView2()}{
+            if let Ok(settings)=unsafe{core.Settings()}{
+                // Preserve site context menus, text selection, PDFs, page
+                // dialogs and downloads: only remove the vendor status strip.
+                let _=unsafe{settings.SetIsStatusBarEnabled(false)};
+            }
+        }
+    }).map_err(|e|e.to_string())?;
+    Ok(())
+}
 
 #[cfg(windows)]
 fn update_audio_state(app:&tauri::AppHandle,id:u32,playing:bool,muted:bool){
@@ -4399,7 +4514,7 @@ fn main() {
                     }
                 }
             }
-            window.add_child(
+            let chrome_webview=window.add_child(
                 WebviewBuilder::new("chrome",WebviewUrl::App("index.html".into()))
                     // Tauri's native file-drop handler supersedes HTML5
                     // DataTransfer on Windows. Browser/bookmark drags need
@@ -4716,6 +4831,8 @@ fn main() {
                 LogicalPosition::new(0.0,0.0),
                 LogicalSize::new(width,height)
             )?;
+            #[cfg(windows)]
+            let _=suppress_native_vendor_status_bar(&chrome_webview);
             // Restored pinned URLs need their real WebView2 on first launch;
             // without pins, activated displays the true tabless home view.
             activated(app.handle()).map_err(std::io::Error::other)?;

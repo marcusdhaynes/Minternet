@@ -37,25 +37,36 @@ function tabTooltip(tab) {
 // Icons appear immediately, even on sites that omit /favicon.ico or block
 // third-party favicon requests. Fetch each host at most once per session.
 const faviconCache=new Map();
-function iconCandidates(host){
+function faviconKey(page){
+  try{
+    const url=new URL(page);
+    // GitHub Pages hosts multiple independent apps under /Project/.
+    // A host-only cache would copy the wrong favicon between their tabs.
+    const project=url.hostname.endsWith('.github.io')
+      ?'/'+(url.pathname.split('/').filter(Boolean)[0]||''):'';
+    return url.origin+project;
+  }catch{return '';}
+}
+function iconCandidates(host,page){
   const root='https://'+host;
-  return [root+'/favicon.ico',root+'/favicon.svg',root+'/favicon-32x32.png',
+  const project=faviconKey(page);
+  const base=project&&project!==root?project+'/':'';
+  return [...(base?[base+'favicon.ico',base+'favicon.svg',base+'favicon.png',
+    base+'favicon-32.png']:[]),
+    root+'/favicon.ico',root+'/favicon.svg',root+'/favicon-32x32.png',
     root+'/apple-touch-icon.png'];
 }
-function iconFallback(host){
+function iconFallback(){
+  // A neutral globe, not an invented letter/logo, when a page has no favicon.
   const chip=document.createElement('span');
-  chip.className='site-icon-fallback'+(host==='chatgpt.com'||host.endsWith('.chatgpt.com')?' site-icon-chatgpt':'');
-  chip.textContent=chip.classList.contains('site-icon-chatgpt')?'✳':
-    (host.replace(/^www\./,'').charAt(0).toUpperCase()||'◆');
-  // Distinct visible fallback at 16px even if the site supplies no icon.
-  let hash=0;for(const c of host)hash=(hash*31+c.charCodeAt(0))>>>0;
-  chip.style.setProperty('--favicon-hue',String(hash%360));
+  chip.className='site-icon-fallback';
+  chip.innerHTML='<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c-5 5-5 13 0 18M12 3c5 5 5 13 0 18"/></svg>';
   return chip;
 }
-function refreshHostIcons(host){
-  document.querySelectorAll('.tab-symbol[data-site-host]').forEach(slot=>{
-    if(slot.dataset.siteHost!==host)return;
-    const state=faviconCache.get(host);
+function refreshHostIcons(key){
+  document.querySelectorAll('.tab-symbol[data-site-key]').forEach(slot=>{
+    if(slot.dataset.siteKey!==key||slot.dataset.nativeFavicon)return;
+    const state=faviconCache.get(key);
     if(!state?.src)return;
     const img=document.createElement('img');
     img.alt='';img.decoding='async';img.referrerPolicy='no-referrer';
@@ -64,10 +75,11 @@ function refreshHostIcons(host){
   });
 }
 function discoverSiteIcon(host,page){
-  if(faviconCache.has(host))return;
+  const key=faviconKey(page)||host;
+  if(faviconCache.has(key))return;
   const state={src:null,loading:true};
-  faviconCache.set(host,state);
-  const candidates=iconCandidates(host);
+  faviconCache.set(key,state);
+  const candidates=iconCandidates(host,page);
   const tryIcon=index=>{
     if(index>=candidates.length){
       // Reuse native site-declared icon discovery for sites such as ChatGPT
@@ -85,7 +97,7 @@ function discoverSiteIcon(host,page){
     probe.decoding='async';probe.referrerPolicy='no-referrer';
     probe.onload=()=>{
       if(probe.naturalWidth===0||probe.naturalHeight===0){tryIcon(index+1);return;}
-      state.src=candidates[index];state.loading=false;refreshHostIcons(host);
+      state.src=candidates[index];state.loading=false;refreshHostIcons(key);
     };
     probe.onerror=()=>tryIcon(index+1);
     probe.src=candidates[index];
@@ -97,28 +109,49 @@ function renderSiteIcon(tab,slot){
   if(tab.secretTab){
     slot.textContent='◈';
     slot.classList.add('secret-tab-icon');
-    slot.removeAttribute('data-site-host');
+    slot.removeAttribute('data-site-key');
+    slot.removeAttribute('data-native-favicon');
     return;
   }
   slot.classList.remove('secret-tab-icon');
   slot.classList.remove('private-eye');
-  slot.removeAttribute('data-site-host');
+  slot.removeAttribute('data-site-key');
+  slot.removeAttribute('data-native-favicon');
   if(!tab.url||!/^https?:\/\//i.test(tab.url)){
-    slot.append(iconFallback('',tab.private));
+    slot.append(iconFallback());
     return;
   }
   let host;
   try{host=new URL(tab.url).hostname.toLowerCase();}catch{
-    slot.append(iconFallback(''));return;
+    slot.append(iconFallback());return;
   }
-  slot.dataset.siteHost=host;
-  const cached=faviconCache.get(host);
+  const key=faviconKey(tab.url)||host;
+  slot.dataset.siteKey=key;
+  // Native WebView2 reports the actual favicon URI, including site-specific
+  // app icons and icons changed dynamically by the page.
+  if(typeof tab.favicon==='string'&&/^https:\/\/[^\s]+/i.test(tab.favicon)){
+    const img=document.createElement('img');
+    img.alt='';img.decoding='async';img.referrerPolicy='no-referrer';
+    img.onerror=()=>{
+      if(slot.dataset.nativeFavicon!==tab.favicon)return;
+      slot.removeAttribute('data-native-favicon');
+      slot.replaceChildren(iconFallback());
+      const cached=faviconCache.get(key);
+      if(cached?.src)refreshHostIcons(key);
+      else discoverSiteIcon(host,tab.url);
+    };
+    slot.dataset.nativeFavicon=tab.favicon;
+    img.src=tab.favicon;
+    slot.append(img);
+    return;
+  }
+  const cached=faviconCache.get(key);
   if(cached?.src){
     const img=document.createElement('img');
     img.alt='';img.decoding='async';img.referrerPolicy='no-referrer';
     img.src=cached.src;slot.append(img);
   }else{
-    slot.append(iconFallback(host));
+    slot.append(iconFallback());
     discoverSiteIcon(host,tab.url);
   }
 }
@@ -174,8 +207,12 @@ window.minternetRenderTabs = () => {
 };
 function render(data) {
   const previouslyKnown=new Set(snapshot.tabs.map(tab=>tab.id));
-  const isNewTab=data.activeId && !previouslyKnown.has(data.activeId) &&
-    data.tabs.some(tab=>tab.id===data.activeId&&tab.url==='about:blank'&&!tab.secretTab);
+  const opened=data.tabs.find(tab=>tab.id===data.activeId);
+  const isNewForegroundTab=Boolean(render.initialized&&opened&&
+    !previouslyKnown.has(opened.id)&&!opened.openerId);
+  const isNewTab=Boolean(isNewForegroundTab&&!opened.secretTab&&
+    opened.url==='about:blank');
+  render.initialized=true;
   snapshot = data;
   const tabs = byId('tabs');
   const active = data.tabs.find(t => t.id === data.activeId);
@@ -201,6 +238,15 @@ function render(data) {
       renderSiteIcon(tab,symbol);
       el.querySelector('.tab-text').textContent = tab.title || 'New Tab';
     }
+  }
+  // A new foreground tab is selected by native Browser::add. Reveal its
+  // rightmost tab immediately, regardless of the current scroll position.
+  // Do not jump for Ctrl-click/background tabs or restored startup tabs.
+  if(isNewForegroundTab){
+    requestAnimationFrame(()=>{
+      tabs.scrollLeft=tabs.scrollWidth;
+      requestAnimationFrame(()=>{tabs.scrollLeft=tabs.scrollWidth;});
+    });
   }
   document.documentElement.classList.toggle('private-active',Boolean(active?.private));
   if(isNewTab){
