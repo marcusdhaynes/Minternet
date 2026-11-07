@@ -31,7 +31,7 @@ final class GoogleAccount {
             GetCredentialRequest request=new GetCredentialRequest.Builder()
                 .addCredentialOption(option).build();
             CredentialManager.create(activity).getCredentialAsync(
-                activity,request,null,activity.getMainExecutor(),
+                activity,request,null,activity::runOnUiThread,
                 new CredentialManagerCallback<GetCredentialResponse,GetCredentialException>(){
                     @Override public void onResult(GetCredentialResponse result){
                         Credential credential=result.getCredential();
