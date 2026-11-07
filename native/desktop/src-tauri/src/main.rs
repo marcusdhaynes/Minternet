@@ -2896,6 +2896,48 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             let state=app.state::<Mutex<password_vault::Vault>>();
             return state.lock().map_err(|e|e.to_string())?.list_cards();
         }
+        "vault-identity-list" => {
+            let state=app.state::<Mutex<password_vault::Vault>>();
+            return state.lock().map_err(|e|e.to_string())?.list_identities();
+        }
+        "vault-identity-get" => {
+            let id=value.as_str().ok_or("Choose an identity")?;
+            let state=app.state::<Mutex<password_vault::Vault>>();
+            let vault=state.lock().map_err(|e|e.to_string())?;
+            let identity=vault.identity(id).ok_or("Unlock the vault and choose an identity")?;
+            return Ok(serde_json::to_value(identity).map_err(|e|e.to_string())?);
+        }
+        "vault-identity-put" => {
+            let id=value.get("id").and_then(Value::as_str);
+            let label=value.get("label").and_then(Value::as_str)
+                .ok_or("Identity label required")?.to_owned();
+            let fields=value.get("fields").and_then(Value::as_object)
+                .ok_or("Identity fields required")?;
+            let mut values=std::collections::BTreeMap::new();
+            for (key,content) in fields {
+                let text=content.as_str().ok_or("Identity field must be text")?;
+                if !text.trim().is_empty(){values.insert(key.clone(),text.to_owned());}
+            }
+            let state=app.state::<Mutex<password_vault::Vault>>();
+            let mut vault=state.lock().map_err(|e|e.to_string())?;
+            let id=vault.put_identity(id,label,values)?;
+            vault.save(&password_vault::file(&app)?)?;
+            let _=app.emit_to("chrome","minternet:vault-changed",());
+            return Ok(json!({"ok":true,"id":id}));
+        }
+        "vault-identity-remove" => {
+            let id=value.as_str().ok_or("Choose an identity")?;
+            let state=app.state::<Mutex<password_vault::Vault>>();
+            let mut vault=state.lock().map_err(|e|e.to_string())?;
+            vault.remove_identity(id)?;
+            vault.save(&password_vault::file(&app)?)?;
+            let _=app.emit_to("chrome","minternet:vault-changed",());
+            return Ok(json!({"ok":true}));
+        }
+        "vault-identity-fill" => {
+            let id=value.as_str().ok_or("Choose an identity")?;
+            return Ok(json!({"filled":fill_identity(&app,id)?}));
+        }
         "vault-card-put" => {
             let label=value.get("label").and_then(Value::as_str).unwrap_or("").to_string();
             let holder=value.get("name").and_then(Value::as_str).ok_or("Cardholder name required")?.to_string();
