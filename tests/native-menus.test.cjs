@@ -123,3 +123,28 @@ test('right-clicked folder supports editing its name and deletion',()=>{
  assert.equal(h.flags.deleted[0],h.root.id);
  assert.ok(!menu.some(x=>x.text?.includes('Tab Groups')));
 });
+
+test('Pin Tab and Unpin Tab are visible direct right-click actions',()=>{
+ const h=harness();
+ const normal=h.window.minternetMenus.inspectTab(1);
+ const pin=normal.find(entry=>entry.text?.includes('Pin Tab'));
+ assert.ok(pin,'Pin Tab must be visible in the main tab context menu');
+ pin.action();
+ assert.equal(h.flags.tabPins,1);
+ const pinned=h.window.minternetMenus.inspectTab(1);
+ const unpin=pinned.find(entry=>entry.text?.includes('Unpin Tab'));
+ assert.ok(unpin,'A pinned tab must offer Unpin Tab directly');
+ unpin.action();
+ assert.equal(h.flags.tabPins,2);
+ assert.equal(h.window.minternetGroups.getLatest().tabs.length,1);
+ assert.equal(h.window.minternetGroups.getLatest().tabs[0].pinned,false);
+});
+
+test('Secret tabs cannot be pinned from browser menus',()=>{
+ const h=harness();
+ h.window.minternetGroups.getLatest().tabs[0].secretTab=true;
+ const normal=h.window.minternetMenus.inspectTab(1);
+ assert.ok(normal.some(entry=>entry.enabled===false&&entry.text?.includes('cannot be pinned')));
+ assert.equal(normal.some(entry=>entry.action&&entry.text?.includes('Pin Tab')),false);
+ assert.equal(h.window.minternetMenus.inspectTabQuick(1).some(entry=>entry.title?.includes('Pin Tab')),false);
+});
