@@ -253,7 +253,7 @@ fn download_source_allowed(app:&tauri::AppHandle,id:u32,url:&tauri::Url)->bool{
         let Some(tab)=browser.tabs.iter().find(|tab|tab.id==id) else{return false};
         // Private downloads can be saved as user-visible files, but secret
         // pages must never yield concealed URLs to the normal download log.
-        if tab.secret_id.is_some(){return false;}
+        if tab.secret_id.is_some()&&!tab.secret_revealed{return false;}
         let Ok(source)=tauri::Url::parse(&tab.url) else{return false};
         if !matches!(source.scheme(),"http"|"https")||
             source.host_str().is_none(){return false;}
@@ -3216,11 +3216,14 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         "browser-preferences" => {
             let prefs=app.state::<BrowserPreferenceState>().0.lock()
                 .map_err(|e|e.to_string())?;
+            let selected=prefs.homepage.clone();
+            let system=prefs.download_folder.is_none();
+            drop(prefs);
             let destination=configured_download_folder(&app)?;
             return Ok(json!({
-                "homepage":prefs.homepage,
+                "homepage":selected,
                 "downloadFolder":destination.to_string_lossy(),
-                "usingSystemDownloads":prefs.download_folder.is_none()
+                "usingSystemDownloads":system
             }));
         }
         "browser-homepage-set" => {
@@ -3266,11 +3269,13 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             }
             persist_preferences(&app,&updated)?;
             *prefs=updated;
+            let system=prefs.download_folder.is_none();
+            drop(prefs);
             // Already-downloaded files are still accessible from their
             // original known folders through Downloads history.
             let current=configured_download_folder(&app)?;
             return Ok(json!({"ok":true,"downloadFolder":current.to_string_lossy(),
-                "usingSystemDownloads":prefs.download_folder.is_none()}));
+                "usingSystemDownloads":system}));
         }
         "downloads-list" => {
             let state=app.state::<DownloadsState>();
