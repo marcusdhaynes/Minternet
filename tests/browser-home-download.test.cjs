@@ -22,7 +22,7 @@ test('all browser downloads honor a configurable trusted destination',()=>{
   assert.match(native,/let dir=configured_download_folder\(app\)\?/);
   assert.match(native,/fn download_source_allowed\(/);
   assert.match(native,/url\.scheme\(\)=="blob"/);
-  assert.match(native,/url\.scheme\(\)=="data"/);
+  assert.match(native,/address && matches!\(url\.scheme\(\),"blob"\|"data"\)/);
   assert.match(native,/DownloadEvent::Requested/);
   assert.match(native,/download_path\(&for_download,&url,destination\.as_path\(\)\)/);
   assert.match(native,/downloads-folder-set/);
