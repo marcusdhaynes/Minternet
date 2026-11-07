@@ -1537,7 +1537,13 @@ fn refresh_layout(app: &tauri::AppHandle) {
     // Windows can report a zero/tiny client area while minimizing or dragging.
     // Never collapse a live WebView2 renderer to a 1-pixel surface: it can
     // become blank until another full layout or an expensive site refresh.
-    if physical.width < 64 || physical.height < 64 { return; }
+    if physical.width < 64 || physical.height < 64 {
+        // A minimized or transiently zero-sized window must invalidate the
+        // last successful bounds; otherwise restore-to-same-size can skip
+        // the repaint and leave a WebView2 surface blank.
+        invalidate_layout(app);
+        return;
+    }
     let Ok((width, height)) = dimensions(&window) else { return };
     let (show_home, active_id, active_label) = {
         let state = app.state::<Mutex<Browser>>();
@@ -4766,9 +4772,35 @@ fn main() {
             // without pins, activated displays the true tabless home view.
             activated(app.handle()).map_err(std::io::Error::other)?;
             let handle = app.handle().clone();
+            // Coalesce Windows resize storms to at most one native WebView2
+            // bounds pass per display frame. Do not block the UI event handler
+            // on repeated COM resizing while a border is being dragged.
+            let resize_pending=std::sync::Arc::new(AtomicBool::new(false));
             window.on_window_event(move |event| {
-                if matches!(event, tauri::WindowEvent::Resized(_)) {
-                    refresh_layout(&handle);
+                match event {
+                    tauri::WindowEvent::Resized(_) => {
+                        if resize_pending.swap(true, Ordering::AcqRel) { return; }
+                        let app=handle.clone();
+                        let pending=resize_pending.clone();
+                        std::thread::spawn(move || {
+                            std::thread::sleep(Duration::from_millis(16));
+                            let callback_app=app.clone();
+                            let callback_pending=pending.clone();
+                            if app.run_on_main_thread(move || {
+                                callback_pending.store(false,Ordering::Release);
+                                refresh_layout(&callback_app);
+                            }).is_err() {
+                                pending.store(false,Ordering::Release);
+                            }
+                        });
+                    },
+                    tauri::WindowEvent::Focused(true) => {
+                        // Force a compositor refresh on restore/focus even when
+                        // the physical dimensions match the cached dimensions.
+                        invalidate_layout(&handle);
+                        refresh_layout(&handle);
+                    },
+                    _=>{}
                 }
             });
             Ok(())
