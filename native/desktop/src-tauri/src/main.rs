@@ -1963,7 +1963,8 @@ const FORM_FIELD_CONTEXT_JS:&str=r#"(function(){
   const entered=Boolean(field.value);
   const loginReady=kind==='login'&&hasPassword.length===1&&
     Boolean(hasPassword[0].value)&&Boolean(loginUser?.value);
-  return {kind,key,hasValue:entered,saveReady:loginReady,
+  const fieldIndex=[...document.querySelectorAll('input,textarea,select')].indexOf(field);
+  return {kind,key,fieldIndex,hasValue:entered,saveReady:loginReady,
     x:Math.round(r.left),y:Math.round(r.bottom),width:Math.round(r.width),
     height:Math.round(r.height)};
 })()"#;
@@ -1986,7 +1987,9 @@ const CAPTURE_LOGIN_JS:&str=r#"(function(){
 const CAPTURE_IDENTITY_JS:&str=r#"(function(){
   'use strict';
   if(window!==window.top)return null;
-  const el=document.activeElement;
+  const index=__IDENTITY_FIELD_INDEX__;
+  const all=[...document.querySelectorAll('input,textarea,select')];
+  const el=all[index]||document.activeElement;
   if(!el||!['INPUT','TEXTAREA','SELECT'].includes(el.tagName)||
      el.type==='password'||el.type==='hidden'||el.disabled||el.readOnly||
      !el.value||el.value.length>400)return null;
@@ -3177,9 +3180,12 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             let identity_id=value.get("id").and_then(Value::as_str).map(str::to_owned);
             let key=value.get("key").and_then(Value::as_str)
                 .ok_or("Field type required")?.to_owned();
+            let index=value.get("index").and_then(Value::as_u64)
+                .ok_or("Focused field identifier required")?;
+            if index>500{return Err("Field index too large".into());}
             let handle=app.clone();
             return tauri::async_runtime::spawn_blocking(move||{
-                let (_origin,field)=browser_page_eval(&handle,CAPTURE_IDENTITY_JS)?;
+                let (_origin,field)=browser_page_eval(&handle,&CAPTURE_IDENTITY_JS.replace("__IDENTITY_FIELD_INDEX__",&index.to_string()))?;
                 let value=field.get("value").and_then(Value::as_str)
                     .ok_or("No field value was found")?.to_owned();
                 let state=handle.state::<Mutex<password_vault::Vault>>();
