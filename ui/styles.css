@@ -1324,6 +1324,12 @@ html.minternet-overlay-active .group-editor-backdrop {
 .google-choice button{flex:1;min-width:0;}
 .google-account-email{font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .google-account-status{font-size:9px;color:#a9b6d3;}
+.google-settings .google-login-feedback{display:block;padding:5px 7px;
+  color:#d7e5ff;background:#31436038;border:1px solid #60759a57;border-radius:5px;
+  line-height:1.35;font-size:9px;overflow-wrap:anywhere;}
+.google-settings .google-website-signin{display:grid;gap:4px;
+  padding:6px 0 2px;border-top:1px solid #8393ac25;}
+.google-settings button:disabled{opacity:.55;cursor:progress;}
 .gmail-code-badge{flex:0 0 auto;padding:2px 6px;margin:0 3px;height:19px;border-radius:4px;border:1px solid #89a4dd;background:#374d7d;color:#fff;font:600 11px/14px system-ui;letter-spacing:1px;cursor:pointer;max-width:104px;text-overflow:ellipsis;overflow:hidden;white-space:nowrap;}
 
 /* Always-visible website identity: bright monograms while the real favicon
