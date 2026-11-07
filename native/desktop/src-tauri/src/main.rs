@@ -1831,7 +1831,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                 let label=format!("auth-popup-{}",
                     NEXT_AUTH_POPUP_ID.fetch_add(1,Ordering::Relaxed));
                 let builder=WebviewWindowBuilder::new(
-                        &for_popup,label,WebviewUrl::External(
+                        &for_popup,label.clone(),WebviewUrl::External(
                             tauri::Url::parse("about:blank").expect("valid blank URL")))
                     .window_features(features)
                     .title("Sign in — Minternet")
@@ -1849,7 +1849,13 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                         if !safe.is_empty(){let _=window.set_title(&safe);}
                     });
                 return match builder.build() {
-                    Ok(window)=>NewWindowResponse::Create{window},
+                    Ok(window)=>{
+                        #[cfg(windows)]
+                        if let Some(view)=for_popup.get_webview(&label){
+                            let _=suppress_native_vendor_status_bar(&view);
+                        }
+                        NewWindowResponse::Create{window}
+                    },
                     Err(error)=>{
                         eprintln!("Cannot create related sign-in popup: {error}");
                         NewWindowResponse::Deny
@@ -1949,7 +1955,10 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     ).map_err(|e| e.to_string())?;
     let _=created.set_zoom(zoom);
     #[cfg(windows)]
-    let _=listen_native_tab_favicon(app,id,&created);
+    {
+        let _=suppress_native_vendor_status_bar(&created);
+        let _=listen_native_tab_favicon(app,id,&created);
+    }
     let state = app.state::<Mutex<Browser>>();
     let mut browser = state.lock().map_err(|e| e.to_string())?;
     if let Some(tab) = browser.tabs.iter_mut().find(|tab| tab.id == id) {
@@ -1964,6 +1973,23 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
 }
 
 
+
+// Minternet owns all visible browser chrome. Disable the built-in WebView2
+// lower-left status strip (including on hovered links) on every created view.
+// CSS applied to the chrome WebView cannot affect independent site renderers.
+#[cfg(windows)]
+fn suppress_native_vendor_status_bar(view:&tauri::webview::Webview)->Result<(),String>{
+    view.with_webview(|native|{
+        if let Ok(core)=unsafe{native.controller().CoreWebView2()}{
+            if let Ok(settings)=unsafe{core.Settings()}{
+                // Preserve site context menus, text selection, PDFs, page
+                // dialogs and downloads: only remove the vendor status strip.
+                let _=unsafe{settings.SetIsStatusBarEnabled(false)};
+            }
+        }
+    }).map_err(|e|e.to_string())?;
+    Ok(())
+}
 
 #[cfg(windows)]
 fn update_audio_state(app:&tauri::AppHandle,id:u32,playing:bool,muted:bool){
@@ -4488,7 +4514,7 @@ fn main() {
                     }
                 }
             }
-            window.add_child(
+            let chrome_webview=window.add_child(
                 WebviewBuilder::new("chrome",WebviewUrl::App("index.html".into()))
                     // Tauri's native file-drop handler supersedes HTML5
                     // DataTransfer on Windows. Browser/bookmark drags need
@@ -4805,6 +4831,8 @@ fn main() {
                 LogicalPosition::new(0.0,0.0),
                 LogicalSize::new(width,height)
             )?;
+            #[cfg(windows)]
+            let _=suppress_native_vendor_status_bar(&chrome_webview);
             // Restored pinned URLs need their real WebView2 on first launch;
             // without pins, activated displays the true tabless home view.
             activated(app.handle()).map_err(std::io::Error::other)?;
