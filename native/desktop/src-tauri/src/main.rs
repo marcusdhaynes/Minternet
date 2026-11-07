@@ -1887,6 +1887,142 @@ const IDENTITY_FILL_JS:&str=r#"(function(){
   }
 })()"#;
 
+// Low-cost, read-only inspection of the currently focused website form field.
+// The browser chrome receives only semantic type, position and booleans; never
+// passwords, PANs, IDs or typed identity values.
+const FORM_FIELD_CONTEXT_JS:&str=r#"(function(){
+  'use strict';
+  if(window!==window.top||!document.hasFocus())return null;
+  const field=document.activeElement;
+  if(!field||!['INPUT','TEXTAREA','SELECT'].includes(field.tagName)||
+      field.disabled||field.readOnly||['hidden','file'].includes(field.type))return null;
+  const r=field.getBoundingClientRect();
+  if(r.width<16||r.height<10)return null;
+  const auto=(field.autocomplete||'').toLowerCase().split(/\s+/);
+  const desc=[
+    field.name||'',field.id||'',field.placeholder||'',
+    field.getAttribute('aria-label')||'',field.labels?.[0]?.textContent||'',
+    field.closest('label')?.textContent||''
+  ].join(' ').toLowerCase();
+  const hasPassword=[...document.querySelectorAll('input[type="password"]')]
+    .filter(e=>!e.disabled&&e.getBoundingClientRect().width>0);
+  const loginUser=document.querySelector('input[autocomplete="username"],input[type="email"],input[name*="user" i],input[id*="user" i]');
+  const login=hasPassword.length===1 &&
+    (field.type==='password'||auto.includes('username')||
+      (loginUser===field));
+  let kind='',key='';
+  if(login){kind='login';key='login';}
+  else if(auto.some(x=>x.startsWith('cc-'))||/credit.?card|card.?number|cc.?number|expir/i.test(desc)){
+    kind='payment';key='payment';
+  }else{
+    const pairs=[
+      ['passport-number',/passport.{0,25}(number|no|id)/],
+      ['passport-country',/passport.{0,25}country|issuing.?country/],
+      ['passport-expiry',/passport.{0,25}(expir|valid)/],
+      ['drivers-license',/driver.s?.?licen[cs]e.{0,25}(number|no|id)/],
+      ['drivers-license-state',/driver.s?.?licen[cs]e.{0,25}(state|region)/],
+      ['national-id',/national.?id|identity.?number/],
+      ['tax-id',/tax.?id|taxpayer.?number/],
+      ['vehicle-make',/vehicle.?make|car.?make/],
+      ['vehicle-model',/vehicle.?model|car.?model/],
+      ['vehicle-year',/vehicle.?year|model.?year/],
+      ['vehicle-color',/vehicle.?colou?r/],
+      ['license-plate',/licen[cs]e.?plate|plate.?number/],
+      ['vin',/\bvin\b|vehicle.?identification.?number/],
+      ['given-name',/first.?name|given.?name/],
+      ['family-name',/last.?name|surname|family.?name/],
+      ['middle-name',/middle.?name/],
+      ['full-name',/full.?name|your.?name/],
+      ['street-address',/street.?address|full.?address/],
+      ['address-line1',/address.?1|address.?line.?1/],
+      ['address-line2',/address.?2|address.?line.?2|apartment|suite/],
+      ['city',/\bcity\b|\btown\b/],
+      ['region',/state|province|region/],
+      ['postal-code',/zip|postal/],
+      ['country',/\bcountry\b/],
+      ['date-of-birth',/date.?of.?birth|\bdob\b/],
+      ['email',/email|e-mail/],
+      ['phone',/phone|mobile|telephone/],
+      ['company',/company|organization/],
+      ['job-title',/job.?title|occupation/],
+      ['website',/web.?site|\burl\b/]
+    ];
+    const tokens={
+      name:'full-name','given-name':'given-name','family-name':'family-name',
+      'additional-name':'middle-name','nickname':'nickname',email:'email',
+      tel:'phone','tel-national':'phone',organization:'company',
+      'organization-title':'job-title','street-address':'street-address',
+      'address-line1':'address-line1','address-line2':'address-line2',
+      'address-level2':'city','address-level1':'region','postal-code':'postal-code',
+      country:'country','country-name':'country',bday:'date-of-birth',url:'website'
+    };
+    key=auto.map(x=>tokens[x]).find(Boolean)||pairs.find(p=>p[1].test(desc))?.[0]||'';
+    if(key)kind='identity';
+  }
+  if(!kind)return null;
+  const entered=Boolean(field.value);
+  const loginReady=kind==='login'&&hasPassword.length===1&&
+    Boolean(hasPassword[0].value)&&Boolean(loginUser?.value);
+  return {kind,key,hasValue:entered,saveReady:loginReady,
+    x:Math.round(r.left),y:Math.round(r.bottom),width:Math.round(r.width),
+    height:Math.round(r.height)};
+})()"#;
+
+const CAPTURE_LOGIN_JS:&str=r#"(function(){
+  'use strict';
+  if(window!==window.top)return null;
+  const pw=[...document.querySelectorAll('input[type="password"]')]
+    .filter(e=>!e.disabled&&e.getBoundingClientRect().width>0);
+  if(pw.length!==1||!pw[0].value||pw[0].value.length>4096)return null;
+  const form=pw[0].form||document;
+  const inputs=[...form.querySelectorAll('input')].filter(e=>!e.disabled);
+  const username=inputs.find(e=>e.autocomplete==='username')||
+    inputs.find(e=>e.type==='email')||
+    inputs.find(e=>/user|email|login/i.test(e.name+' '+e.id)&&e.type!=='password');
+  if(!username?.value||username.value.length>320)return null;
+  return {username:username.value,password:pw[0].value};
+})()"#;
+
+const CAPTURE_IDENTITY_JS:&str=r#"(function(){
+  'use strict';
+  if(window!==window.top)return null;
+  const el=document.activeElement;
+  if(!el||!['INPUT','TEXTAREA','SELECT'].includes(el.tagName)||
+     el.type==='password'||el.type==='hidden'||el.disabled||el.readOnly||
+     !el.value||el.value.length>400)return null;
+  return {value:el.value};
+})()"#;
+
+fn browser_page_eval(app:&tauri::AppHandle,script:&str)->Result<(String,Value),String>{
+    let (label,tab_url,private)={
+        let browser=app.state::<Mutex<Browser>>();
+        let b=browser.lock().map_err(|e|e.to_string())?;
+        let tab=b.active().ok_or("No active tab")?;
+        (tab.view.clone().ok_or("No active webpage")?,tab.url.clone(),tab.private)
+    };
+    if private{return Err("Form assistance is disabled in private and Secret Tabs".into());}
+    let origin=password_vault::origin(&tab_url)?;
+    let view=app.get_webview(&label).ok_or("No active webpage")?;
+    let actual=view.url().map_err(|e|e.to_string())?;
+    if password_vault::origin(actual.as_str())?!=origin{
+        return Err("Website navigation changed".into());
+    }
+    let (sender,receiver)=std::sync::mpsc::sync_channel(1);
+    view.eval_with_callback(script,move |answer|{let _=sender.send(answer.to_string());})
+        .map_err(|e|e.to_string())?;
+    let mut reply=receiver.recv_timeout(Duration::from_millis(850))
+        .map_err(|_|"Form inspection was unavailable".to_string())?;
+    let parsed=serde_json::from_str::<Value>(&reply)
+        .map_err(|_|"Invalid form inspection response".to_string())?;
+    reply.zeroize();
+    // The WebView2 callback may return JSON text or an already serialized
+    // object. Neither representation can initiate native commands.
+    let parsed=if let Some(inner)=parsed.as_str(){
+        serde_json::from_str::<Value>(inner).unwrap_or(Value::Null)
+    }else{parsed};
+    Ok((origin,parsed))
+}
+
 fn fill_identity(app:&tauri::AppHandle,id:&str)->Result<bool,String>{
     let (label,url,private)={
         let browser=app.state::<Mutex<Browser>>();
