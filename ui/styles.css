@@ -1552,21 +1552,30 @@ html.minternet-overlay-active .group-editor-backdrop {
   --minternet-group-tab-width:56px;
   --minternet-regular-tab-width:38px;
   --minternet-pinned-tab-width:27px;
+  --minternet-group-tab-padding:5px;
+  --minternet-regular-tab-padding:2px;
+  --minternet-pinned-tab-padding:2px;
 }
 .tabs .group-chip {
   --group-chip-width:var(--minternet-group-tab-width);
+  padding-left:var(--minternet-group-tab-padding)!important;
+  padding-right:var(--minternet-group-tab-padding)!important;
 }
 .tabs .tab:not(.group-end-cap):not(.pinned-tab) {
   flex:0 0 var(--minternet-regular-tab-width)!important;
   width:var(--minternet-regular-tab-width)!important;
   min-width:var(--minternet-regular-tab-width)!important;
   max-width:var(--minternet-regular-tab-width)!important;
+  padding-left:var(--minternet-regular-tab-padding)!important;
+  padding-right:var(--minternet-regular-tab-padding)!important;
 }
 .tabs .tab.pinned-tab {
   flex:0 0 var(--minternet-pinned-tab-width)!important;
   width:var(--minternet-pinned-tab-width)!important;
   min-width:var(--minternet-pinned-tab-width)!important;
   max-width:var(--minternet-pinned-tab-width)!important;
+  padding-left:var(--minternet-pinned-tab-padding)!important;
+  padding-right:var(--minternet-pinned-tab-padding)!important;
 }
 /* Preserve the normal 22px gap for the M logo; when hidden, reclaim it
    completely and move both the group button and tab strip together. */
@@ -1586,14 +1595,22 @@ html.minternet-overlay-active .group-editor-backdrop {
 .tab-layout-settings-title {display:grid;gap:3px;margin-bottom:4px;}
 .tab-layout-settings-title strong {font-size:11px;color:#ecebff;}
 .tab-layout-settings-title small,.tab-icon-toggle small {font-size:9px;color:#8998ba;}
-.tab-size-setting {
-  display:flex;align-items:center;justify-content:space-between;
-  gap:10px;min-height:31px;color:#dbe3f9;font-size:11px;
+.tab-size-table {
+  width:100%;border-collapse:separate;border-spacing:0 3px;table-layout:fixed;
+  color:#dbe3f9;font-size:11px;
 }
-.tab-size-setting > span:first-child {flex:1;min-width:0;}
-.tab-size-entry {display:flex;align-items:center;gap:5px;color:#9daaca;font-size:10px;}
+.tab-size-table th,.tab-size-table td {padding:2px 3px;text-align:left;}
+.tab-size-table thead th {
+  color:#a9b5d3;font-size:10px;font-weight:600;
+  padding-bottom:3px;border-bottom:1px solid #39445e;
+}
+.tab-size-table thead th:first-child {width:31%;}
+.tab-size-table thead th:nth-child(2),
+.tab-size-table thead th:nth-child(3) {width:34.5%;}
+.tab-size-table tbody th {font-weight:500;}
+.tab-size-entry {display:flex;align-items:center;gap:4px;color:#9daaca;font-size:10px;white-space:nowrap;}
 .tab-size-entry input {
-  width:72px;min-width:0;height:26px;padding:3px 7px;
+  width:100%;max-width:72px;min-width:0;height:26px;padding:3px 5px;
   border:1px solid #55617d;border-radius:6px;
   color:#f0f1ff;background:#121a2c;font-size:11px;
   font-variant-numeric:tabular-nums;
