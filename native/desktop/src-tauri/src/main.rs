@@ -21,7 +21,99 @@ use tauri::{
 const CHROME: f64 = 52.0;
 const BOOKMARK_BAR: f64 = 22.0;
 const MAX_TABS: usize = 35;
-const HOME: &str = "about:blank";
+const HOME: &str = "about:blank"; // Internal tab sentinel, never a homepage.
+const DEFAULT_HOMEPAGE: &str = "https://www.google.com/";
+
+#[derive(Clone,Serialize,Deserialize)]
+#[serde(rename_all="camelCase")]
+struct BrowserPreferences {
+    homepage:String,
+    #[serde(default)]
+    download_folder:Option<String>,
+    #[serde(default)]
+    previous_download_folders:Vec<String>,
+}
+impl Default for BrowserPreferences{
+    fn default()->Self{
+        Self{homepage:DEFAULT_HOMEPAGE.into(),
+            download_folder:None,previous_download_folders:Vec::new()}
+    }
+}
+struct BrowserPreferenceState(Mutex<BrowserPreferences>);
+
+fn validate_homepage(url:&str)->Result<String,String>{
+    if url.len()>2048{return Err("Homepage URL too long".into());}
+    let candidate=tauri::Url::parse(url)
+        .map_err(|_|"Enter a complete http:// or https:// homepage URL")?;
+    if !matches!(candidate.scheme(),"http"|"https")||
+       candidate.host_str().is_none()||
+       !candidate.username().is_empty()||candidate.password().is_some(){
+        return Err("Homepage must be a normal HTTP or HTTPS website".into());
+    }
+    Ok(candidate.to_string())
+}
+fn preferences_file(app:&tauri::AppHandle)->Result<PathBuf,String>{
+    Ok(app.path().app_data_dir().map_err(|e|e.to_string())?
+        .join("browser-preferences.v1.json"))
+}
+fn load_preferences(app:&tauri::AppHandle)->BrowserPreferences{
+    let Ok(path)=preferences_file(app) else{return BrowserPreferences::default()};
+    let Ok(bytes)=std::fs::read(path) else{return BrowserPreferences::default()};
+    if bytes.len()>8192{return BrowserPreferences::default();}
+    let Ok(mut saved)=serde_json::from_slice::<BrowserPreferences>(&bytes)
+        else{return BrowserPreferences::default()};
+    saved.homepage=validate_homepage(&saved.homepage)
+        .unwrap_or_else(|_|DEFAULT_HOMEPAGE.into());
+    saved.previous_download_folders.truncate(8);
+    saved
+}
+fn persist_preferences(app:&tauri::AppHandle,
+    value:&BrowserPreferences)->Result<(),String>{
+    let path=preferences_file(app)?;
+    if let Some(parent)=path.parent(){std::fs::create_dir_all(parent)
+        .map_err(|e|e.to_string())?;}
+    let bytes=serde_json::to_vec(value).map_err(|e|e.to_string())?;
+    let temp=path.with_extension("tmp");
+    std::fs::write(&temp,bytes).map_err(|e|e.to_string())?;
+    if std::fs::rename(&temp,&path).is_err(){
+        std::fs::copy(&temp,&path).map_err(|e|e.to_string())?;
+        std::fs::remove_file(&temp).ok();
+    }
+    Ok(())
+}
+fn homepage(app:&tauri::AppHandle)->tauri::Url{
+    let saved=app.state::<BrowserPreferenceState>().0.lock()
+        .ok().map(|p|p.homepage.clone()).unwrap_or_else(||DEFAULT_HOMEPAGE.into());
+    tauri::Url::parse(&saved).unwrap_or_else(|_|
+        tauri::Url::parse(DEFAULT_HOMEPAGE).expect("known safe homepage"))
+}
+fn configured_download_folder(app:&tauri::AppHandle)->Result<PathBuf,String>{
+    let value=app.state::<BrowserPreferenceState>().0.lock()
+        .map_err(|e|e.to_string())?.download_folder.clone();
+    let selected=if let Some(folder)=value {PathBuf::from(folder)}
+        else {app.path().download_dir().map_err(|_|"System Downloads folder unavailable")?};
+    if !selected.is_absolute(){return Err("Downloads folder must be an absolute path".into());}
+    std::fs::create_dir_all(&selected).map_err(|e|format!("Cannot create Downloads folder: {e}"))?;
+    let path=std::fs::canonicalize(&selected).map_err(|e|e.to_string())?;
+    if !path.is_dir(){return Err("Downloads path is not a folder".into());}
+    Ok(path)
+}
+fn allowed_download_folders(app:&tauri::AppHandle)->Vec<PathBuf>{
+    let mut directories=Vec::new();
+    if let Ok(dir)=configured_download_folder(app){directories.push(dir);}
+    if let Ok(dir)=app.path().download_dir(){
+        if let Ok(dir)=std::fs::canonicalize(dir){directories.push(dir);}
+    }
+    if let Ok(prefs)=app.state::<BrowserPreferenceState>().0.lock(){
+        for path in &prefs.previous_download_folders {
+            if let Ok(dir)=std::fs::canonicalize(path){
+                if dir.is_dir(){directories.push(dir);}
+            }
+        }
+    }
+    directories
+}
+
 
 #[derive(Clone)]
 struct PendingChatPrompt {
