@@ -186,8 +186,21 @@ fn browser_open(uri:&str)->Result<(),String>{
 }
 fn token_reply(url:&str,params:&[(&str,&str)])->Result<Value,String>{
     let response=ureq::post(url).timeout(Duration::from_secs(20))
-        .send_form(params).map_err(|e|format!("Google authorization failed: {e}"))?;
-    response.into_json::<Value>().map_err(|e|e.to_string())
+        .send_form(params).map_err(|e|match e{
+            ureq::Error::Status(status,response)=>{
+                // Display Google's actual error reason, not an opaque HTTP 400.
+                // Never include authorization codes, verifiers or tokens.
+                let body=response.into_json::<Value>().unwrap_or(Value::Null);
+                let kind=body.get("error").and_then(Value::as_str).unwrap_or("request_rejected");
+                let description=body.get("error_description").and_then(Value::as_str)
+                    .unwrap_or("Check the Google OAuth client and permission settings.");
+                format!("Google authorization rejected ({status}, {}): {}",
+                    kind.chars().take(55).collect::<String>(),
+                    description.chars().take(180).collect::<String>())
+            },
+            other=>format!("Could not reach Google's authorization service: {other}")
+        })?;
+    response.into_json::<Value>().map_err(|_|"Google returned an invalid token response".into())
 }
 fn userinfo(access:&str)->Result<String,String>{
     let info=ureq::get("https://openidconnect.googleapis.com/v1/userinfo")
@@ -251,13 +264,21 @@ pub fn login(state:&Mutex<GoogleState>,client_id:&str,mail:bool)->Result<Value,S
                 let authorized=status.as_deref()==Some(nonce.as_str());
                 let value=parsed.as_ref().and_then(|u|u.query_pairs().find(|(k,_)|k=="code")
                     .map(|(_,v)|v.to_string()));
+                let failure=parsed.as_ref().and_then(|u|u.query_pairs().find(|(k,_)|k=="error")
+                    .map(|(_,v)|v.to_string()));
                 let response=if authorized&&value.is_some(){
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n<html><body>Minternet Google sign-in received. Return to Minternet.</body></html>"
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n<html><body>Minternet received Google's authorization. Return to Minternet to confirm the account is connected.</body></html>"
                 }else{
-                    "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nCache-Control: no-store\r\nConnection: close\r\n\r\nAuthorization was not completed."
+                    "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nCache-Control: no-store\r\nConnection: close\r\n\r\nGoogle authorization was not completed. Return to Minternet for details."
                 };
                 let _=socket.write_all(response.as_bytes());
-                if authorized { if let Some(code)=value {break code;} }
+                if authorized {
+                    if let Some(reason)=failure {
+                        return Err(format!("Google denied authorization: {}",
+                            reason.chars().take(110).collect::<String>()));
+                    }
+                    if let Some(code)=value {break code;}
+                }
             },
             Err(e) if e.kind()==std::io::ErrorKind::WouldBlock=>{
                 std::thread::sleep(Duration::from_millis(100));

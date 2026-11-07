@@ -102,13 +102,18 @@
       <div class="bookmark-panel-head"><strong>Settings</strong><button class="bookmark-close" id="bookmarkSettingsClose" aria-label="Close Settings">×</button></div>
       <section class="google-settings" aria-label="Google Account and Sync" id="googleSettings">
         <div class="google-settings-title"><strong>Google Account</strong><span id="googleSyncState">Not connected</span></div>
-        <button type="button" id="googleAccountLogin" class="google-primary-button">G · Sign In With Google</button>
+        <button type="button" id="googleAccountLogin" class="google-primary-button">G · Connect Google Account</button>
+        <small id="googleLoginFeedback" class="google-login-feedback" role="status" aria-live="polite" hidden></small>
         <div id="googleAccountConfig" hidden>
           <label>Google Desktop OAuth Client ID
             <input id="googleClientId" inputmode="url" spellcheck="false" autocomplete="off" placeholder="123456-…apps.googleusercontent.com">
           </label>
           <small>This app needs its own Google Cloud OAuth client ID. Google sign-in happens in your system browser, not inside a website.</small>
           <button type="button" id="googleConnectContinue" class="google-primary-button">Continue to Google</button>
+        </div>
+        <div class="google-website-signin">
+          <button type="button" id="googleWebsiteSignIn" class="google-secondary-button">Open Google Sign-In Tab in Minternet</button>
+          <small>Google website sessions (Gmail, YouTube) are separate from Minternet's Google API connection. Sign in on a normal tab; Google may restrict embedded browsers.</small>
         </div>
         <div id="googleSyncChoice" hidden>
           <p>Sync this Minternet with your other Minternet devices? Private and Tor tabs are excluded.</p>

@@ -20,9 +20,19 @@
   let email=null,mailboxes=[],connected=false,session=null,key=null,userId=null;
   let baseline=null,initializing=false,muted=0,flushing=false,scheduled=false;
   let latestCode='',lastTabSignature='',flushPending=false,booting=false;
+  let loginInProgress=false;
 
   const toast=message=>window.minternetToast?.(message);
-  const setStatus=text=>{if($('googleSyncStatus'))$('googleSyncStatus').textContent=text;};
+  const setStatus=text=>{
+    if($('googleSyncStatus'))$('googleSyncStatus').textContent=text;
+    // Previously errors were written only into googleSyncConnected, which is
+    // hidden until login succeeds. Always expose OAuth failures and timeouts.
+    const feedback=$('googleLoginFeedback');
+    if(feedback){
+      feedback.hidden=!text;
+      feedback.textContent=text||'';
+    }
+  };
   const command=async(name,value)=>{
     const result=await native.command(name,value);
     if(result?.message)throw Error(result.message);
@@ -40,7 +50,11 @@
   const isSame=(a,b)=>a&&b&&a.kind===b.kind&&
     a.item_key===b.item_key&&itemContent(a)===itemContent(b);
   function updateUi(){
-    $('googleSyncState').textContent=connected?'Live encrypted sync':'Not connected';
+    // OAuth authorization and Minternet Realtime sync are independent states.
+    // Never call a successfully authorized Google account "Not connected".
+    $('googleSyncState').textContent=connected
+      ?'Google connected · Sync on'
+      :(email?'Google connected · Sync off':'Not connected');
     $('googleAccountLogin').hidden=Boolean(email);
     $('googleSyncConnected').hidden=!email;
     $('googleSyncEmail').textContent=email||'';
@@ -251,32 +265,53 @@
     }
   }
   async function googleLogin(mail){
-    if(!window.__TAURI__){toast('Google account sync requires native Minternet');return;}
+    if(!window.__TAURI__){setStatus('Google account connection requires native Minternet.');return;}
+    if(loginInProgress)return;
     let clientId=$('googleClientId').value.trim()||localStorage.getItem(CLIENT_KEY)||'';
     if(!/^\d+-[\w.-]+\.apps\.googleusercontent\.com$/.test(clientId)){
       $('googleAccountConfig').hidden=false;
       $('googleClientId').focus();
-      setStatus('Register a Google OAuth Desktop Client ID first');return;
+      setStatus('Enter the Desktop OAuth Client ID from Google Cloud, then click Continue to Google.');
+      return;
     }
     localStorage.setItem(CLIENT_KEY,clientId);
-    $('googleAccountConfig').hidden=true;
-    setStatus('Authorize in your system browser');
+    loginInProgress=true;
+    $('googleAccountLogin').disabled=true;
+    $('googleConnectContinue').disabled=true;
+    // The external authorization is not a Minternet website-cookie login.
+    setStatus('Finish authorization in your system browser. It must redirect to a localhost page saying sign-in was received.');
     try{
       const result=await command(mail?'google-gmail-login':'google-login',{clientId});
+      if(!result?.authorized||!result.email)
+        throw Error('Google did not complete authorization. Try again from Settings.');
+      const verified=await command('google-status');
       if(mail){
-        if(!mailboxes.includes(result.email))mailboxes.push(result.email);
+        mailboxes=Array.isArray(verified?.gmailAccounts)?verified.gmailAccounts:mailboxes;
+        if(!mailboxes.includes(result.email))
+          throw Error('Google Gmail permission was not recorded by Minternet.');
         updateUi();await checkCodes();
         setStatus(result.sessionSaved
-          ?'Gmail read-only code detection enabled · session saved securely for '+result.email
-          :'Gmail authorized for this launch only · Windows Credential Manager unavailable');
+          ?'Gmail access connected · Session securely saved.'
+          :'Gmail connected for this launch only · Windows Credential Manager unavailable.');
       }else{
-        email=result.email;
+        if(!verified?.connected||verified.email!==result.email)
+          throw Error('Google authorization returned, but Minternet could not confirm its session.');
+        email=verified.email;
+        mailboxes=Array.isArray(verified.gmailAccounts)?verified.gmailAccounts:mailboxes;
+        $('googleAccountConfig').hidden=true;
         updateUi();$('googleSyncChoice').hidden=false;
         setStatus(result.sessionSaved
-          ?'Google sign-in saved securely · Sync this Minternet with other devices?'
-          :'Google signed in for this launch only · Windows Credential Manager unavailable');
+          ?'Google account connected and securely saved. Encrypted sync is optional.'
+          :'Google connected for this launch only; secure session storage unavailable.');
       }
-    }catch(e){fail(e);}
+    }catch(e){
+      $('googleAccountConfig').hidden=false;
+      fail(e);
+    }finally{
+      loginInProgress=false;
+      $('googleAccountLogin').disabled=false;
+      $('googleConnectContinue').disabled=false;
+    }
   }
   async function checkCodes(){
     if(!mailboxes.length)return;
@@ -308,6 +343,14 @@
 
   $('googleAccountLogin').addEventListener('click',()=>void googleLogin(false));
   $('googleConnectContinue').addEventListener('click',()=>void googleLogin(false));
+  $('googleWebsiteSignIn').addEventListener('click',async()=>{
+    // OAuth cannot create cookies in Minternet's independent WebView2 profile.
+    // Use an ordinary, persistent tab and let Google handle the website login.
+    try{
+      await command('new-url','https://accounts.google.com/');
+      window.minternetBookmarks?.closeOverlay?.();
+    }catch(e){fail(e);}
+  });
   $('googleSyncNo').addEventListener('click',()=>{
     $('googleSyncChoice').hidden=true;
     $('googleSyncEncryption').hidden=true;
@@ -368,7 +411,8 @@
       email=status.email||null;
       mailboxes=Array.isArray(status.gmailAccounts)?status.gmailAccounts:[];
       updateUi();
-    }).catch(()=>{});
+      if(email)setStatus('Google connected as '+email+'. Cloud sync is '+(connected?'on.':'optional and currently off.'));
+    }).catch(error=>setStatus('Could not check saved Google authorization: '+String(error.message||error).slice(0,100)));
   }
   // Gmail is not a sync transport. This separately consented metadata check
   // only activates after Gmail OAuth and scans a small set of recent codes.
