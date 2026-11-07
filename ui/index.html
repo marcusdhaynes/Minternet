@@ -144,6 +144,22 @@
           <option value="chatgpt-private">ChatGPT (Temporary Chat)</option>
         </select>
       </label>
+      <section class="browser-path-setting" aria-label="New Tab Home Page">
+        <label for="homePageUrl"><strong>Home Page / New Tab</strong><small>Google by default. Changes apply to new tabs immediately.</small></label>
+        <div class="browser-path-actions">
+          <input id="homePageUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://www.google.com/">
+          <button id="homePageSave" type="button">Save</button>
+        </div>
+      </section>
+      <section class="browser-path-setting" aria-label="Downloads Folder">
+        <label for="downloadFolderPath"><strong>Downloads Folder</strong><small>Files download automatically here. Executables aren't run unless you open them.</small></label>
+        <div class="browser-path-actions">
+          <input id="downloadFolderPath" type="text" autocomplete="off" spellcheck="false" placeholder="System Downloads folder" aria-label="Folder path for downloads">
+          <button id="downloadFolderSave" type="button">Save</button>
+          <button id="downloadFolderDefault" type="button" title="Restore operating system Downloads folder">Default</button>
+        </div>
+      </section>
+      <small id="browserPreferencesStatus" class="browser-preferences-status" aria-live="polite" hidden></small>
       <label class="auto-unload-setting" for="autoUnloadMinutes"><span><strong>Unload Inactive Tabs</strong><small>Only when idle, not loading or holding entered data</small></span><select id="autoUnloadMinutes" aria-label="Automatically unload inactive tabs"><option value="0">Never</option><option value="1" selected>1 minute</option><option value="2">2 minutes</option><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option><option value="120">2 hours</option></select></label>
       <div class="zoom-setting-row" aria-label="Page Zoom">
         <span>Zoom</span><button id="zoomOut" type="button" aria-label="Zoom Out" title="Zoom Out (Ctrl+-)">−</button>
