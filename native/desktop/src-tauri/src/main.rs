@@ -14,7 +14,7 @@ use zeroize::Zeroize;
 use serde_json::{json, Value};
 use tauri::{
     Emitter, Manager, WebviewUrl, LogicalPosition, LogicalSize,
-    webview::{WebviewBuilder, WebviewWindowBuilder, NewWindowResponse, PermissionResponse, PageLoadEvent, DownloadEvent},
+    webview::{WebviewBuilder, WebviewWindowBuilder, NewWindowResponse, PermissionKind, PermissionResponse, PageLoadEvent, DownloadEvent},
     window::WindowBuilder,
 };
 
@@ -1758,7 +1758,14 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                 ((url.scheme()=="tauri" || url.host_str()==Some("tauri.localhost"))
                  && url.path()=="/warmup.html")
         })
-        .on_permission_request(|_view, _kind| PermissionResponse::Deny)
+        // PermissionKind::Other includes browser-managed identity/storage requests
+        // (FedCM and Storage Access). Denying it globally silently breaks
+        // third-party Google sign-in. Keep explicit dangerous permissions
+        // denied; let WebView2 handle identity permissions normally.
+        .on_permission_request(|_view, kind| match kind {
+            PermissionKind::Other => PermissionResponse::Default,
+            _ => PermissionResponse::Deny,
+        })
         .on_download(move |_view,event|{
             match event {
                 DownloadEvent::Requested{url,destination}=>{
@@ -1812,6 +1819,15 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                     .on_document_title_changed(|window,title| {
                         let safe=title.chars().take(100).collect::<String>();
                         if !safe.is_empty(){let _=window.set_title(&safe);}
+                        // Test only: a genuine related popup reached a rendered
+                        // document with its original window.opener intact.
+                        if safe=="Minternet OAuth Popup Smoke" &&
+                            std::env::args().any(|a|a=="--minternet-auth-popup-smoke") {
+                            let marker=std::env::temp_dir().join(format!(
+                                "minternet-auth-popup-{}.ok",std::process::id()));
+                            let _=std::fs::write(marker,
+                                "Native WebView2 popup retained opener and rendered title");
+                        }
                     });
                 return match builder.build() {
                     Ok(window)=>NewWindowResponse::Create{window},
@@ -1854,6 +1870,24 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                 if matches!(event.event(), PageLoadEvent::Finished) {
                     record_page_history(&for_load,id,event.url().as_str(),None);
                     let _=fill_saved_credential(&for_load,id,false,None);
+                    // CI only: open about:blank exactly as OAuth popup libraries
+                    // do, then assert a same-origin opener can write to it.
+                    // No Google account or sign-in secrets are used.
+                    if event.url().host_str()==Some("example.com") &&
+                        std::env::args().any(|a|a=="--minternet-auth-popup-smoke") {
+                        let _=view.eval(r#"
+                            setTimeout(() => {
+                              const popup=window.open('about:blank',
+                                'minternet-auth-popup-smoke','width=480,height=600');
+                              if (!popup) return;
+                              popup.document.open();
+                              popup.document.write('<!doctype html><html><head><title>OAuth popup</title></head><body>Checking opener</body></html>');
+                              popup.document.close();
+                              if (popup.opener===window)
+                                popup.document.title='Minternet OAuth Popup Smoke';
+                            }, 250);
+                        "#);
+                    }
                     // Only a prompt typed into the trusted browser address bar
                     // can enable ChatGPT auto-submit. External URLs never do.
                     if event.url().host_str()==Some("chatgpt.com"){
@@ -4426,6 +4460,7 @@ fn main() {
             // not invoke the operating system's default browser.
             let smoke = std::env::args().any(|a| a == "--minternet-smoke");
             let turbo_smoke = std::env::args().any(|a| a == "--minternet-turbo-smoke");
+            let auth_popup_smoke = std::env::args().any(|a| a == "--minternet-auth-popup-smoke");
             let bookmarks_smoke = std::env::args().any(|a| a == "--minternet-bookmarks-smoke");
             let bookmarks_reopen = std::env::args().any(|a| a == "--minternet-bookmarks-reopen");
             let menus_smoke = std::env::args().any(|a| a == "--minternet-menus-smoke");
@@ -4460,7 +4495,7 @@ fn main() {
                     .transparent(true)
                     .on_page_load(move |view, event| {
                         if matches!(event.event(), PageLoadEvent::Finished) {
-                            if smoke {
+                            if smoke || auth_popup_smoke {
                                 let _ = view.eval(
                                     "setTimeout(() => window.minternet?.command('navigate', 'https://example.com'), 200)"
                                 );

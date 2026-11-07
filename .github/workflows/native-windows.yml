@@ -93,6 +93,26 @@ jobs:
             if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
             Remove-Item $marker -Force -ErrorAction SilentlyContinue
           }
+      - name: Verify OAuth popup renders with a working native window.opener
+        shell: pwsh
+        run: |
+          $exe = "$env:RUNNER_TEMP\minternet-portable\Minternet-Portable-x64.exe"
+          $p = Start-Process -FilePath $exe -ArgumentList "--minternet-auth-popup-smoke" -PassThru
+          $marker = Join-Path $env:TEMP "minternet-auth-popup-$($p.Id).ok"
+          try {
+            $passed = $false
+            for ($i = 0; $i -lt 35; $i++) {
+              Start-Sleep -Seconds 2
+              $p.Refresh()
+              if ($p.HasExited) { throw "Browser exited during native OAuth popup test" }
+              if (Test-Path $marker) { $passed = $true; break }
+            }
+            if (!$passed) { throw "Popup did not render with a valid window.opener" }
+            "PASS: WebView2 related OAuth popup rendered and retained its opener." >> $env:GITHUB_STEP_SUMMARY
+          } finally {
+            if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
+            Remove-Item $marker -Force -ErrorAction SilentlyContinue
+          }
       - name: Verify turbo-warmed browser view also navigates internally
         shell: pwsh
         run: |
