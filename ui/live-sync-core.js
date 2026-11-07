@@ -9,7 +9,7 @@
   if(root)root.MinternetLiveSync=api;
 })(typeof window!=='undefined'?window:null,()=>{
   const MAX=250_000;
-  const categories=new Set(['tab','group','bookmark','login','payment','undo','prefs']);
+  const categories=new Set(['tab','group','bookmark','login','payment','identity','undo','prefs']);
   const canonical=x=>JSON.stringify(x);
   const toBytes=text=>new TextEncoder().encode(text);
   const fromBytes=bytes=>new TextDecoder().decode(bytes);
@@ -70,7 +70,7 @@
     return b64(hash).slice(0,42);
   }
   async function makeRecords({tabs=[],groups=[],assignments={},
-      bookmarks={items:[]},logins=[],cards=[],prefs={}},subtle=crypto.subtle){
+      bookmarks={items:[]},logins=[],cards=[],identities=[],prefs={}},subtle=crypto.subtle){
     const out=new Map();
     const normal=tabs.filter(eligibleTab);
     const normalIds=new Set(normal.map(t=>String(t.id)));
@@ -119,6 +119,14 @@
       out.set('payment:'+key,{kind:'payment',item_key:key,value:{
         id:card.id,label:card.label,name:card.name,number:card.number,
         month:card.month,year:card.year,postal:card.postal}});
+    }
+    for(const identity of identities){
+      if(!identity?.id||!identity.label||!identity.fields||
+         typeof identity.fields!=='object')continue;
+      const key=await opaqueId('identity',identity.id,subtle);
+      out.set('identity:'+key,{kind:'identity',item_key:key,value:{
+        id:identity.id,label:identity.label,fields:identity.fields
+      }});
     }
     if(Object.keys(prefs).length){
       out.set('prefs:general',{kind:'prefs',item_key:'general',value:prefs});
