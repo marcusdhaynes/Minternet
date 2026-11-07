@@ -416,7 +416,7 @@ h1 em { color: #b3bfff; font-family: Georgia, serif; font-weight: 400; letter-sp
 /* Compact native-browser tab groups (tabs remain alive when groups are hidden). */
 .tab-groups-btn { flex: 0 0 21px; width:21px; height:20px; align-self:end; margin:0 2px 1px 0; color:#a7b9e1; -webkit-app-region:no-drag; }
 .tab-groups-btn:hover {color:#e8e8ff;}
-.group-chip { --group-chip-width:94.4px; display:flex; align-items:center; justify-content:center; gap:0; flex:0 0 var(--group-chip-width); width:var(--group-chip-width); min-width:var(--group-chip-width); max-width:var(--group-chip-width); height:20px; padding:0 11px;
+.group-chip { --group-chip-width:56px; display:flex; align-items:center; justify-content:center; gap:0; flex:0 0 var(--group-chip-width); width:var(--group-chip-width); min-width:var(--group-chip-width); max-width:var(--group-chip-width); height:20px; padding:0 5px;
  background:color-mix(in srgb, var(--group-accent) 17%, #1b2436); border:1px solid color-mix(in srgb,var(--group-accent) 65%,#2b3552);
  border-bottom:0; border-radius:6px 6px 0 0; color:#f6f7ff; font-size:10px; white-space:nowrap; -webkit-app-region:no-drag; }
 .group-chip:hover {filter:brightness(1.16);}
@@ -456,7 +456,7 @@ h1 em { color: #b3bfff; font-family: Georgia, serif; font-weight: 400; letter-sp
  background:#242d42;border:1px solid #67718a;border-radius:8px;box-shadow:0 12px 36px #000a;padding:4px;}
 .system-popup-has-child:hover>.system-popup-child,.system-popup-has-child.system-popup-open>.system-popup-child {display:flex;}
 .system-popup-arrow {margin-left:auto;color:#b9c7e9;}
-@media(max-width:600px){.group-editor-panel{left:7px;right:7px;width:auto}.group-chip{--group-chip-width:60px}}
+@media(max-width:600px){.group-editor-panel{left:7px;right:7px;width:auto}.group-chip{--group-chip-width:56px}}
 
 /* Native frameless window: this row is the application's only title bar. */
 .tab-row{cursor:default}
@@ -857,7 +857,7 @@ body.tab-dragging .tab-drag-source {opacity:.48;box-shadow:inset 0 0 0 1px #aab5
 }
 
 /* Compact group name with a discreet top-right tab count; no collapse arrow. */
-.tabs .group-chip{position:relative;padding:0 11px;gap:0;}
+.tabs .group-chip{position:relative;--group-chip-width:56px;flex:0 0 var(--group-chip-width);width:var(--group-chip-width);min-width:var(--group-chip-width);max-width:var(--group-chip-width);padding:0 5px;justify-content:center;gap:0;}
 .tabs .group-chip-label{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;text-align:center;}
 .tabs .group-chip-count{
   position:absolute;top:1px;right:3px;

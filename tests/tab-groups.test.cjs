@@ -79,3 +79,12 @@ test('Ctrl-clicked background tab inserts immediately right of opener, not the e
  assert.deepEqual(s.order,[3,1,7,8,5,2]);
  assert.equal(m.insertAfter(s,9,12345),false);
 });
+
+test('group chips use one compact centered width on every viewport',()=>{
+ const css=require('node:fs').readFileSync(require('node:path').join(__dirname,'../ui/styles.css'),'utf8');
+ assert.match(css,/\.group-chip\s*\{[^}]*--group-chip-width:56px/);
+ assert.match(css,/\.tabs \.group-chip\s*\{[^}]*--group-chip-width:56px;[^}]*flex:0 0 var\(--group-chip-width\);[^}]*min-width:var\(--group-chip-width\);[^}]*max-width:var\(--group-chip-width\);[^}]*justify-content:center;/);
+ assert.match(css,/\.group-chip-label\s*\{[^}]*text-align:center;/);
+ assert.match(css,/@media\(max-width:600px\)\{[^\n]*\.group-chip\{--group-chip-width:56px\}/);
+ assert.doesNotMatch(css,/--group-chip-width:(?:94\.4|60)px/);
+});

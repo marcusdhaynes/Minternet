@@ -674,7 +674,7 @@ fn undo_last(app:&tauri::AppHandle)->Result<Option<Value>,String> {
 
 #[derive(Default)]
 struct LayoutCache {
-    size_and_home: Option<(u32, u32, bool, bool, bool, u64)>,
+    size_and_home: Option<(u32, u32, bool, bool, bool, u64, u32)>,
     shown: HashSet<String>,
     bookmark_bar_visible: bool,
     overlay_open: bool,
@@ -1534,46 +1534,92 @@ fn raise_chrome_above_site(_app:&tauri::AppHandle){}
 fn refresh_layout(app: &tauri::AppHandle) {
     let Some(window) = app.get_window("main") else { return };
     let Ok(physical) = window.inner_size() else { return };
+    // Windows can report a zero/tiny client area while minimizing or dragging.
+    // Never collapse a live WebView2 renderer to a 1-pixel surface: it can
+    // become blank until another full layout or an expensive site refresh.
+    if physical.width < 64 || physical.height < 64 { return; }
     let Ok((width, height)) = dimensions(&window) else { return };
-    let show_home = app.state::<Mutex<Browser>>()
-        .lock()
-        .map(|b| b.active().map(|t| t.url == HOME).unwrap_or(true))
-        .unwrap_or(true);
-    let split_signature=visible_split(app).iter().fold(0u64,|hash,id|hash.wrapping_mul(37).wrapping_add(*id as u64));
+    let (show_home, active_id, active_label) = {
+        let state = app.state::<Mutex<Browser>>();
+        let Ok(browser) = state.lock() else { return };
+        let current = browser.active();
+        (current.map(|t|t.url == HOME).unwrap_or(true),
+         browser.active_id,
+         current.and_then(|t|if t.url == HOME {None} else {t.view.clone()}))
+    };
+    let positions = visible_split(app);
+    let split_count = if positions.len()>1 { positions.len() } else { 0 };
+    let split_signature = positions.iter().fold(0u64, |hash,id|
+        hash.wrapping_mul(37).wrapping_add(*id as u64));
     let (bar_visible, overlay_open) = {
         let cache = app.state::<Mutex<LayoutCache>>();
-        let Ok(mut state) = cache.lock() else { return };
-        let signature = (
-            physical.width, physical.height, show_home,
-            state.bookmark_bar_visible, state.overlay_open, split_signature
-        );
-        if state.size_and_home == Some(signature) { return; }
-        state.size_and_home = Some(signature);
+        let Ok(state) = cache.lock() else { return };
         (state.bookmark_bar_visible, state.overlay_open)
     };
     let top = CHROME + if bar_visible { BOOKMARK_BAR } else { 0.0 };
+    if height <= top + 1.0 { return; }
+    // Include active tab identity: a previously hidden WebView must get its
+    // current viewport before being shown, even when window size is unchanged.
+    let signature = (physical.width, physical.height, show_home,
+        bar_visible, overlay_open, split_signature, active_id);
+    {
+        let cache = app.state::<Mutex<LayoutCache>>();
+        let Ok(state) = cache.lock() else { return };
+        if state.size_and_home == Some(signature) { return; }
+    }
+
+    let mut applied = true;
     if let Some(chrome) = app.get_webview("chrome") {
         let full = show_home || overlay_open;
         let height_for_chrome = if full { height } else { top.min(height) };
-        let _ = chrome.set_size(LogicalSize::new(width, height_for_chrome));
+        if chrome.set_size(LogicalSize::new(width, height_for_chrome)).is_err() {
+            applied = false;
+        }
+    } else {
+        applied = false;
     }
-    let available = (height - top).max(1.0);
-    let positions=visible_split(app);
-    let split_count=if positions.len()>1{positions.len()}else{0};
-    let ratios=app.state::<SplitRatios>().0.lock().map(|r|*r).unwrap_or((0.5,0.5));
-    for view in window.webviews() {
-        if view.label() == "chrome" || view.label().starts_with("split-badge-") {continue;}
-        let index=if split_count>0 {
-            positions.iter().position(|id|view.label()==format!("tab-{id}"))
-        }else{None};
-        let (x,y,w,h)=if let Some(index)=index {
+
+    let available = height - top;
+    let ratios = app.state::<SplitRatios>().0.lock()
+        .map(|r|*r).unwrap_or((0.5,0.5));
+    // Resizing every background tab triggered many WebView2 COM operations
+    // per mouse movement, delaying the active page and sometimes blanking it.
+    // Background tabs retain their renderer and are laid out on activation.
+    let visible_labels: Vec<String> = if split_count > 1 {
+        positions.iter().map(|id|format!("tab-{id}")).collect()
+    } else {
+        active_label.into_iter().collect()
+    };
+    for (index, label) in visible_labels.iter().enumerate() {
+        let (x,y,w,h) = if split_count > 1 {
             split_rect(index,split_count,width,available,top,ratios.0,ratios.1)
-        }else{(0.0,top,width,available)};
-        let _ = view.set_position(LogicalPosition::new(x,y));
-        let _ = view.set_size(LogicalSize::new(w.max(1.0),h.max(1.0)));
+        } else {
+            (0.0,top,width,available)
+        };
+        if let Some(view) = app.get_webview(label) {
+            // One atomic parent-relative bounds update, rather than two
+            // separate position/size calls that can expose an empty frame.
+            let bounds = tauri::Rect {
+                position: LogicalPosition::new(x,y).into(),
+                size: LogicalSize::new(w.max(1.0),h.max(1.0)).into(),
+            };
+            if view.set_bounds(bounds).is_err() { applied = false; }
+        } else {
+            applied = false;
+        }
     }
-    update_split_badges(app,&window,if split_count>1 {positions.as_slice()} else {&[]},width,available,top);
-    if overlay_open {raise_chrome_above_site(app);}
+    update_split_badges(app,&window,
+        if split_count > 1 {positions.as_slice()} else {&[]},
+        width,available,top);
+    if overlay_open { raise_chrome_above_site(app); }
+    // Only cache successful layouts. A transient controller failure should
+    // be retried on the next resize/tab switch, never permanently skipped.
+    let cache = app.state::<Mutex<LayoutCache>>();
+    if let Ok(mut state) = cache.lock() {
+        if state.bookmark_bar_visible == bar_visible && state.overlay_open == overlay_open {
+            state.size_and_home = if applied {Some(signature)} else {None};
+        }
+    }
 }
 fn display_active(app: &tauri::AppHandle) {
     let mut targets=HashSet::new();
