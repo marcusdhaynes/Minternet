@@ -240,6 +240,34 @@ struct RecentDownload {
 #[derive(Default)]
 struct DownloadsState(Mutex<VecDeque<RecentDownload>>);
 
+// HTTP(S) attachments, generated blob downloads and data-URI downloads
+// should work like ordinary WebView2 browser downloads. Generated downloads
+// must come from the exact website tab that initiated the request.
+fn download_source_allowed(app:&tauri::AppHandle,id:u32,url:&tauri::Url)->bool{
+    if matches!(url.scheme(),"https"|"http"){
+        return url.host_str().is_some();
+    }
+    let address={
+        let state=app.state::<Mutex<Browser>>();
+        let Ok(browser)=state.lock() else{return false};
+        let Some(tab)=browser.tabs.iter().find(|tab|tab.id==id) else{return false};
+        // Private downloads can be saved as user-visible files, but secret
+        // pages must never yield concealed URLs to the normal download log.
+        if tab.secret_id.is_some(){return false;}
+        let Ok(source)=tauri::Url::parse(&tab.url) else{return false};
+        if !matches!(source.scheme(),"http"|"https")||
+            source.host_str().is_none(){return false;}
+        source.origin().ascii_serialization()
+    };
+    if url.scheme()=="data"{return true;}
+    if url.scheme()=="blob"{
+        return url.as_str().strip_prefix("blob:")
+            .and_then(|raw|tauri::Url::parse(raw).ok())
+            .map(|candidate|candidate.origin().ascii_serialization()==address)
+            .unwrap_or(false);
+    }
+    false
+}
 fn recent_downloads_file(app:&tauri::AppHandle)->Result<PathBuf,String>{
     Ok(app.path().app_data_dir().map_err(|e|e.to_string())?
         .join("recent-downloads.v1.json"))
@@ -1627,6 +1655,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     let (width, height) = dimensions(&window)?;
     let top = chrome_top(app);
     let for_load = app.clone();
+    let for_navigation = app.clone();
     let for_title = app.clone();
     let for_popup = app.clone();
     let for_download=app.clone();
@@ -1638,9 +1667,12 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
         // Do not block internal warmup.html: the prepared WebView2 controller
         // must actually load before its first HTTPS navigation. Ordinary HTTP
         // is legitimate browser content but remains visibly marked insecure.
-        .on_navigation(|url| {
+        .on_navigation(move |url| {
             if matches!(url.scheme(), "https"|"http") {
                 return url.host_str().is_some();
+            }
+            if url.scheme()=="blob" {
+                return download_source_allowed(&for_navigation,id,&url);
             }
             url.as_str()=="about:blank" ||
                 ((url.scheme()=="tauri" || url.host_str()==Some("tauri.localhost"))
@@ -1650,7 +1682,10 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
         .on_download(move |_view,event|{
             match event {
                 DownloadEvent::Requested{url,destination}=>{
-                    if url.scheme()!="https" {return false;}
+                    // WebView2 decides whether to render inline (PDFs, images,
+                    // media) or download. Don't reject ordinary HTTP, blob:
+                    // exports, data: attachments, or user-clicked .exe files.
+                    if !download_source_allowed(&for_download,id,&url){return false;}
                     match download_path(&for_download,&url,destination.as_path()){
                         Ok(path)=>{
                             *destination=path.clone();
@@ -3178,6 +3213,65 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         remember_undo(&app,None);
     }
     match name.as_str() {
+        "browser-preferences" => {
+            let prefs=app.state::<BrowserPreferenceState>().0.lock()
+                .map_err(|e|e.to_string())?;
+            let destination=configured_download_folder(&app)?;
+            return Ok(json!({
+                "homepage":prefs.homepage,
+                "downloadFolder":destination.to_string_lossy(),
+                "usingSystemDownloads":prefs.download_folder.is_none()
+            }));
+        }
+        "browser-homepage-set" => {
+            let submitted=value.as_str().ok_or("Enter a homepage URL")?.trim();
+            let selected=validate_homepage(submitted)?;
+            let state=app.state::<BrowserPreferenceState>();
+            let mut prefs=state.0.lock().map_err(|e|e.to_string())?;
+            let mut updated=prefs.clone();
+            updated.homepage=selected.clone();
+            persist_preferences(&app,&updated)?;
+            *prefs=updated;
+            return Ok(json!({"ok":true,"homepage":selected}));
+        }
+        "downloads-folder-set" => {
+            let raw=value.as_str().ok_or("Enter an absolute Downloads folder path")?.trim();
+            let chosen=if raw.is_empty(){
+                None // Reset to the operating system's Downloads folder.
+            }else{
+                let requested=PathBuf::from(raw);
+                if !requested.is_absolute(){
+                    return Err("Downloads folder must be an absolute path".into());
+                }
+                if !requested.is_dir(){
+                    return Err("Choose an existing folder for downloads".into());
+                }
+                let folder=std::fs::canonicalize(&requested)
+                    .map_err(|e|format!("Downloads folder is unavailable: {e}"))?;
+                if !folder.is_dir(){return Err("Downloads folder must be a directory".into());}
+                Some(folder.to_string_lossy().to_string())
+            };
+            let state=app.state::<BrowserPreferenceState>();
+            let mut prefs=state.0.lock().map_err(|e|e.to_string())?;
+            let mut updated=prefs.clone();
+            if updated.download_folder!=chosen {
+                if let Some(previous)=updated.download_folder.take(){
+                    updated.previous_download_folders.retain(|folder|folder!=&previous);
+                    updated.previous_download_folders.push(previous);
+                    if updated.previous_download_folders.len()>8{
+                        updated.previous_download_folders.remove(0);
+                    }
+                }
+                updated.download_folder=chosen;
+            }
+            persist_preferences(&app,&updated)?;
+            *prefs=updated;
+            // Already-downloaded files are still accessible from their
+            // original known folders through Downloads history.
+            let current=configured_download_folder(&app)?;
+            return Ok(json!({"ok":true,"downloadFolder":current.to_string_lossy(),
+                "usingSystemDownloads":prefs.download_folder.is_none()}));
+        }
         "downloads-list" => {
             let state=app.state::<DownloadsState>();
             let history=state.0.lock().map_err(|e|e.to_string())?;
