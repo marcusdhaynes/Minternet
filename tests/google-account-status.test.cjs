@@ -47,8 +47,9 @@ function harness(authorized){
     setInterval(){},queueMicrotask:fn=>Promise.resolve().then(fn),
     navigator:{clipboard:{writeText:async()=>{}}}
   };
-  get('googleClientId').value='123456-local.apps.googleusercontent.com';
   vm.runInNewContext(source,context,{filename:'google-sync-ui.js'});
+  // App initialization restores the saved Client ID after loading its UI.
+  get('googleClientId').value='123456-local.apps.googleusercontent.com';
   return {get,win,calls};
 }
 async function tick(){for(let i=0;i<20;i++)await Promise.resolve();}
