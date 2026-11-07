@@ -161,6 +161,13 @@
           <button id="downloadFolderDefault" type="button" title="Restore operating system Downloads folder">Default</button>
         </div>
       </section>
+      <section class="browser-path-setting" aria-label="Tab Limit">
+        <label for="tabLimit"><strong>Tab Limit</strong><small>0 = Unlimited (default). Lower limits do not close existing tabs.</small></label>
+        <div class="browser-path-actions">
+          <input id="tabLimit" type="number" inputmode="numeric" min="0" max="1000000" step="1" value="0" aria-label="Maximum number of tabs, zero for unlimited">
+          <button id="tabLimitSave" type="button">Save</button>
+        </div>
+      </section>
       <small id="browserPreferencesStatus" class="browser-preferences-status" aria-live="polite" hidden></small>
       <section class="tab-layout-settings" aria-label="Tab Bar Appearance">
         <div class="tab-layout-settings-title"><strong>Tab Bar Appearance</strong><small>Set tab width and equal left/right padding in pixels; changes apply immediately.</small></div>
