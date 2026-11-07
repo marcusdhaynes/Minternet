@@ -518,6 +518,45 @@ mod tests {
         let _=fs::remove_file(&file);
     }
     #[test]
+    fn identities_are_encrypted_masked_and_persist_with_existing_logins(){
+        let path=std::env::temp_dir().join(format!("minternet-identities-{}.enc",
+            rand::random::<u64>()));
+        let mut vault=Vault::default();
+        vault.unlock(&path,"correct horse battery staple",true).unwrap();
+        vault.put("https://example.com".into(),"alice".into(),"secret".into(),true).unwrap();
+        let mut values=BTreeMap::new();
+        values.insert("full-name".into(),"Example User".into());
+        values.insert("passport-number".into(),"A12345678".into());
+        values.insert("vin".into(),"1HGCM82633A004352".into());
+        let id=vault.put_identity(None,"Travel".into(),values.clone()).unwrap();
+        assert!(!vault.list_identities().unwrap().to_string().contains("A12345678"));
+        assert_eq!(vault.identity(&id).unwrap().fields,values);
+        vault.save(&path).unwrap();
+        let encoded=fs::read(&path).unwrap();
+        assert!(!String::from_utf8_lossy(&encoded).contains("A12345678"));
+        assert!(!String::from_utf8_lossy(&encoded).contains("Example User"));
+        vault.lock();
+        assert!(vault.identity(&id).is_none());
+        vault.unlock(&path,"correct horse battery staple",false).unwrap();
+        assert_eq!(vault.identity(&id).unwrap().fields,values);
+        assert_eq!(vault.matching("https://example.com",true,None).unwrap().username,"alice");
+        vault.remove_identity(&id).unwrap();
+        vault.save(&path).unwrap();
+        assert!(vault.identity(&id).is_none());
+        let _=fs::remove_file(path);
+    }
+    #[test]
+    fn identity_field_validation_rejects_secrets_and_invalid_tags(){
+        let mut fields=BTreeMap::new();
+        fields.insert("passport-number".into(),"P-123".into());
+        assert!(check_identity("Travel",&fields).is_ok());
+        fields.insert("password".into(),"secret".into());
+        assert!(check_identity("Travel",&fields).is_err());
+        fields.remove("password");
+        fields.insert("credit-card-cvv".into(),"123".into());
+        assert!(check_identity("Travel",&fields).is_err());
+    }
+    #[test]
     fn only_exact_https_origins() {
         assert_eq!(origin("https://example.com/login").unwrap(),"https://example.com");
         assert_ne!(origin("https://sub.example.com").unwrap(),origin("https://example.com").unwrap());
