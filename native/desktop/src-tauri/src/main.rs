@@ -87,6 +87,35 @@ fn homepage(app:&tauri::AppHandle)->tauri::Url{
     tauri::Url::parse(&saved).unwrap_or_else(|_|
         tauri::Url::parse(DEFAULT_HOMEPAGE).expect("known safe homepage"))
 }
+#[cfg(test)]
+mod home_and_download_tests{
+    use super::*;
+    #[test]
+    fn home_is_google_until_user_changes_it(){
+        assert_eq!(BrowserPreferences::default().homepage,DEFAULT_HOMEPAGE);
+        assert_eq!(validate_homepage("https://example.org/start").unwrap(),
+            "https://example.org/start");
+        assert!(validate_homepage("javascript:alert(1)").is_err());
+        assert!(validate_homepage("file:///c:/Windows").is_err());
+        assert!(validate_homepage("https://user:password@example.org/").is_err());
+    }
+    #[test]
+    fn warmup_is_not_a_real_tab_or_history_address(){
+        assert!(!is_real_page_url("http://tauri.localhost/warmup.html"));
+        assert!(!is_real_page_url("tauri://localhost/warmup.html"));
+        assert!(!is_real_page_url("about:blank"));
+        assert!(is_real_page_url("https://www.google.com/"));
+        assert!(is_real_page_url("https://example.org/downloads"));
+    }
+    #[test]
+    fn browser_can_validate_generated_file_download_urls(){
+        let blob=tauri::Url::parse("blob:https://example.org/01234567").unwrap();
+        let data=tauri::Url::parse("data:application/octet-stream;base64,AA==").unwrap();
+        assert_eq!(blob.scheme(),"blob");
+        assert_eq!(data.scheme(),"data");
+        assert!(tauri::Url::parse("https://example.org/setup.exe").is_ok());
+    }
+}
 fn configured_download_folder(app:&tauri::AppHandle)->Result<PathBuf,String>{
     let value=app.state::<BrowserPreferenceState>().0.lock()
         .map_err(|e|e.to_string())?.download_folder.clone();
@@ -257,13 +286,17 @@ fn download_source_allowed(app:&tauri::AppHandle,id:u32,url:&tauri::Url)->bool{
         let Ok(source)=tauri::Url::parse(&tab.url) else{return false};
         if !matches!(source.scheme(),"http"|"https")||
             source.host_str().is_none(){return false;}
-        source.origin().ascii_serialization()
+        true
     };
-    if url.scheme()=="data"{return true;}
+    if url.scheme()=="data"{return address;}
     if url.scheme()=="blob"{
-        return url.as_str().strip_prefix("blob:")
+        // A download may be created by an allowed cross-origin iframe.
+        // WebView2 has already approved the DownloadStarting event; accept
+        // generated web blobs without requiring the top-frame origin.
+        return address && url.as_str().strip_prefix("blob:")
             .and_then(|raw|tauri::Url::parse(raw).ok())
-            .map(|candidate|candidate.origin().ascii_serialization()==address)
+            .map(|candidate|matches!(candidate.scheme(),"http"|"https")||
+                candidate.as_str()=="null")
             .unwrap_or(false);
     }
     false
@@ -1595,17 +1628,16 @@ fn display_active(app: &tauri::AppHandle) {
     notify(app);
 }
 
+fn is_real_page_url(url:&str)->bool{
+    // Internal prepared controllers must never become a visible browser URL.
+    let Ok(actual)=tauri::Url::parse(url) else{return false};
+    matches!(actual.scheme(),"http"|"https") &&
+        actual.host_str().is_some() &&
+        !(matches!(actual.host_str(),Some("tauri.localhost")|Some("localhost"))
+          && actual.path()=="/warmup.html")
+}
 fn update_from_site(app: &tauri::AppHandle, id: u32, url: &str) {
-    // A hidden WebView2 warmup uses http://tauri.localhost/warmup.html.
-    // NEVER promote that internal renderer URL into the user's address bar
-    // or session history; it is not the homepage, and must remain invisible.
-    let Ok(actual)=tauri::Url::parse(url) else{return};
-    if !matches!(actual.scheme(),"https"|"http")||
-       actual.host_str().is_none()||
-       matches!(actual.host_str(),Some("tauri.localhost")|Some("localhost"))
-       && actual.path()=="/warmup.html" {
-        return;
-    }
+    if !is_real_page_url(url){return;}
     let mut pinned_change=false;
     {
         let state=app.state::<Mutex<Browser>>();
