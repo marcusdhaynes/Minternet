@@ -20,7 +20,6 @@ use tauri::{
 
 const CHROME: f64 = 52.0;
 const BOOKMARK_BAR: f64 = 22.0;
-const MAX_TABS: usize = 35;
 const HOME: &str = "about:blank"; // Internal tab sentinel, never a homepage.
 const DEFAULT_HOMEPAGE: &str = "https://www.google.com/";
 
@@ -29,13 +28,15 @@ const DEFAULT_HOMEPAGE: &str = "https://www.google.com/";
 struct BrowserPreferences {
     homepage:String,
     #[serde(default)]
+    tab_limit:usize,
+    #[serde(default)]
     download_folder:Option<String>,
     #[serde(default)]
     previous_download_folders:Vec<String>,
 }
 impl Default for BrowserPreferences{
     fn default()->Self{
-        Self{homepage:DEFAULT_HOMEPAGE.into(),
+        Self{homepage:DEFAULT_HOMEPAGE.into(),tab_limit:0,
             download_folder:None,previous_download_folders:Vec::new()}
     }
 }
@@ -52,6 +53,36 @@ fn validate_homepage(url:&str)->Result<String,String>{
     }
     Ok(candidate.to_string())
 }
+// Zero means unlimited; lowering a positive limit never closes existing tabs.
+fn has_tab_capacity(existing:usize, additional:usize, limit:usize)->bool{
+    limit==0 || existing.checked_add(additional).is_some_and(|total|total<=limit)
+}
+#[cfg(test)]
+mod tab_limit_tests {
+    use super::*;
+    #[test]
+    fn unlimited_and_positive_limits(){
+        assert_eq!(BrowserPreferences::default().tab_limit,0);
+        assert!(has_tab_capacity(35,1,0));
+        assert!(has_tab_capacity(999,1000,0));
+        assert!(has_tab_capacity(34,1,35));
+        assert!(!has_tab_capacity(35,1,35));
+        assert!(!has_tab_capacity(40,1,35));
+        assert!(!has_tab_capacity(usize::MAX,1,35));
+        let mut browser=Browser::new();
+        for _ in 0..40 {browser.add(false).unwrap();}
+        browser.tab_limit=40;
+        assert!(browser.add(false).is_err());
+        browser.tab_limit=0;
+        assert!(browser.add(false).is_ok());
+    }
+    #[test]
+    fn legacy_preferences_default_to_unlimited(){
+        let old=r#"{"homepage":"https://www.google.com/","downloadFolder":null}"#;
+        let prefs:BrowserPreferences=serde_json::from_str(old).unwrap();
+        assert_eq!(prefs.tab_limit,0);
+    }
+}
 fn preferences_file(app:&tauri::AppHandle)->Result<PathBuf,String>{
     Ok(app.path().app_data_dir().map_err(|e|e.to_string())?
         .join("browser-preferences.v1.json"))
@@ -65,6 +96,7 @@ fn load_preferences(app:&tauri::AppHandle)->BrowserPreferences{
     saved.homepage=validate_homepage(&saved.homepage)
         .unwrap_or_else(|_|DEFAULT_HOMEPAGE.into());
     saved.previous_download_folders.truncate(8);
+    saved.tab_limit=saved.tab_limit.min(1_000_000);
     saved
 }
 fn persist_preferences(app:&tauri::AppHandle,
@@ -258,6 +290,7 @@ struct Browser {
     next_id: u32,
     last_notified: Option<Snapshot>,
     warming: HashSet<u32>,
+    tab_limit: usize,
 }
 
 #[derive(Clone,Serialize,Deserialize)]
@@ -694,6 +727,7 @@ impl Browser {
             next_id: 1,
             last_notified: None,
             warming: HashSet::new(),
+            tab_limit: 0,
         }
     }
     fn active(&self) -> Option<&Tab> {
@@ -703,7 +737,9 @@ impl Browser {
         self.tabs.iter_mut().find(|t| t.id == self.active_id)
     }
     fn add(&mut self, private: bool) -> Result<u32, String> {
-        if self.tabs.len() >= MAX_TABS { return Err("Maximum 35 tabs".into()); }
+        if !has_tab_capacity(self.tabs.len(),1,self.tab_limit) {
+            return Err(format!("Tab limit reached ({}). Set Tab Limit to 0 for unlimited.",self.tab_limit));
+        }
         let id = self.next_id;
         self.next_id += 1;
         self.tabs.push(Tab {
@@ -801,7 +837,7 @@ fn save_pinned(app: &tauri::AppHandle) -> Result<(), String> {
         browser.tabs.iter()
             .filter(|tab|tab.pinned && !tab.private)
             .filter(|tab|tab.url.starts_with("https://"))
-            .map(|tab|tab.url.clone()).take(MAX_TABS).collect::<Vec<_>>()
+            .map(|tab|tab.url.clone()).collect::<Vec<_>>()
     };
     let file=pinned_file(app)?;
     if let Some(dir)=file.parent(){std::fs::create_dir_all(dir).map_err(|e|e.to_string())?;}
@@ -819,11 +855,11 @@ fn save_pinned(app: &tauri::AppHandle) -> Result<(), String> {
 fn restore_pinned(app: &tauri::AppHandle) {
     let Ok(path)=pinned_file(app) else {return};
     let Ok(bytes)=std::fs::read(path) else {return};
-    if bytes.len()>128_000{return}
+    if bytes.len()>16_000_000{return}
     let Ok(pages)=serde_json::from_slice::<Vec<String>>(&bytes) else {return};
     let state=app.state::<Mutex<Browser>>();
     let Ok(mut browser)=state.lock() else {return};
-    for address in pages.into_iter().take(MAX_TABS) {
+    for address in pages {
         let Ok(url)=tauri::Url::parse(&address) else {continue};
         if url.scheme()!="https"||url.host_str().is_none()||
            !url.username().is_empty()||url.password().is_some(){continue;}
@@ -881,12 +917,12 @@ fn restore_session(app: &tauri::AppHandle) {
     }
     let Ok(path)=session_file(app) else {restore_pinned(app);return};
     let Ok(bytes)=std::fs::read(path) else {restore_pinned(app);return};
-    if bytes.len()>128_000 {restore_pinned(app);return;}
+    if bytes.len()>16_000_000 {restore_pinned(app);return;}
     let Ok(data)=serde_json::from_slice::<Value>(&bytes) else {restore_pinned(app);return};
     let Some(saved)=data.get("tabs").and_then(Value::as_array) else {restore_pinned(app);return};
     let state=app.state::<Mutex<Browser>>();
     let Ok(mut browser)=state.lock() else {return};
-    for record in saved.iter().take(MAX_TABS) {
+    for record in saved.iter() {
         let Some(address)=record.get("url").and_then(Value::as_str) else {continue};
         if address!=HOME {
             let Ok(url)=tauri::Url::parse(address) else {continue};
@@ -2858,13 +2894,14 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
     if name=="secret-open"{
         let items=value.get("ids").and_then(Value::as_array)
             .ok_or("Select Secret Bookmarks")?;
-        if items.is_empty()||items.len()>MAX_TABS{return Err("Select up to 35 bookmarks".into());}
+        if items.is_empty(){return Err("Select at least one bookmark".into());}
         let ids=items.iter().map(|x|x.as_str()
             .map(str::to_owned).ok_or_else(||"Invalid Secret Bookmark ID".to_string()))
             .collect::<Result<Vec<_>,_>>()?;
         {
             let store=app.state::<Mutex<Browser>>();
-            if store.lock().map_err(|e|e.to_string())?.tabs.len()+ids.len()>MAX_TABS{
+            if !{let b=store.lock().map_err(|e|e.to_string())?;
+                has_tab_capacity(b.tabs.len(),ids.len(),b.tab_limit)}{
                 return Err("Not enough available tabs".into());
             }
         }
@@ -2880,7 +2917,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         let browser=app.state::<Mutex<Browser>>();
         let mut b=browser.lock().map_err(|e|e.to_string())?;
         let selected=b.active_id;
-        if b.tabs.len()+ids.len()>MAX_TABS{
+        if !has_tab_capacity(b.tabs.len(),ids.len(),b.tab_limit){
             for key in &mut keys{key.zeroize();}
             return Err("Not enough available tabs".into());
         }
@@ -3087,7 +3124,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                         if tab.pinned!=pinned{tab.pinned=pinned;changed=true;}
                     }
                 }
-            }else if !deleted && b.tabs.len()<MAX_TABS {
+            }else if !deleted && has_tab_capacity(b.tabs.len(),1,b.tab_limit) {
                 let selected=b.active_id;
                 let id=b.add(false)?;
                 if let (Some(tab),Some(url))=(b.tabs.iter_mut().find(|t|t.id==id),dest.as_ref()){
@@ -3114,7 +3151,6 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         // Sync never mutates private tabs or foreground input, and unopened
         // remote tabs stay suspended until the user explicitly selects one.
         let urls=value.as_array().ok_or("Expected synced tab list")?;
-        if urls.len()>MAX_TABS{return Err("Too many synced tabs".into());}
         let (added,total)={
             let state=app.state::<Mutex<Browser>>();
             let mut b=state.lock().map_err(|e|e.to_string())?;
@@ -3127,7 +3163,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 if parsed.scheme()!="https"||parsed.host_str().is_none()||
                     !parsed.username().is_empty()||parsed.password().is_some(){continue;}
                 if b.tabs.iter().any(|tab|!tab.private&&tab.url==url){continue;}
-                if b.tabs.len()>=MAX_TABS{break;}
+                if !has_tab_capacity(b.tabs.len(),1,b.tab_limit){break;}
                 let id=b.add(false)?;
                 if let Some(tab)=b.tabs.iter_mut().find(|tab|tab.id==id){
                     tab.url=url.to_owned();
@@ -3331,14 +3367,30 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             let state=app.state::<BrowserPreferenceState>();
             let prefs=state.0.lock().map_err(|e|e.to_string())?;
             let selected=prefs.homepage.clone();
+            let tab_limit=prefs.tab_limit;
             let system=prefs.download_folder.is_none();
             drop(prefs);
             let destination=configured_download_folder(&app)?;
             return Ok(json!({
                 "homepage":selected,
+                "tabLimit":tab_limit,
                 "downloadFolder":destination.to_string_lossy(),
                 "usingSystemDownloads":system
             }));
+        }
+        "tab-limit-set" => {
+            let requested=value.as_u64().ok_or("Tab Limit must be a nonnegative whole number")?;
+            if requested>1_000_000{return Err("Enter a Tab Limit from 0 to 1000000".into());}
+            let selected=requested as usize;
+            let state=app.state::<BrowserPreferenceState>();
+            let mut prefs=state.0.lock().map_err(|e|e.to_string())?;
+            let mut updated=prefs.clone();
+            updated.tab_limit=selected;
+            persist_preferences(&app,&updated)?;
+            *prefs=updated;
+            drop(prefs);
+            app.state::<Mutex<Browser>>().lock().map_err(|e|e.to_string())?.tab_limit=selected;
+            return Ok(json!({"ok":true,"tabLimit":selected}));
         }
         "browser-homepage-set" => {
             let submitted=value.as_str().ok_or("Enter a homepage URL")?.trim();
@@ -4170,7 +4222,6 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         }
         "close-many" => {
             let ids=value.as_array().ok_or("Expected tab ID array")?;
-            if ids.len()>MAX_TABS{return Err("Too many tabs".into());}
             let wanted:HashSet<u32>=ids.iter().map(|v|v.as_u64().map(|x|x as u32)
                 .ok_or_else(||"Invalid tab ID".to_string())).collect::<Result<_,_>>()?;
             let labels={
@@ -4426,8 +4477,12 @@ fn main() {
         .manage(Mutex::new(LayoutCache::default()))
         .invoke_handler(tauri::generate_handler![browser_action, browser_snapshot])
         .setup(|app| {
+            let preferences=load_preferences(app.handle());
             if let Ok(mut saved)=app.state::<BrowserPreferenceState>().0.lock(){
-                *saved=load_preferences(app.handle());
+                *saved=preferences.clone();
+            }
+            if let Ok(mut b)=app.state::<Mutex<Browser>>().lock(){
+                b.tab_limit=preferences.tab_limit;
             }
             if let Ok(mut h)=app.state::<Mutex<browsing_history::History>>().lock(){
                 *h=browsing_history::History::load(app.handle());
