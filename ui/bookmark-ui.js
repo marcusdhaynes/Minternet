@@ -294,8 +294,52 @@
   // must have started here: never trust an externally supplied bookmark ID.
   let draggedBarId=null,draggedBarElement=null,barDropIndicator=null;
   let ignoreBarClick=null;
+  // Long-press once to enter multi-select. Ctrl/Cmd-click also works.
+  const selectedBookmarks=new Set(),expandedFolders=new Set();
+  const holdTimers=new WeakMap();
+  let draggedIds=[];
+  function selectionMode(){return selectedBookmarks.size>0;}
+  function refreshSelections(){
+    for(const el of document.querySelectorAll('[data-bookmark-id]'))
+      el.classList.toggle('bookmark-multi-selected',selectedBookmarks.has(el.dataset.bookmarkId));
+    const count=$('bookmarkSelectionCount');
+    if(count){count.hidden=!selectionMode();count.textContent=selectedBookmarks.size+' selected';}
+  }
+  function toggleSelection(id,force=false){
+    if(id===model.BOOKMARK_BAR_ID)return;
+    if(selectedBookmarks.has(id)&&!force)selectedBookmarks.delete(id);
+    else selectedBookmarks.add(id);
+    refreshSelections();
+  }
+  function bindHoldSelect(el,item){
+    let held=false,position=null;
+    el.addEventListener('pointerdown',event=>{
+      if(event.button!==0)return;
+      held=false;position={x:event.clientX,y:event.clientY};
+      clearTimeout(holdTimers.get(el));
+      holdTimers.set(el,setTimeout(()=>{
+        held=true;toggleSelection(item.id,true);
+        el.dataset.holdConsumed='yes';
+      },480));
+    });
+    const cancel=()=>{clearTimeout(holdTimers.get(el));holdTimers.delete(el);};
+    el.addEventListener('pointermove',event=>{
+      if(position&&Math.hypot(event.clientX-position.x,event.clientY-position.y)>7){
+        cancel();position=null;
+      }
+    });
+    for(const kind of ['pointerup','pointercancel','pointerleave'])el.addEventListener(kind,()=>{cancel();position=null;});
+    el.addEventListener('click',event=>{
+      const consumed=el.dataset.holdConsumed==='yes';
+      if(consumed)delete el.dataset.holdConsumed;
+      if(consumed||event.ctrlKey||event.metaKey||event.shiftKey||selectionMode()){
+        event.preventDefault();event.stopImmediatePropagation();
+        if(!consumed)toggleSelection(item.id);
+      }
+    },true);
+  }
   function clearBarIndicator(){
-    barDropIndicator?.classList.remove('bookmark-reorder-before','bookmark-reorder-after');
+    barDropIndicator?.classList.remove('bookmark-reorder-before','bookmark-reorder-after','bookmark-reorder-inside');
     barDropIndicator=null;
   }
   function finishBarDrag(){
@@ -303,6 +347,23 @@
     draggedBarElement?.classList.remove('bookmark-reorder-source');
     draggedBarElement=null;
     draggedBarId=null;
+    draggedIds=[];
+  }
+  function beginBookmarkDrag(item,el,event){
+    if(!event.dataTransfer)return;
+    finishBarDrag();
+    draggedBarId=item.id;draggedBarElement=el;
+    draggedIds=selectedBookmarks.has(item.id)
+      ?Array.from(selectedBookmarks).filter(id=>id!==model.BOOKMARK_BAR_ID&&model.find(data,id))
+      :[item.id];
+    el.classList.add('bookmark-reorder-source');
+    event.dataTransfer.setData('application/x-minternet-reorder',item.id);
+    if(item.kind==='link'){
+      event.dataTransfer.setData('application/x-minternet-bookmark',
+        JSON.stringify({id:item.id,url:item.url,name:item.name||''}));
+      event.dataTransfer.setData('text/uri-list',item.url);
+    }else event.dataTransfer.setData('text/plain','Bookmark folder');
+    event.dataTransfer.effectAllowed='move';
   }
   function barPlacement(event){
     const target=event.target;
@@ -341,24 +402,9 @@
       // Folders and links can both be rearranged, while external URL drags
       // and Firefox folder imports retain their existing formats.
       el.draggable=true;
-      el.addEventListener('dragstart',event=>{
-        if(!event.dataTransfer)return;
-        finishBarDrag();
-        draggedBarId=item.id;
-        draggedBarElement=el;
-        el.classList.add('bookmark-reorder-source');
-        event.dataTransfer.setData('application/x-minternet-reorder',item.id);
-        if(item.kind==='link'){
-          event.dataTransfer.setData('application/x-minternet-bookmark',
-            JSON.stringify({id:item.id,url:item.url,name:item.name||''}));
-          event.dataTransfer.setData('text/uri-list',item.url);
-          event.dataTransfer.effectAllowed='copyMove';
-        }else{
-          // Don't export a folder's children or browser URLs during a drag.
-          event.dataTransfer.setData('text/plain','Bookmark folder');
-          event.dataTransfer.effectAllowed='move';
-        }
-      });
+      el.addEventListener('dragstart',event=>beginBookmarkDrag(item,el,event));
+      el.classList.toggle('bookmark-multi-selected',selectedBookmarks.has(item.id));
+      bindHoldSelect(el,item);
       el.title = item.kind === 'folder' ? textFor(item) : (item.name || item.url);
       el.setAttribute('aria-label', item.kind === 'folder' ? 'Open Folder: ' + textFor(item) : 'Open Bookmark: ' + textFor(item));
       el.addEventListener('click', event => {
@@ -562,37 +608,64 @@
     hoverTarget=null;
     document.documentElement.classList.remove('bookmark-drag-over');
   }
-  // Trusted in-browser reordering runs before the external-import listeners.
-  // Edge markers do not change item widths, avoiding jerky rearrangement.
+  function internalPlacement(event){
+    const bar=barPlacement(event);
+    if(bar)return {...bar,parentId:model.BOOKMARK_BAR_ID};
+    const target=event.target;
+    if(!target?.closest)return null;
+    const row=target.closest('.bookmark-tree-line,.bookmark-folder-row');
+    if(row){
+      const node=model.find(data,row.dataset.bookmarkId);
+      if(!node)return null;
+      if(node.id===model.BOOKMARK_BAR_ID)return {parentId:node.id,anchorId:null,element:row,inside:true};
+      const rect=row.getBoundingClientRect();
+      const fraction=(event.clientY-rect.top)/Math.max(rect.height,1);
+      if(node.kind==='folder'&&fraction>=.25&&fraction<=.75){
+        return {parentId:node.id,anchorId:null,element:row,inside:true};
+      }
+      const parent=model.location(data,node.id)?.parent?.id||model.BOOKMARK_BAR_ID;
+      return {parentId:parent,anchorId:node.id,after:fraction>.5,element:row};
+    }
+    if(target.closest('#bookmarkTree,#bookmarkManager'))return {
+      parentId:model.BOOKMARK_BAR_ID,anchorId:null,element:null};
+    if(target.closest('#bookmarkFolderContents,#bookmarkFolderMenu')&&folderId)return {
+      parentId:folderId,anchorId:null,element:null};
+    return null;
+  }
+  // Trusted in-browser move/reorder takes precedence over external imports.
   document.addEventListener('dragover',event=>{
     if(!draggedBarId)return;
-    const placement=barPlacement(event);
+    const placement=internalPlacement(event);
     if(!placement){clearBarIndicator();return;}
     event.preventDefault();event.stopImmediatePropagation();
     if(event.dataTransfer)event.dataTransfer.dropEffect='move';
     clearBarIndicator();
     if(placement.element){
       barDropIndicator=placement.element;
-      placement.element.classList.add(placement.after
-        ?'bookmark-reorder-after':'bookmark-reorder-before');
+      placement.element.classList.add(placement.inside?'bookmark-reorder-inside':
+        (placement.after?'bookmark-reorder-after':'bookmark-reorder-before'));
     }
   },true);
   document.addEventListener('drop',event=>{
     if(!draggedBarId)return;
-    const placement=barPlacement(event);
+    const placement=internalPlacement(event);
     if(!placement)return;
     event.preventDefault();event.stopImmediatePropagation();
-    const id=draggedBarId;
+    const id=draggedBarId,ids=[...draggedIds];
     ignoreBarClick={id,until:Date.now()+350};
-    // First discard the drag source/indicator, then render once on a change.
     finishBarDrag();
-    if(model.reorderBar(data,id,placement.anchorId,placement.after)){
-      persist(); // Same profile, Undo and encrypted sync ordering path.
-    }
+    const moved=model.moveMany(data,ids,placement.parentId,placement.anchorId,placement.after);
+    if(moved){
+      if(placement.inside)expandedFolders.add(placement.parentId);
+      selectedBookmarks.clear();
+      persist();
+    }else if(ids.length>1||placement.inside)toast('Cannot move selection into this location.');
+    refreshSelections();
   },true);
   document.addEventListener('dragend',finishBarDrag,true);
 
   document.addEventListener('dragover',event=>{
+    if(draggedBarId)return;
     // Secret Bookmarks drop targets belong exclusively to the encrypted
     // importer. Never copy their dropped URL into normal bookmark storage.
     if(event.target?.closest?.('[data-secret-target],#secretBookmarksBar,#secretTree'))return;
@@ -609,6 +682,7 @@
     document.documentElement.classList.add('bookmark-drag-over');
   },true);
   document.addEventListener('drop',event=>{
+    if(draggedBarId)return;
     if(event.target?.closest?.('[data-secret-target],#secretBookmarksBar,#secretTree'))return;
     const parent=dropTarget(event);
     if(!externalTransfer(event.dataTransfer))return;
@@ -718,6 +792,10 @@
     const row = document.createElement('div');
     row.className = 'bookmark-folder-row';
     row.dataset.bookmarkId=item.id;
+    row.draggable=true;
+    row.classList.toggle('bookmark-multi-selected',selectedBookmarks.has(item.id));
+    row.addEventListener('dragstart',event=>beginBookmarkDrag(item,row,event));
+    bindHoldSelect(row,item);
     const open = document.createElement('button');
     open.className = 'bookmark-folder-entry';
     open.type = 'button';
@@ -769,22 +847,27 @@
         const row = document.createElement('div');
         row.className = 'bookmark-tree-line';
         row.dataset.bookmarkId=item.id;
-        if(item.kind==='link'){
+        if(item.id!==model.BOOKMARK_BAR_ID){
           row.draggable=true;
-          row.addEventListener('dragstart',event=>{
-            event.dataTransfer?.setData('application/x-minternet-bookmark',
-              JSON.stringify({id:item.id,url:item.url,name:item.name||''}));
-            event.dataTransfer?.setData('text/uri-list',item.url);
-            if(event.dataTransfer)event.dataTransfer.effectAllowed='copyMove';
-          });
+          row.addEventListener('dragstart',event=>beginBookmarkDrag(item,row,event));
+          bindHoldSelect(row,item);
         }
+        row.classList.toggle('bookmark-multi-selected',selectedBookmarks.has(item.id));
         row.style.paddingLeft = Math.min(160, depth * 13 + 4) + 'px';
         const icon = iconNode(item);
         const label = document.createElement('button');
         label.className = 'label';
-        label.textContent = textFor(item);
-        label.title = item.kind === 'link' ? item.url : textFor(item);
-        label.addEventListener('click', () => item.kind === 'folder' ? openFolder(item.id) : openLink(item.url));
+        label.textContent = item.kind==='folder'
+          ?(expandedFolders.has(item.id)?'▾ ':'▸ ')+textFor(item):textFor(item);
+        label.title = item.kind==='link'?item.url:'Expand/collapse '+textFor(item);
+        label.setAttribute('aria-expanded',item.kind==='folder'?String(expandedFolders.has(item.id)):'false');
+        label.addEventListener('click',()=>{
+          if(item.kind==='folder'){
+            if(expandedFolders.has(item.id))expandedFolders.delete(item.id);
+            else expandedFolders.add(item.id);
+            renderManager();
+          }else openLink(item.url);
+        });
         row.append(icon, label);
         if (item.kind === 'folder') {
           const add = document.createElement('button');
@@ -805,7 +888,7 @@
           row.append(editButton);
         }
         tree.append(row);
-        if (item.kind === 'folder') walk(item.children, depth + 1);
+        if (item.kind === 'folder'&&expandedFolders.has(item.id))walk(item.children, depth + 1);
       }
     }
     walk(data.items, 0);
@@ -960,6 +1043,14 @@
   }
   $('bookmarkSettingsManage').addEventListener('click', () => { renderManager(); setMode('manager'); });
   $('bookmarkBarManage').addEventListener('click', () => { renderManager(); setMode('manager'); });
+  $('bookmarkSelectionCount').addEventListener('click',()=>{
+    selectedBookmarks.clear();refreshSelections();
+  });
+  $('bookmarkTree').addEventListener('click',event=>{
+    if(event.target===$('bookmarkTree')&&selectionMode()){
+      selectedBookmarks.clear();refreshSelections();
+    }
+  });
   $('bookmarkManageNewFolder').addEventListener('click', () => openEditor('folder'));
   $('bookmarkManageNewLink').addEventListener('click', () => openEditor('link'));
   $('bookmarkFolderBack').addEventListener('click', folderParent);
@@ -999,6 +1090,9 @@
     } catch(e) { toast(e.message || 'Could not use image.'); }
   });
   window.addEventListener('keydown', event => {
+    if(event.key==='Escape'&&selectionMode()){
+      event.preventDefault();selectedBookmarks.clear();refreshSelections();return;
+    }
     if (event.key === 'Escape' && mode) { event.preventDefault(); closeOverlay(); }
     if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'b') {
       event.preventDefault(); changeVisibility(!data.visible); return;

@@ -167,3 +167,25 @@ test('drag ordering moves original bar folders and links without touching conten
  assert.deepEqual(b.barItems(restored).map(x=>x.id),ids());
  assert.equal(b.location(restored,page.id).parent.id,nested.id);
 });
+
+test('atomic moves preserve nested folders, sibling order, and reject descendant moves',()=>{
+ const s=b.blank(),a=b.add(s,'folder',null,{name:'A'}),z=b.add(s,'folder',null,{name:'Z'});
+ const l=b.add(s,'link',a.id,{name:'first',url:'https://example.com/1'});
+ const n=b.add(s,'folder',a.id,{name:'nested'});
+ const nested=b.add(s,'link',n.id,{name:'inner',url:'https://example.com/inside'});
+ const l2=b.add(s,'link',a.id,{name:'second',url:'https://example.com/2'});
+ assert.equal(b.moveMany(s,[l.id,l2.id],z.id),true);
+ assert.deepEqual(b.find(s,z.id).children.map(x=>x.id),[l.id,l2.id]);
+ assert.equal(b.moveMany(s,[n.id],z.id,l.id,false),true);
+ assert.deepEqual(b.find(s,z.id).children.map(x=>x.id),[n.id,l.id,l2.id]);
+ assert.equal(b.location(s,nested.id).parent.id,n.id);
+ const before=JSON.stringify(s);
+ assert.equal(b.moveMany(s,[z.id],n.id),false);
+ assert.equal(b.moveMany(s,[z.id,n.id],a.id),false);
+ assert.equal(b.moveMany(s,[b.BOOKMARK_BAR_ID],a.id),false);
+ assert.equal(b.moveMany(s,[l.id],z.id,'invalid'),false);
+ assert.equal(JSON.stringify(s),before);
+ assert.equal(b.moveMany(s,[l2.id],z.id,n.id,true),true);
+ assert.deepEqual(b.find(s,z.id).children.map(x=>x.id),[n.id,l2.id,l.id]);
+ assert.deepEqual(b.find(b.hydrate(JSON.stringify(s)),z.id).children.map(x=>x.id),[n.id,l2.id,l.id]);
+});

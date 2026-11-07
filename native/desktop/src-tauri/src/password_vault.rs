@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf};
+use std::{fs, path::PathBuf, collections::BTreeMap};
 use serde::{Serialize, Deserialize};
 use tauri::Manager;
 use argon2::Argon2;
@@ -29,11 +29,45 @@ pub struct PaymentCard {
 impl Drop for PaymentCard {
     fn drop(&mut self){self.number.zeroize();self.name.zeroize();self.postal.zeroize();}
 }
+/// Identifying fields are stored only inside the existing authenticated,
+/// password-derived encrypted vault; never in regular bookmarks or localStorage.
+#[derive(Clone,Serialize,Deserialize)]
+pub struct Identity {
+    pub id:String,
+    pub label:String,
+    pub fields:BTreeMap<String,String>,
+}
+impl Drop for Identity {
+    fn drop(&mut self){
+        self.label.zeroize();
+        for value in self.fields.values_mut(){value.zeroize();}
+    }
+}
+fn valid_identity_field(key:&str)->bool{
+    matches!(key,"full-name"|"given-name"|"family-name"|"middle-name"|"nickname"|
+        "email"|"phone"|"company"|"job-title"|"street-address"|"address-line1"|
+        "address-line2"|"city"|"region"|"postal-code"|"country"|"date-of-birth"|
+        "national-id"|"passport-number"|"passport-country"|"passport-expiry"|
+        "drivers-license"|"drivers-license-state"|"vehicle-make"|"vehicle-model"|
+        "vehicle-year"|"vehicle-color"|"license-plate"|"vin"|"tax-id"|"website")
+        || (key.starts_with("custom-")&&key.len()<=46&&
+            key[7..].bytes().all(|c|c.is_ascii_lowercase()||c.is_ascii_digit()||c==b'-'))
+}
+fn check_identity(label:&str,fields:&BTreeMap<String,String>)->Result<(),String>{
+    if label.trim().is_empty()||label.len()>80||fields.len()>40||
+       fields.is_empty(){return Err("Identity needs a label and one or more fields".into());}
+    for (name,value) in fields {
+        if !valid_identity_field(name)||value.len()>400||value.chars().any(|c|c=='\0'){
+            return Err("Invalid identity field or value".into());
+        }
+    }
+    Ok(())
+}
 #[derive(Serialize,Deserialize)]
 #[serde(untagged)]
 enum VaultPayload {
     Legacy(Vec<Entry>),
-    Current{logins:Vec<Entry>,cards:Vec<PaymentCard>}
+    Current{logins:Vec<Entry>,cards:Vec<PaymentCard>,#[serde(default)] identities:Vec<Identity>}
 }
 fn valid_pan(input:&str)->Option<String>{
     if input.len()>40{return None;}
@@ -63,6 +97,7 @@ pub struct Vault {
     salt: Option<[u8; 16]>,
     entries: Vec<Entry>,
     cards: Vec<PaymentCard>,
+    identities:Vec<Identity>,
 }
 impl Drop for Vault {
     fn drop(&mut self) { self.lock(); }
@@ -74,6 +109,7 @@ impl Vault {
         for entry in &mut self.entries {entry.password.zeroize();entry.username.zeroize();}
         self.entries.clear();
         self.cards.clear();
+        self.identities.clear();
         self.salt=None;
     }
     pub fn list(&self) -> Result<serde_json::Value,String> {
@@ -114,19 +150,23 @@ impl Vault {
         };
         let parsed=serde_json::from_slice::<VaultPayload>(&plaintext);
         plaintext.zeroize();
-        let (entries,cards)=match parsed.map_err(|_|"Invalid vault entries".to_string())?{
-            VaultPayload::Legacy(entries)=>(entries,Vec::new()),
-            VaultPayload::Current{logins,cards}=>(logins,cards)
+        let (entries,cards,identities)=match parsed.map_err(|_|"Invalid vault entries".to_string())?{
+            VaultPayload::Legacy(entries)=>(entries,Vec::new(),Vec::new()),
+            VaultPayload::Current{logins,cards,identities}=>(logins,cards,identities)
         };
-        if entries.len()>MAX_ENTRIES||cards.len()>50{return Err("Vault capacity exceeded".into());}
-        self.key=Some(key);self.salt=Some(disk.salt);self.entries=entries;self.cards=cards;
+        if entries.len()>MAX_ENTRIES||cards.len()>50||identities.len()>60{
+            return Err("Vault capacity exceeded".into());
+        }
+        for identity in &identities {check_identity(&identity.label,&identity.fields)?;}
+        self.key=Some(key);self.salt=Some(disk.salt);
+        self.entries=entries;self.cards=cards;self.identities=identities;
         Ok(())
     }
     pub fn save(&self,path:&PathBuf)->Result<(),String>{
         let key=self.key.as_ref().ok_or("Vault locked")?;
         let salt=self.salt.ok_or("Missing vault salt")?;
         let mut plaintext=serde_json::to_vec(&VaultPayload::Current{
-            logins:self.entries.clone(),cards:self.cards.clone()
+            logins:self.entries.clone(),cards:self.cards.clone(),identities:self.identities.clone()
         }).map_err(|e|e.to_string())?;
         let mut nonce=[0u8;12];OsRng.fill_bytes(&mut nonce);
         let cipher=ChaCha20Poly1305::new_from_slice(key).map_err(|_|"Crypto initialization failed")?;
@@ -161,9 +201,9 @@ impl Vault {
             .map_err(|_|"Cloud vault authentication failed".to_string())?;
         let parsed=serde_json::from_slice::<VaultPayload>(&plain);
         plain.zeroize();
-        let (logins,cards)=match parsed.map_err(|_|"Cloud vault data invalid".to_string())?{
-            VaultPayload::Legacy(logins)=>(logins,Vec::new()),
-            VaultPayload::Current{logins,cards}=>(logins,cards)
+        let (logins,cards,identities)=match parsed.map_err(|_|"Cloud vault data invalid".to_string())?{
+            VaultPayload::Legacy(logins)=>(logins,Vec::new(),Vec::new()),
+            VaultPayload::Current{logins,cards,identities}=>(logins,cards,identities)
         };
         let mut new_logins=0;
         let mut new_cards=0;
@@ -186,16 +226,25 @@ impl Vault {
                 new_cards+=1;
             }
         }
-        if new_logins>0||new_cards>0{self.save(path)?;}
+        let mut new_identities=0;
+        for identity in identities {
+            if check_identity(&identity.label,&identity.fields).is_err(){continue;}
+            if let Some(existing)=self.identities.iter().find(|e|e.id==identity.id){
+                if existing.fields!=identity.fields{conflicts+=1;}
+            }else if self.identities.len()<60{
+                self.identities.push(identity);new_identities+=1;
+            }
+        }
+        if new_logins>0||new_cards>0||new_identities>0{self.save(path)?;}
         Ok(serde_json::json!({"ok":true,"addedLogins":new_logins,
-            "addedCards":new_cards,"conflicts":conflicts}))
+            "addedCards":new_cards,"addedIdentities":new_identities,"conflicts":conflicts}))
     }
 
     // Trusted-local-chrome export: records are encrypted individually with the
     // user's cross-device sync key before leaving the app. Never for websites.
     pub fn sync_snapshot(&self)->Result<serde_json::Value,String>{
         if !self.unlocked(){return Err("Unlock the local vault to sync secrets".into());}
-        Ok(serde_json::json!({"logins":self.entries,"cards":self.cards}))
+        Ok(serde_json::json!({"logins":self.entries,"cards":self.cards,"identities":self.identities}))
     }
     pub fn sync_apply(&mut self,kind:&str,value:&serde_json::Value,deleted:bool)
         ->Result<bool,String>{
@@ -274,10 +323,65 @@ impl Vault {
                     self.cards.push(incoming);Ok(true)
                 }
             }
+            "identity"=>{
+                let id=value.get("id").and_then(serde_json::Value::as_str)
+                    .ok_or("Missing synced identity ID")?;
+                if id.len()!=24||!id.bytes().all(|c|c.is_ascii_hexdigit()){
+                    return Err("Invalid synced identity ID".into());
+                }
+                if deleted {
+                    if let Some(i)=self.identities.iter().position(|e|e.id==id){
+                        self.identities.remove(i);return Ok(true);
+                    }
+                    return Ok(false);
+                }
+                let identity:Identity=serde_json::from_value(value.clone())
+                    .map_err(|_|"Invalid synced identity")?;
+                check_identity(&identity.label,&identity.fields)?;
+                if let Some(existing)=self.identities.iter_mut().find(|e|e.id==id){
+                    if existing.label==identity.label&&existing.fields==identity.fields{return Ok(false);}
+                    *existing=identity;return Ok(true);
+                }
+                if self.identities.len()>=60{return Err("Identity capacity exceeded".into());}
+                self.identities.push(identity);Ok(true)
+            }
             _=>Err("Unsupported synced vault category".into())
         }
     }
 
+    pub fn list_identities(&self)->Result<serde_json::Value,String>{
+        if !self.unlocked(){return Err("Unlock the encrypted vault first".into());}
+        Ok(serde_json::json!(self.identities.iter().map(|item|serde_json::json!({
+            "id":item.id,"label":item.label,
+            "fields":item.fields.keys().collect::<Vec<_>>()
+        })).collect::<Vec<_>>()))
+    }
+    pub fn identity(&self,id:&str)->Option<Identity>{
+        if !self.unlocked(){return None;}
+        self.identities.iter().find(|e|e.id==id).cloned()
+    }
+    pub fn put_identity(&mut self,id:Option<&str>,label:String,fields:BTreeMap<String,String>)
+        ->Result<String,String>{
+        if !self.unlocked(){return Err("Unlock the encrypted vault first".into());}
+        check_identity(&label,&fields)?;
+        if let Some(id)=id{
+            let entry=self.identities.iter_mut().find(|e|e.id==id)
+                .ok_or("Identity not found")?;
+            *entry=Identity{id:id.to_owned(),label,fields};
+            return Ok(id.to_owned());
+        }
+        if self.identities.len()>=60{return Err("Maximum 60 identities".into());}
+        let mut bytes=[0u8;12];OsRng.fill_bytes(&mut bytes);
+        let id=bytes.iter().map(|b|format!("{b:02x}")).collect::<String>();
+        self.identities.push(Identity{id:id.clone(),label,fields});
+        Ok(id)
+    }
+    pub fn remove_identity(&mut self,id:&str)->Result<(),String>{
+        if !self.unlocked(){return Err("Unlock the encrypted vault first".into());}
+        let index=self.identities.iter().position(|e|e.id==id)
+            .ok_or("Identity not found")?;
+        self.identities.remove(index);Ok(())
+    }
     pub fn put(&mut self,origin:String,username:String,password:String,autofill:bool)->Result<(),String>{
         if !self.unlocked(){return Err("Vault locked".into());}
         if username.len()>320||password.is_empty()||password.len()>4096{return Err("Invalid credential length".into());}
@@ -412,6 +516,45 @@ mod tests {
         vault.unlock(&file,"correct horse battery staple",false).unwrap();
         assert!(vault.matching("https://example.com",false,None).is_none());
         let _=fs::remove_file(&file);
+    }
+    #[test]
+    fn identities_are_encrypted_masked_and_persist_with_existing_logins(){
+        let path=std::env::temp_dir().join(format!("minternet-identities-{}.enc",
+            rand::random::<u64>()));
+        let mut vault=Vault::default();
+        vault.unlock(&path,"correct horse battery staple",true).unwrap();
+        vault.put("https://example.com".into(),"alice".into(),"secret".into(),true).unwrap();
+        let mut values=BTreeMap::new();
+        values.insert("full-name".into(),"Example User".into());
+        values.insert("passport-number".into(),"A12345678".into());
+        values.insert("vin".into(),"1HGCM82633A004352".into());
+        let id=vault.put_identity(None,"Travel".into(),values.clone()).unwrap();
+        assert!(!vault.list_identities().unwrap().to_string().contains("A12345678"));
+        assert_eq!(vault.identity(&id).unwrap().fields,values);
+        vault.save(&path).unwrap();
+        let encoded=fs::read(&path).unwrap();
+        assert!(!String::from_utf8_lossy(&encoded).contains("A12345678"));
+        assert!(!String::from_utf8_lossy(&encoded).contains("Example User"));
+        vault.lock();
+        assert!(vault.identity(&id).is_none());
+        vault.unlock(&path,"correct horse battery staple",false).unwrap();
+        assert_eq!(vault.identity(&id).unwrap().fields,values);
+        assert_eq!(vault.matching("https://example.com",true,None).unwrap().username,"alice");
+        vault.remove_identity(&id).unwrap();
+        vault.save(&path).unwrap();
+        assert!(vault.identity(&id).is_none());
+        let _=fs::remove_file(path);
+    }
+    #[test]
+    fn identity_field_validation_rejects_secrets_and_invalid_tags(){
+        let mut fields=BTreeMap::new();
+        fields.insert("passport-number".into(),"P-123".into());
+        assert!(check_identity("Travel",&fields).is_ok());
+        fields.insert("password".into(),"secret".into());
+        assert!(check_identity("Travel",&fields).is_err());
+        fields.remove("password");
+        fields.insert("credit-card-cvv".into(),"123".into());
+        assert!(check_identity("Travel",&fields).is_err());
     }
     #[test]
     fn only_exact_https_origins() {

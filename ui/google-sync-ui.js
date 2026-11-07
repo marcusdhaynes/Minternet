@@ -68,6 +68,7 @@
         bookmarks:bookmarkState,
         logins:vault?.locked?[]:vault?.logins||[],
         cards:vault?.locked?[]:vault?.cards||[],
+        identities:vault?.locked?[]:vault?.identities||[],
         prefs
       }),
       vaultLocked:!!vault?.locked
@@ -114,7 +115,7 @@
   }
   async function applyVault(){
     const pending=[...remote.values()].filter(e=>
-      (e.kind==='login'||e.kind==='payment') && e.value);
+      (e.kind==='login'||e.kind==='payment'||e.kind==='identity') && e.value);
     if(!pending.length)return;
     const vault=await command('vault-status');
     if(!vault?.unlocked){
@@ -174,7 +175,7 @@
       const current=snapshot.map;
       const changes=[];
       for(const [k,entry] of current){
-        if(entry.kind==='login'||entry.kind==='payment'){
+        if(entry.kind==='login'||entry.kind==='payment'||entry.kind==='identity'){
           if(snapshot.vaultLocked)continue;
         }
         const prior=baseline.get(k);
@@ -182,7 +183,7 @@
       }
       for(const [k,entry] of baseline){
         if(!current.has(k)){
-          if(snapshot.vaultLocked && (entry.kind==='login'||entry.kind==='payment'))continue;
+          if(snapshot.vaultLocked && (entry.kind==='login'||entry.kind==='payment'||entry.kind==='identity'))continue;
           // Preserve the encrypted identity in the tombstone. This permits a
           // receiving device to delete a login/card without exposing its key.
           changes.push({entry,deleted:true});
@@ -357,7 +358,7 @@
         // Publish newly unlocked local records only if the cloud has never
         // seen their identity. Cloud tombstones prevent resurrection.
         for(const [id,item] of available){
-          if((item.kind==='login'||item.kind==='payment')&&!remote.has(id))
+          if((item.kind==='login'||item.kind==='payment'||item.kind==='identity')&&!remote.has(id))
             await writeRecord(item,false);
         }
         baseline=available;

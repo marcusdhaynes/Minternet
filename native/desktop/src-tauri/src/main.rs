@@ -1802,6 +1802,257 @@ fn fill_saved_credential(app:&tauri::AppHandle,id:u32,manual:bool,username:Optio
 
 // Prepare one lightweight WebView2 controller only after the user focuses a
 // blank tab's address input. This does not connect to sites or leak typed URLs.
+// Site pages never receive the user's identity list. Only one explicitly
+// chosen record reaches the already selected, exact HTTPS page.
+const IDENTITY_FILL_JS:&str=r#"(function(){
+  'use strict';
+  const profile=__MINTERNET_IDENTITY_PAYLOAD__;
+  if(window!==window.top || location.origin!==profile.origin)return;
+  const all=[...document.querySelectorAll('input,textarea,select')].filter(el=>{
+    if(el.disabled||el.readOnly||['hidden','password','file'].includes(el.type))return false;
+    const r=el.getBoundingClientRect();
+    return r.width>0&&r.height>0;
+  });
+  const auto=el=>(el.autocomplete||'').toLowerCase().split(/\s+/);
+  const tag=el=>[
+    el.name||'',el.id||'',el.placeholder||'',
+    el.getAttribute('aria-label')||'',el.labels?.[0]?.textContent||'',
+    el.closest('label')?.textContent||''
+  ].join(' ').toLowerCase();
+  const rules={
+    'full-name':/^(?:name)$/,'given-name':/^(?:given-name)$/,'family-name':/^(?:family-name)$/,
+    'middle-name':/^(?:additional-name)$/,'nickname':/^(?:nickname)$/,
+    'email':/^(?:email)$/,'phone':/^(?:tel|tel-national)$/,
+    'company':/^(?:organization)$/,'job-title':/^(?:organization-title)$/,
+    'street-address':/^(?:street-address)$/,'address-line1':/^(?:address-line1)$/,
+    'address-line2':/^(?:address-line2)$/,'city':/^(?:address-level2)$/,
+    'region':/^(?:address-level1)$/,'postal-code':/^(?:postal-code)$/,
+    'country':/^(?:country-name|country)$/,'date-of-birth':/^(?:bday)$/,
+    'website':/^(?:url)$/
+  };
+  const descriptions={
+    'full-name':/\bfull.?name\b|\byour.?name\b/i,
+    'given-name':/\bfirst.?name\b|\bgiven.?name\b/i,
+    'family-name':/\blast.?name\b|\bsurname\b|\bfamily.?name\b/i,
+    'middle-name':/\bmiddle.?name\b/i,
+    'nickname':/\bnick.?name\b/i,
+    'email':/\bemail\b|\be-mail\b/i,
+    'phone':/\bphone\b|\bmobile\b|\btelephone\b/i,
+    'company':/\bcompany\b|\borganization\b/i,
+    'job-title':/\bjob.?title\b|\boccupation\b/i,
+    'street-address':/\bstreet.?address\b|\bfull.?address\b/i,
+    'address-line1':/\baddress.?1\b|\baddress.?line.?1\b/i,
+    'address-line2':/\baddress.?2\b|\baddress.?line.?2\b|\bapt\b|\bsuite\b/i,
+    'city':/\bcity\b|\btown\b/i,'region':/\bstate\b|\bprovince\b|\bregion\b/i,
+    'postal-code':/\bzip\b|\bpostal\b/i,'country':/\bcountry\b/i,
+    'date-of-birth':/\bdate.?of.?birth\b|\bdob\b/i,
+    'national-id':/\bnational.?id\b|\bidentity.?number\b/i,
+    'passport-number':/\bpassport\b.{0,20}\b(number|no|id)\b|\bpassport.?no\b/i,
+    'passport-country':/\bpassport.?country\b|\bissuing.?country\b/i,
+    'passport-expiry':/\bpassport\b.{0,20}\b(expir|valid)\b/i,
+    'drivers-license':/\bdriver.s?.?licen[cs]e\b.{0,20}\b(number|no|id)\b/i,
+    'drivers-license-state':/\bdriver.s?.?licen[cs]e\b.{0,20}\b(state|region)\b/i,
+    'vehicle-make':/\bvehicle.?make\b|\bcar.?make\b/i,
+    'vehicle-model':/\bvehicle.?model\b|\bcar.?model\b/i,
+    'vehicle-year':/\bmodel.?year\b|\bvehicle.?year\b/i,
+    'vehicle-color':/\bvehicle.?colou?r\b/i,
+    'license-plate':/\blicen[cs]e.?plate\b|\bplate.?number\b/i,
+    'vin':/\bvin\b|\bvehicle.?identification.?number\b/i,
+    'tax-id':/\btax.?id\b|\btaxpayer.?number\b/i,
+    'website':/\bweb.?site\b|\burl\b/i
+  };
+  const put=(el,v)=>{
+    if(!el||el.value||typeof v!=='string'||!v)return false;
+    if(el.tagName==='SELECT'){
+      const option=[...el.options].find(o=>o.value.toLowerCase()===v.toLowerCase()||
+        o.text.toLowerCase()===v.toLowerCase());
+      if(!option)return false;
+      el.value=option.value;
+    }else{
+      const setter=Object.getOwnPropertyDescriptor(
+        el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value')?.set;
+      if(setter)setter.call(el,v);else el.value=v;
+    }
+    el.dispatchEvent(new Event('input',{bubbles:true}));
+    el.dispatchEvent(new Event('change',{bubbles:true}));
+    return true;
+  };
+  for(const [key,value] of Object.entries(profile.fields)){
+    if(!descriptions[key]&&!rules[key])continue;
+    // Explicit HTML autocomplete semantics outrank vague labels.
+    const automatic=rules[key]&&all.find(el=>auto(el).some(token=>rules[key].test(token)));
+    const named=all.find(el=>descriptions[key]?.test(tag(el)));
+    const element=automatic||named;
+    if(element&&put(element,value))all.splice(all.indexOf(element),1);
+  }
+})()"#;
+
+// Low-cost, read-only inspection of the currently focused website form field.
+// The browser chrome receives only semantic type, position and booleans; never
+// passwords, PANs, IDs or typed identity values.
+const FORM_FIELD_CONTEXT_JS:&str=r#"(function(){
+  'use strict';
+  if(window!==window.top||!document.hasFocus())return null;
+  const field=document.activeElement;
+  if(!field||!['INPUT','TEXTAREA','SELECT'].includes(field.tagName)||
+      field.disabled||field.readOnly||['hidden','file'].includes(field.type))return null;
+  const r=field.getBoundingClientRect();
+  if(r.width<16||r.height<10)return null;
+  const auto=(field.autocomplete||'').toLowerCase().split(/\s+/);
+  const desc=[
+    field.name||'',field.id||'',field.placeholder||'',
+    field.getAttribute('aria-label')||'',field.labels?.[0]?.textContent||'',
+    field.closest('label')?.textContent||''
+  ].join(' ').toLowerCase();
+  const hasPassword=[...document.querySelectorAll('input[type="password"]')]
+    .filter(e=>!e.disabled&&e.getBoundingClientRect().width>0);
+  const loginUser=document.querySelector('input[autocomplete="username"],input[type="email"],input[name*="user" i],input[id*="user" i]');
+  const login=hasPassword.length===1 &&
+    (field.type==='password'||auto.includes('username')||
+      (loginUser===field));
+  let kind='',key='';
+  if(login){kind='login';key='login';}
+  else if(auto.some(x=>x.startsWith('cc-'))||/credit.?card|card.?number|cc.?number|expir/i.test(desc)){
+    kind='payment';key='payment';
+  }else{
+    const pairs=[
+      ['passport-number',/passport.{0,25}(number|no|id)/],
+      ['passport-country',/passport.{0,25}country|issuing.?country/],
+      ['passport-expiry',/passport.{0,25}(expir|valid)/],
+      ['drivers-license',/driver.s?.?licen[cs]e.{0,25}(number|no|id)/],
+      ['drivers-license-state',/driver.s?.?licen[cs]e.{0,25}(state|region)/],
+      ['national-id',/national.?id|identity.?number/],
+      ['tax-id',/tax.?id|taxpayer.?number/],
+      ['vehicle-make',/vehicle.?make|car.?make/],
+      ['vehicle-model',/vehicle.?model|car.?model/],
+      ['vehicle-year',/vehicle.?year|model.?year/],
+      ['vehicle-color',/vehicle.?colou?r/],
+      ['license-plate',/licen[cs]e.?plate|plate.?number/],
+      ['vin',/\bvin\b|vehicle.?identification.?number/],
+      ['given-name',/first.?name|given.?name/],
+      ['family-name',/last.?name|surname|family.?name/],
+      ['middle-name',/middle.?name/],
+      ['full-name',/full.?name|your.?name/],
+      ['street-address',/street.?address|full.?address/],
+      ['address-line1',/address.?1|address.?line.?1/],
+      ['address-line2',/address.?2|address.?line.?2|apartment|suite/],
+      ['city',/\bcity\b|\btown\b/],
+      ['region',/state|province|region/],
+      ['postal-code',/zip|postal/],
+      ['country',/\bcountry\b/],
+      ['date-of-birth',/date.?of.?birth|\bdob\b/],
+      ['email',/email|e-mail/],
+      ['phone',/phone|mobile|telephone/],
+      ['company',/company|organization/],
+      ['job-title',/job.?title|occupation/],
+      ['website',/web.?site|\burl\b/]
+    ];
+    const tokens={
+      name:'full-name','given-name':'given-name','family-name':'family-name',
+      'additional-name':'middle-name','nickname':'nickname',email:'email',
+      tel:'phone','tel-national':'phone',organization:'company',
+      'organization-title':'job-title','street-address':'street-address',
+      'address-line1':'address-line1','address-line2':'address-line2',
+      'address-level2':'city','address-level1':'region','postal-code':'postal-code',
+      country:'country','country-name':'country',bday:'date-of-birth',url:'website'
+    };
+    key=auto.map(x=>tokens[x]).find(Boolean)||pairs.find(p=>p[1].test(desc))?.[0]||'';
+    if(key)kind='identity';
+  }
+  if(!kind)return null;
+  const entered=Boolean(field.value);
+  const loginReady=kind==='login'&&hasPassword.length===1&&
+    Boolean(hasPassword[0].value)&&Boolean(loginUser?.value);
+  const fieldIndex=[...document.querySelectorAll('input,textarea,select')].indexOf(field);
+  return {kind,key,fieldIndex,hasValue:entered,saveReady:loginReady,
+    x:Math.round(r.left),y:Math.round(r.bottom),width:Math.round(r.width),
+    height:Math.round(r.height)};
+})()"#;
+
+const CAPTURE_LOGIN_JS:&str=r#"(function(){
+  'use strict';
+  if(window!==window.top)return null;
+  const pw=[...document.querySelectorAll('input[type="password"]')]
+    .filter(e=>!e.disabled&&e.getBoundingClientRect().width>0);
+  if(pw.length!==1||!pw[0].value||pw[0].value.length>4096)return null;
+  const form=pw[0].form||document;
+  const inputs=[...form.querySelectorAll('input')].filter(e=>!e.disabled);
+  const username=inputs.find(e=>e.autocomplete==='username')||
+    inputs.find(e=>e.type==='email')||
+    inputs.find(e=>/user|email|login/i.test(e.name+' '+e.id)&&e.type!=='password');
+  if(!username?.value||username.value.length>320)return null;
+  return {username:username.value,password:pw[0].value};
+})()"#;
+
+const CAPTURE_IDENTITY_JS:&str=r#"(function(){
+  'use strict';
+  if(window!==window.top)return null;
+  const index=__IDENTITY_FIELD_INDEX__;
+  const all=[...document.querySelectorAll('input,textarea,select')];
+  const el=all[index]||document.activeElement;
+  if(!el||!['INPUT','TEXTAREA','SELECT'].includes(el.tagName)||
+     el.type==='password'||el.type==='hidden'||el.disabled||el.readOnly||
+     !el.value||el.value.length>400)return null;
+  return {value:el.value};
+})()"#;
+
+fn browser_page_eval(app:&tauri::AppHandle,script:&str)->Result<(String,Value),String>{
+    let (label,tab_url,private)={
+        let browser=app.state::<Mutex<Browser>>();
+        let b=browser.lock().map_err(|e|e.to_string())?;
+        let tab=b.active().ok_or("No active tab")?;
+        (tab.view.clone().ok_or("No active webpage")?,tab.url.clone(),tab.private)
+    };
+    if private{return Err("Form assistance is disabled in private and Secret Tabs".into());}
+    let origin=password_vault::origin(&tab_url)?;
+    let view=app.get_webview(&label).ok_or("No active webpage")?;
+    let actual=view.url().map_err(|e|e.to_string())?;
+    if password_vault::origin(actual.as_str())?!=origin{
+        return Err("Website navigation changed".into());
+    }
+    let (sender,receiver)=std::sync::mpsc::sync_channel(1);
+    view.eval_with_callback(script,move |answer|{let _=sender.send(answer.to_string());})
+        .map_err(|e|e.to_string())?;
+    let mut reply=receiver.recv_timeout(Duration::from_millis(850))
+        .map_err(|_|"Form inspection was unavailable".to_string())?;
+    let parsed=serde_json::from_str::<Value>(&reply)
+        .map_err(|_|"Invalid form inspection response".to_string())?;
+    reply.zeroize();
+    // The WebView2 callback may return JSON text or an already serialized
+    // object. Neither representation can initiate native commands.
+    let parsed=if let Some(inner)=parsed.as_str(){
+        serde_json::from_str::<Value>(inner).unwrap_or(Value::Null)
+    }else{parsed};
+    Ok((origin,parsed))
+}
+
+fn fill_identity(app:&tauri::AppHandle,id:&str)->Result<bool,String>{
+    let (label,url,private)={
+        let browser=app.state::<Mutex<Browser>>();
+        let browser=browser.lock().map_err(|e|e.to_string())?;
+        let tab=browser.active().ok_or("No active tab")?;
+        (tab.view.clone().ok_or("No active webpage")?,tab.url.clone(),tab.private)
+    };
+    if private{return Err("Identities cannot autofill private or Secret Tabs".into());}
+    let origin=password_vault::origin(&url)?;
+    let view=app.get_webview(&label).ok_or("No active webpage")?;
+    let actual=view.url().map_err(|e|e.to_string())?;
+    if password_vault::origin(actual.as_str())?!=origin{
+        return Err("Website changed; choose the identity again".into());
+    }
+    let identity={
+        let state=app.state::<Mutex<password_vault::Vault>>();
+        let vault=state.lock().map_err(|e|e.to_string())?;
+        vault.identity(id).ok_or("Unlock the vault and choose an identity")?
+    };
+    let payload=json!({"origin":origin,"fields":identity.fields.clone()}).to_string();
+    // A script cannot be evaluated for a different origin, even if the page
+    // navigates between the click and the browser's native evaluate call.
+    view.eval(&IDENTITY_FILL_JS.replace("__MINTERNET_IDENTITY_PAYLOAD__",&payload))
+        .map_err(|e|e.to_string())?;
+    Ok(true)
+}
+
 fn fill_payment_card(app:&tauri::AppHandle,id:&str)->Result<bool,String>{
     let (label,url)={
         let state=app.state::<Mutex<Browser>>();
@@ -2148,6 +2399,18 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
     // OAuth, Drive and Gmail are only available to the trusted local chrome.
     // All remote network calls run on worker threads so they never pause the
     // native browser event loop. No Google token is returned to web content.
+    if name=="browser-form-context" {
+        let handle=app.clone();
+        return tauri::async_runtime::spawn_blocking(move || {
+            let (origin,mut field)=browser_page_eval(&handle,FORM_FIELD_CONTEXT_JS)?;
+            if let Some(data)=field.as_object_mut(){
+                data.insert("origin".into(),Value::String(origin));
+                data.insert("top".into(),json!(chrome_top(&handle)));
+                return Ok(Value::Object(data.clone()));
+            }
+            Ok(Value::Null)
+        }).await.map_err(|e|e.to_string())?;
+    }
     if name=="live-sync-auth" {
         let url=value.get("url").and_then(Value::as_str)
             .ok_or("Supabase project URL is required")?.to_owned();
@@ -2516,7 +2779,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             .ok_or("Missing sync category")?;
         let entry=value.get("entry").ok_or("Missing decrypted sync entry")?;
         let deleted=value.get("deleted").and_then(Value::as_bool)==Some(true);
-        if !matches!(kind,"login"|"payment") {return Err("Not a vault record".into());}
+        if !matches!(kind,"login"|"payment"|"identity") {return Err("Not a vault record".into());}
         let state=app.state::<Mutex<password_vault::Vault>>();
         let mut vault=state.lock().map_err(|e|e.to_string())?;
         if !vault.unlocked(){return Ok(json!({"ok":false,"locked":true}));}
@@ -2892,9 +3155,98 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             app.state::<Mutex<password_vault::Vault>>().lock().map_err(|e|e.to_string())?.lock();
             return Ok(json!({"ok":true}));
         }
+        "vault-capture-login" => {
+            // Only the trusted chrome's explicit Save action executes this.
+            // Password values never cross the chrome IPC or appear in a toast.
+            let handle=app.clone();
+            return tauri::async_runtime::spawn_blocking(move||{
+                let (origin,mut value)=browser_page_eval(&handle,CAPTURE_LOGIN_JS)?;
+                let username=value.get("username").and_then(Value::as_str)
+                    .ok_or("No completed login form was found")?.to_owned();
+                let mut password=value.get("password").and_then(Value::as_str)
+                    .ok_or("No password was entered")?.to_owned();
+                value=Value::Null;
+                let state=handle.state::<Mutex<password_vault::Vault>>();
+                let mut vault=state.lock().map_err(|e|e.to_string())?;
+                let result=vault.put(origin,username,password.clone(),true)
+                    .and_then(|_|vault.save(&password_vault::file(&handle)?));
+                password.zeroize();
+                result?;
+                let _=handle.emit_to("chrome","minternet:vault-changed",());
+                Ok(json!({"ok":true}))
+            }).await.map_err(|e|e.to_string())?;
+        }
+        "vault-identity-capture" => {
+            let identity_id=value.get("id").and_then(Value::as_str).map(str::to_owned);
+            let key=value.get("key").and_then(Value::as_str)
+                .ok_or("Field type required")?.to_owned();
+            let index=value.get("index").and_then(Value::as_u64)
+                .ok_or("Focused field identifier required")?;
+            if index>500{return Err("Field index too large".into());}
+            let handle=app.clone();
+            return tauri::async_runtime::spawn_blocking(move||{
+                let (_origin,field)=browser_page_eval(&handle,&CAPTURE_IDENTITY_JS.replace("__IDENTITY_FIELD_INDEX__",&index.to_string()))?;
+                let value=field.get("value").and_then(Value::as_str)
+                    .ok_or("No field value was found")?.to_owned();
+                let state=handle.state::<Mutex<password_vault::Vault>>();
+                let mut vault=state.lock().map_err(|e|e.to_string())?;
+                let existing=identity_id.as_deref().and_then(|id|vault.identity(id));
+                let mut fields=existing.as_ref()
+                    .map(|item|item.fields.clone()).unwrap_or_default();
+                fields.insert(key,value);
+                let name=existing.as_ref().map(|item|item.label.clone())
+                    .unwrap_or_else(||"New Identity".into());
+                let id=vault.put_identity(identity_id.as_deref(),name,fields)?;
+                vault.save(&password_vault::file(&handle)?)?;
+                let _=handle.emit_to("chrome","minternet:vault-changed",());
+                Ok(json!({"ok":true,"id":id}))
+            }).await.map_err(|e|e.to_string())?;
+        }
         "vault-card-list" => {
             let state=app.state::<Mutex<password_vault::Vault>>();
             return state.lock().map_err(|e|e.to_string())?.list_cards();
+        }
+        "vault-identity-list" => {
+            let state=app.state::<Mutex<password_vault::Vault>>();
+            return state.lock().map_err(|e|e.to_string())?.list_identities();
+        }
+        "vault-identity-get" => {
+            let id=value.as_str().ok_or("Choose an identity")?;
+            let state=app.state::<Mutex<password_vault::Vault>>();
+            let vault=state.lock().map_err(|e|e.to_string())?;
+            let identity=vault.identity(id).ok_or("Unlock the vault and choose an identity")?;
+            return Ok(serde_json::to_value(identity).map_err(|e|e.to_string())?);
+        }
+        "vault-identity-put" => {
+            let id=value.get("id").and_then(Value::as_str);
+            let label=value.get("label").and_then(Value::as_str)
+                .ok_or("Identity label required")?.to_owned();
+            let fields=value.get("fields").and_then(Value::as_object)
+                .ok_or("Identity fields required")?;
+            let mut values=std::collections::BTreeMap::new();
+            for (key,content) in fields {
+                let text=content.as_str().ok_or("Identity field must be text")?;
+                if !text.trim().is_empty(){values.insert(key.clone(),text.to_owned());}
+            }
+            let state=app.state::<Mutex<password_vault::Vault>>();
+            let mut vault=state.lock().map_err(|e|e.to_string())?;
+            let id=vault.put_identity(id,label,values)?;
+            vault.save(&password_vault::file(&app)?)?;
+            let _=app.emit_to("chrome","minternet:vault-changed",());
+            return Ok(json!({"ok":true,"id":id}));
+        }
+        "vault-identity-remove" => {
+            let id=value.as_str().ok_or("Choose an identity")?;
+            let state=app.state::<Mutex<password_vault::Vault>>();
+            let mut vault=state.lock().map_err(|e|e.to_string())?;
+            vault.remove_identity(id)?;
+            vault.save(&password_vault::file(&app)?)?;
+            let _=app.emit_to("chrome","minternet:vault-changed",());
+            return Ok(json!({"ok":true}));
+        }
+        "vault-identity-fill" => {
+            let id=value.as_str().ok_or("Choose an identity")?;
+            return Ok(json!({"filled":fill_identity(&app,id)?}));
         }
         "vault-card-put" => {
             let label=value.get("label").and_then(Value::as_str).unwrap_or("").to_string();

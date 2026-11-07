@@ -181,6 +181,50 @@
     items.splice(destination,0,item);
     return true;
   }
+  // Move/reorder a user-selected set across the Bookmark Bar and nested
+  // folders, preserving the original nodes, IDs, icons, descendants and order.
+  // All validation happens BEFORE any mutation.
+  function moveMany(state,ids,parentId,anchorId=null,after=false){
+    if(!Array.isArray(ids)||!ids.length||ids.length>MAX_ITEMS)return false;
+    const unique=new Set(ids);
+    if(unique.size!==ids.length||unique.has(BOOKMARK_BAR_ID))return false;
+    const target=find(state,parentId||BOOKMARK_BAR_ID);
+    if(!target||target.kind!=='folder')return false;
+    const selections=[];
+    visit(state.items,(node,parent,depth,array,index)=>{
+      if(unique.has(node.id))selections.push({node,parent,depth,array,index});
+    });
+    if(selections.length!==unique.size)return false;
+    // Selecting an ancestor and a descendant would otherwise orphan the latter.
+    for(const entry of selections) {
+      if(entry.node.id===target.id||visit([entry.node],n=>n.id===target.id?true:undefined))return false;
+      if(selections.some(other=>other!==entry&&visit([other.node],n=>n.id===entry.node.id?true:undefined)))return false;
+    }
+    const destinationDepth=location(state,target.id)?.depth+1;
+    for(const entry of selections){
+      let maxHeight=0;
+      visit([entry.node],(_node,_parent,depth)=>{maxHeight=Math.max(maxHeight,depth);});
+      if(destinationDepth+maxHeight>=MAX_DEPTH)return false;
+    }
+    let index=target.children.length;
+    if(anchorId!=null){
+      index=target.children.findIndex(node=>node.id===anchorId);
+      if(index<0||unique.has(anchorId))return false;
+      if(after)index++;
+    }
+    // When moving direct siblings, adjust for removals before the anchor.
+    const earlier=selections.filter(entry=>entry.array===target.children&&entry.index<index).length;
+    index-=earlier;
+    const old=JSON.stringify(target.children.map(n=>n.id));
+    const moved=new Set(selections.map(e=>e.node.id));
+    // Remove in reverse order per array so indices don't shift.
+    for(const entry of [...selections].sort((a,b)=>b.depth-a.depth||b.index-a.index)){
+      entry.array.splice(entry.index,1);
+    }
+    target.children.splice(index,0,...selections.map(e=>e.node));
+    return JSON.stringify(target.children.map(n=>n.id))!==old ||
+      selections.some(e=>e.array!==target.children);
+  }
   const byUrl = (state, target) => visit(state.items, node => node.kind === 'link' && node.url === url(target) ? node : undefined);
-  return { blank, hydrate, url, icon, favicon, find, location, folders, count, add, remove, update, move, reorderBar, byUrl, barFolder, barItems, BOOKMARK_BAR_ID, MAX_ITEMS };
+  return { blank, hydrate, url, icon, favicon, find, location, folders, count, add, remove, update, move, moveMany, reorderBar, byUrl, barFolder, barItems, BOOKMARK_BAR_ID, MAX_ITEMS };
 });
