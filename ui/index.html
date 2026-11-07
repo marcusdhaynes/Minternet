@@ -12,6 +12,7 @@
   <script src="./bookmark-import.js" defer></script>
   <script src="./tab-group-model.js" defer></script>
   <script src="./search-settings.js" defer></script>
+  <script src="./tab-layout-settings.js" defer></script>
   <script src="./app.js" defer></script>
   <script src="./bookmark-ui.js" defer></script>
   <script src="./secret-bookmarks.js" defer></script>
@@ -160,6 +161,14 @@
         </div>
       </section>
       <small id="browserPreferencesStatus" class="browser-preferences-status" aria-live="polite" hidden></small>
+      <section class="tab-layout-settings" aria-label="Tab Bar Appearance">
+        <div class="tab-layout-settings-title"><strong>Tab Bar Appearance</strong><small>Adjust widths immediately; saved for future launches.</small></div>
+        <label class="tab-size-setting" for="groupTabWidth"><span>Group Tab Width</span><span class="tab-size-entry"><input id="groupTabWidth" type="number" inputmode="numeric" min="32" max="320" step="1" value="56" aria-label="Group tab width in pixels"><span>px</span></span></label>
+        <label class="tab-size-setting" for="regularTabWidth"><span>Regular Tab Width</span><span class="tab-size-entry"><input id="regularTabWidth" type="number" inputmode="numeric" min="32" max="320" step="1" value="38" aria-label="Regular tab width in pixels"><span>px</span></span></label>
+        <label class="tab-size-setting" for="pinnedTabWidth"><span>Pinned Tab Width</span><span class="tab-size-entry"><input id="pinnedTabWidth" type="number" inputmode="numeric" min="24" max="200" step="1" value="27" aria-label="Pinned tab width in pixels"><span>px</span></span></label>
+        <label class="bookmark-toggle tab-icon-toggle"><span><strong>Show App Icon in Tab Bar</strong><small>Hide the M icon to shift the group launcher and tabs left</small></span><input id="showTabBarAppIcon" type="checkbox" checked></label>
+        <button id="resetTabWidths" class="tab-size-reset" type="button">Reset Tab Widths</button>
+      </section>
       <label class="auto-unload-setting" for="autoUnloadMinutes"><span><strong>Unload Inactive Tabs</strong><small>Only when idle, not loading or holding entered data</small></span><select id="autoUnloadMinutes" aria-label="Automatically unload inactive tabs"><option value="0">Never</option><option value="1" selected>1 minute</option><option value="2">2 minutes</option><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option><option value="120">2 hours</option></select></label>
       <div class="zoom-setting-row" aria-label="Page Zoom">
         <span>Zoom</span><button id="zoomOut" type="button" aria-label="Zoom Out" title="Zoom Out (Ctrl+-)">−</button>
