@@ -400,13 +400,13 @@
   const handlers={
     folder:(id,button)=>{
       closeFallback();
-      openFolderButton=button;
-      button?.classList.add('bookmark-open-folder');
       return popup(folderItems(id),fromElement(button),
         window.__minternetMenuSmoke?{}:{custom:true,heading:'FOLDER'}).then(result=>{
-        if(!result||!fallback){
-          openFolderButton?.classList.remove('bookmark-open-folder');
-          openFolderButton=null;
+        // popup() builds the fallback after clearing the previous menu.
+        // Apply the active-folder color only while its menu is displayed.
+        if(result&&fallback&&button){
+          openFolderButton=button;
+          button.classList.add('bookmark-open-folder');
         }
         return result;
       });
