@@ -1278,6 +1278,26 @@ html.minternet-overlay-active .group-editor-backdrop {
 .identities-screen .identity-custom-row{display:flex;align-items:center;gap:5px;padding:3px 0;}
 .identities-screen .identity-custom-row input{flex:1;}
 .identities-screen .identity-save{background:#5c467f;border-color:#b292e1;min-height:28px;}
+.form-suggestion-backdrop{position:fixed;z-index:570;inset:var(--chrome-height,52px) 0 0;
+  background:transparent;cursor:default}
+.form-suggestion-popup{position:fixed;z-index:571;box-sizing:border-box;
+  border-radius:6px;border:1px solid #8975ac;
+  background:#242038f5;box-shadow:0 8px 23px #0007,inset 0 1px 0 #ffffff19;
+  color:#efebfb;padding:3px;display:grid;gap:2px;max-height:260px;overflow-y:auto;
+  font:10px/1.25 system-ui,sans-serif;}
+.form-suggestion-popup[hidden],.form-suggestion-backdrop[hidden]{display:none!important}
+.form-suggestion-head{display:flex;align-items:center;justify-content:space-between;
+  font-size:10px;padding:2px 4px 3px;color:#e0d4ff}
+.form-suggestion-popup button{min-width:0;background:transparent;color:#ede4ff;border:0;
+  border-radius:4px;padding:6px;text-align:left;font:10px/1.2 system-ui;cursor:pointer;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.form-suggestion-popup button:hover,.form-suggestion-popup button:focus-visible{background:#7960b15e}
+.form-suggestion-popup button:disabled{opacity:.55}
+.form-suggestion-popup .form-suggestion-x{margin-left:auto;font-size:14px;padding:0 4px;}
+.form-suggestion-note{padding:4px 6px;color:#b7adca;font-size:9px}
+.form-suggestion-footer{border-top:1px solid #ffffff22;display:flex;justify-content:flex-end}
+.form-suggestion-popup .form-suggestion-ignore{font-size:9px;color:#b5aac6}
+
 @media(max-width:560px){.identities-screen .identity-fields-grid{grid-template-columns:1fr}}
 
 
