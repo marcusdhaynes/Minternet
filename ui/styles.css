@@ -1544,3 +1544,69 @@ html.minternet-overlay-active .group-editor-backdrop {
 .secret-security-form .secret-form-actions button:disabled{opacity:.4;cursor:default;}
 .secret-heading #secretChangePassword{margin-left:auto;}
 .secret-heading #secretLock{margin-left:0;}
+
+/* User-controlled tab geometry. These final rules override the compact,
+   icon-only tab rule above, including its fixed min/max width !important.
+   Group and pinned tabs have separate independent dimensions. */
+:root {
+  --minternet-group-tab-width:56px;
+  --minternet-regular-tab-width:38px;
+  --minternet-pinned-tab-width:27px;
+}
+.tabs .group-chip {
+  --group-chip-width:var(--minternet-group-tab-width);
+}
+.tabs .tab:not(.group-end-cap):not(.pinned-tab) {
+  flex:0 0 var(--minternet-regular-tab-width)!important;
+  width:var(--minternet-regular-tab-width)!important;
+  min-width:var(--minternet-regular-tab-width)!important;
+  max-width:var(--minternet-regular-tab-width)!important;
+}
+.tabs .tab.pinned-tab {
+  flex:0 0 var(--minternet-pinned-tab-width)!important;
+  width:var(--minternet-pinned-tab-width)!important;
+  min-width:var(--minternet-pinned-tab-width)!important;
+  max-width:var(--minternet-pinned-tab-width)!important;
+}
+/* Preserve the normal 22px gap for the M logo; when hidden, reclaim it
+   completely and move both the group button and tab strip together. */
+:root.minternet-app-icon-hidden .tab-row > .identity {
+  display:none!important;
+}
+:root.minternet-app-icon-hidden .tab-row > #tabGroups {left:3px;}
+:root.minternet-app-icon-hidden .tab-row > .tabs {margin-left:25px;}
+
+/* Compact native Settings appearance. */
+.tab-layout-settings {
+  display:grid;
+  gap:2px;
+  padding:9px 12px;
+  border-top:1px solid #39445e;
+}
+.tab-layout-settings-title {display:grid;gap:3px;margin-bottom:4px;}
+.tab-layout-settings-title strong {font-size:11px;color:#ecebff;}
+.tab-layout-settings-title small,.tab-icon-toggle small {font-size:9px;color:#8998ba;}
+.tab-size-setting {
+  display:flex;align-items:center;justify-content:space-between;
+  gap:10px;min-height:31px;color:#dbe3f9;font-size:11px;
+}
+.tab-size-setting > span:first-child {flex:1;min-width:0;}
+.tab-size-entry {display:flex;align-items:center;gap:5px;color:#9daaca;font-size:10px;}
+.tab-size-entry input {
+  width:72px;min-width:0;height:26px;padding:3px 7px;
+  border:1px solid #55617d;border-radius:6px;
+  color:#f0f1ff;background:#121a2c;font-size:11px;
+  font-variant-numeric:tabular-nums;
+}
+.tab-size-entry input:focus-visible {outline:2px solid #a7a9f2;}
+.tab-icon-toggle {
+  padding:8px 0 5px;
+  border-top:1px solid #39445e;
+  margin-top:5px;
+}
+.tab-size-reset {
+  justify-self:start;border:1px solid #596885;border-radius:5px;
+  background:#303c57;color:#e8ecff;font-size:10px;
+  padding:5px 8px;margin-top:3px;
+}
+.tab-size-reset:hover {background:#445675;}
