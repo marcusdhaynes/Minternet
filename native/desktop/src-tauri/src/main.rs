@@ -1962,7 +1962,7 @@ const FORM_FIELD_CONTEXT_JS:&str=r#"(function(){
   if(!kind)return null;
   const entered=Boolean(field.value);
   const loginReady=kind==='login'&&hasPassword.length===1&&
-    Boolean(hasPassword[0].value)&&Boolean(loginUser?.value);
+    Boolean(hasPassword[0].value)&&(!loginUser||Boolean(loginUser.value));
   const fieldIndex=[...document.querySelectorAll('input,textarea,select')].indexOf(field);
   return {kind,key,fieldIndex,hasValue:entered,saveReady:loginReady,
     x:Math.round(r.left),y:Math.round(r.bottom),width:Math.round(r.width),
@@ -1980,8 +1980,8 @@ const CAPTURE_LOGIN_JS:&str=r#"(function(){
   const username=inputs.find(e=>e.autocomplete==='username')||
     inputs.find(e=>e.type==='email')||
     inputs.find(e=>/user|email|login/i.test(e.name+' '+e.id)&&e.type!=='password');
-  if(!username?.value||username.value.length>320)return null;
-  return {username:username.value,password:pw[0].value};
+  if(username&&username.value.length>320)return null;
+  return {username:username?.value||'',password:pw[0].value};
 })()"#;
 
 const CAPTURE_IDENTITY_JS:&str=r#"(function(){
