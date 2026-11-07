@@ -36,13 +36,16 @@ final class BrowserState: ObservableObject {
     @Published var autoUnloadMinutes: Int = UserDefaults.standard.object(forKey: "autoUnloadMinutes") as? Int ?? 1 {
         didSet { UserDefaults.standard.set(autoUnloadMinutes, forKey: "autoUnloadMinutes") }
     }
+    @Published var tabLimit: Int = max(0, UserDefaults.standard.object(forKey: "tabLimit") as? Int ?? 0) {
+        didSet { UserDefaults.standard.set(tabLimit, forKey: "tabLimit") }
+    }
     init() { newTab() }
 
     var active: Tab? { tabs.first(where: { $0.id == selectedId }) }
 
     func newTab(privateMode: Bool = false, load: URL? = nil) {
-        guard tabs.count < 25 else {
-            message = "Maximum 25 open tabs."
+        guard tabLimit == 0 || tabs.count < tabLimit else {
+            message = "Tab limit reached (\(tabLimit)). Set Tab Limit to 0 for unlimited."
             return
         }
         if let former=active { former.inactiveSince = Date() }
@@ -308,6 +311,8 @@ struct SiteFavicon: View {
 struct ContentView: View {
     @StateObject private var state = BrowserState()
     @FocusState private var focused: Bool
+    @State private var showTabLimitEditor = false
+    @State private var tabLimitDraft = "0"
 
     var body: some View {
         VStack(spacing: 0) {
@@ -377,6 +382,10 @@ struct ContentView: View {
                 Button(action: { state.navigate(state.address); focused = false }) { Image(systemName: "arrow.right") }
                     .accessibilityIdentifier("go")
                 Menu {
+                    Button("Tab Limit (0 = Unlimited)") {
+                        tabLimitDraft = String(state.tabLimit)
+                        showTabLimitEditor = true
+                    }
                     Picker("Unload Inactive Tabs", selection: $state.autoUnloadMinutes) {
                         Text("Never").tag(0)
                         Text("1 minute").tag(1)
@@ -389,7 +398,21 @@ struct ContentView: View {
                         Text("2 hours").tag(120)
                     }
                 } label: { Image(systemName: "gearshape") }
-                .accessibilityLabel("Tab Unload Settings")
+                .accessibilityLabel("Browser Settings")
+                .alert("Tab Limit", isPresented: $showTabLimitEditor) {
+                    TextField("0 = Unlimited", text: $tabLimitDraft)
+                        .keyboardType(.numberPad)
+                    Button("Save") {
+                        if let limit = Int(tabLimitDraft), (0...1000000).contains(limit) {
+                            state.tabLimit = limit
+                        } else {
+                            state.message = "Enter a whole number from 0 to 1000000."
+                        }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("0 = Unlimited. Reducing the limit will not close existing tabs.")
+                }
                 Button(action: { state.switchPrivacy() }) {
                     Image(systemName: state.active?.isPrivate == true ? "eye.slash.fill" : "eye")
                 }
