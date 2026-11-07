@@ -585,6 +585,20 @@ body.tab-dragging .ungroup-drop-target{display:flex}
 .search-setting-field select {width:120px;max-width:43%;height:28px;padding:0 6px;
   background:#121a2c;border:1px solid #55617d;color:#e7edff;border-radius:6px;font-size:10px;}
 .search-setting-field select:focus-visible {outline:2px solid #a7a9f2;}
+.browser-path-setting{display:grid;gap:7px;padding:10px 12px;border-top:1px solid #39445e;}
+.browser-path-setting label{display:grid;gap:3px;}
+.browser-path-setting strong{font-size:11px;color:#e7edff;}
+.browser-path-setting small{font-size:9px;line-height:1.4;color:#8998ba;}
+.browser-path-actions{display:flex;gap:5px;align-items:center;min-width:0;}
+.browser-path-actions input{min-width:0;flex:1;width:0;border:1px solid #55617d;
+  border-radius:6px;background:#121a2c;color:#e7edff;font-size:10px;padding:7px;}
+.browser-path-actions button{flex:none;border:1px solid #657598;border-radius:6px;
+  color:#e7edff;background:#303d59;font-size:10px;padding:7px;cursor:pointer;}
+.browser-path-actions button:hover{background:#46577a;}
+.browser-path-actions button:disabled{opacity:.55;cursor:default;}
+.browser-preferences-status{display:block;padding:5px 12px;color:#afc9ef;
+  font-size:9px;line-height:1.4;}
+.browser-preferences-status[hidden]{display:none;}
 
 /* Floating, in-app tab gesture: no native HTML DataTransfer cursor. */
 .tab-drag-ghost {position:fixed;z-index:300;pointer-events:none;user-select:none;
