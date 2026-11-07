@@ -292,9 +292,19 @@ if(window.__TAURI__){
     if(event.button!==0||event.target.closest(interactive))return;
     event.preventDefault();
     pendingDrag=null;
-    // Every blank part of the title bar toggles maximize/restore, including
-    // the space to the RIGHT of the final tab. Do not create a tab instead.
-    void api.command('maximize').catch(()=>{});
+    const strip=byId('tabs');
+    const newTab=byId('newTab');
+    const action=strip&&newTab&&window.MinternetTabBlankZones
+      ?window.MinternetTabBlankZones.actionFromRects(
+        event.clientX,
+        strip.getBoundingClientRect(),
+        newTab.getBoundingClientRect(),
+        Array.from(strip.children,child=>child.getBoundingClientRect()))
+      :null;
+    // Split only the genuine blank gap before +: left creates a tab,
+    // right maximizes/restores. All other empty title-bar space still
+    // maximizes/restores; tab/group drag and buttons are unaffected.
+    void api.command(action||'maximize').catch(()=>{});
   });
 }
 

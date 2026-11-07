@@ -37,6 +37,7 @@ jobs:
         run: |
           node --check ../../ui/native-bridge.js
           node --check ../../ui/app.js
+          node --check ../../ui/tab-blank-zones.js
           node --check ../../ui/downloads-ui.js
           node --check ../../ui/bookmark-model.js
           node --check ../../ui/bookmark-import.js
@@ -46,7 +47,7 @@ jobs:
           node --check ../../ui/tab-group-ui.js
           node --check ../../ui/chrome-native-menu.js
           node --check ../../ui/search-settings.js
-          node --test ../../tests/bookmarks.test.cjs ../../tests/bookmark-import.test.cjs ../../tests/tab-groups.test.cjs ../../tests/native-menus.test.cjs ../../tests/search-settings.test.cjs
+          node --test ../../tests/bookmarks.test.cjs ../../tests/bookmark-import.test.cjs ../../tests/tab-groups.test.cjs ../../tests/native-menus.test.cjs ../../tests/search-settings.test.cjs ../../tests/tab-blank-zones.test.cjs
       - name: Generate Branded Minternet App Icons
         run: |
           python -m pip install --disable-pip-version-check --quiet pillow
