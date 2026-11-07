@@ -1802,6 +1802,118 @@ fn fill_saved_credential(app:&tauri::AppHandle,id:u32,manual:bool,username:Optio
 
 // Prepare one lightweight WebView2 controller only after the user focuses a
 // blank tab's address input. This does not connect to sites or leak typed URLs.
+// Site pages never receive the user's identity list. Only one explicitly
+// chosen record reaches the already selected, exact HTTPS page.
+const IDENTITY_FILL_JS:&str=r#"(function(){
+  'use strict';
+  const profile=__MINTERNET_IDENTITY_PAYLOAD__;
+  if(window!==window.top || location.origin!==profile.origin)return;
+  const all=[...document.querySelectorAll('input,textarea,select')].filter(el=>{
+    if(el.disabled||el.readOnly||['hidden','password','file'].includes(el.type))return false;
+    const r=el.getBoundingClientRect();
+    return r.width>0&&r.height>0;
+  });
+  const auto=el=>(el.autocomplete||'').toLowerCase().split(/\s+/);
+  const tag=el=>[
+    el.name||'',el.id||'',el.placeholder||'',
+    el.getAttribute('aria-label')||'',el.labels?.[0]?.textContent||'',
+    el.closest('label')?.textContent||''
+  ].join(' ').toLowerCase();
+  const rules={
+    'full-name':/^(?:name)$/,'given-name':/^(?:given-name)$/,'family-name':/^(?:family-name)$/,
+    'middle-name':/^(?:additional-name)$/,'nickname':/^(?:nickname)$/,
+    'email':/^(?:email)$/,'phone':/^(?:tel|tel-national)$/,
+    'company':/^(?:organization)$/,'job-title':/^(?:organization-title)$/,
+    'street-address':/^(?:street-address)$/,'address-line1':/^(?:address-line1)$/,
+    'address-line2':/^(?:address-line2)$/,'city':/^(?:address-level2)$/,
+    'region':/^(?:address-level1)$/,'postal-code':/^(?:postal-code)$/,
+    'country':/^(?:country-name|country)$/,'date-of-birth':/^(?:bday)$/,
+    'website':/^(?:url)$/
+  };
+  const descriptions={
+    'full-name':/\bfull.?name\b|\byour.?name\b/i,
+    'given-name':/\bfirst.?name\b|\bgiven.?name\b/i,
+    'family-name':/\blast.?name\b|\bsurname\b|\bfamily.?name\b/i,
+    'middle-name':/\bmiddle.?name\b/i,
+    'nickname':/\bnick.?name\b/i,
+    'email':/\bemail\b|\be-mail\b/i,
+    'phone':/\bphone\b|\bmobile\b|\btelephone\b/i,
+    'company':/\bcompany\b|\borganization\b/i,
+    'job-title':/\bjob.?title\b|\boccupation\b/i,
+    'street-address':/\bstreet.?address\b|\bfull.?address\b/i,
+    'address-line1':/\baddress.?1\b|\baddress.?line.?1\b/i,
+    'address-line2':/\baddress.?2\b|\baddress.?line.?2\b|\bapt\b|\bsuite\b/i,
+    'city':/\bcity\b|\btown\b/i,'region':/\bstate\b|\bprovince\b|\bregion\b/i,
+    'postal-code':/\bzip\b|\bpostal\b/i,'country':/\bcountry\b/i,
+    'date-of-birth':/\bdate.?of.?birth\b|\bdob\b/i,
+    'national-id':/\bnational.?id\b|\bidentity.?number\b/i,
+    'passport-number':/\bpassport\b.{0,20}\b(number|no|id)\b|\bpassport.?no\b/i,
+    'passport-country':/\bpassport.?country\b|\bissuing.?country\b/i,
+    'passport-expiry':/\bpassport\b.{0,20}\b(expir|valid)\b/i,
+    'drivers-license':/\bdriver.s?.?licen[cs]e\b.{0,20}\b(number|no|id)\b/i,
+    'drivers-license-state':/\bdriver.s?.?licen[cs]e\b.{0,20}\b(state|region)\b/i,
+    'vehicle-make':/\bvehicle.?make\b|\bcar.?make\b/i,
+    'vehicle-model':/\bvehicle.?model\b|\bcar.?model\b/i,
+    'vehicle-year':/\bmodel.?year\b|\bvehicle.?year\b/i,
+    'vehicle-color':/\bvehicle.?colou?r\b/i,
+    'license-plate':/\blicen[cs]e.?plate\b|\bplate.?number\b/i,
+    'vin':/\bvin\b|\bvehicle.?identification.?number\b/i,
+    'tax-id':/\btax.?id\b|\btaxpayer.?number\b/i,
+    'website':/\bweb.?site\b|\burl\b/i
+  };
+  const put=(el,v)=>{
+    if(!el||el.value||typeof v!=='string'||!v)return false;
+    if(el.tagName==='SELECT'){
+      const option=[...el.options].find(o=>o.value.toLowerCase()===v.toLowerCase()||
+        o.text.toLowerCase()===v.toLowerCase());
+      if(!option)return false;
+      el.value=option.value;
+    }else{
+      const setter=Object.getOwnPropertyDescriptor(
+        el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value')?.set;
+      if(setter)setter.call(el,v);else el.value=v;
+    }
+    el.dispatchEvent(new Event('input',{bubbles:true}));
+    el.dispatchEvent(new Event('change',{bubbles:true}));
+    return true;
+  };
+  for(const [key,value] of Object.entries(profile.fields)){
+    if(!descriptions[key]&&!rules[key])continue;
+    // Explicit HTML autocomplete semantics outrank vague labels.
+    const automatic=rules[key]&&all.find(el=>auto(el).some(token=>rules[key].test(token)));
+    const named=all.find(el=>descriptions[key]?.test(tag(el)));
+    const element=automatic||named;
+    if(element&&put(element,value))all.splice(all.indexOf(element),1);
+  }
+})()"#;
+
+fn fill_identity(app:&tauri::AppHandle,id:&str)->Result<bool,String>{
+    let (label,url,private)={
+        let browser=app.state::<Mutex<Browser>>();
+        let browser=browser.lock().map_err(|e|e.to_string())?;
+        let tab=browser.active().ok_or("No active tab")?;
+        (tab.view.clone().ok_or("No active webpage")?,tab.url.clone(),tab.private)
+    };
+    if private{return Err("Identities cannot autofill private or Secret Tabs".into());}
+    let origin=password_vault::origin(&url)?;
+    let view=app.get_webview(&label).ok_or("No active webpage")?;
+    let actual=view.url().map_err(|e|e.to_string())?;
+    if password_vault::origin(actual.as_str())?!=origin{
+        return Err("Website changed; choose the identity again".into());
+    }
+    let identity={
+        let state=app.state::<Mutex<password_vault::Vault>>();
+        let vault=state.lock().map_err(|e|e.to_string())?;
+        vault.identity(id).ok_or("Unlock the vault and choose an identity")?
+    };
+    let payload=json!({"origin":origin,"fields":identity.fields}).to_string();
+    // A script cannot be evaluated for a different origin, even if the page
+    // navigates between the click and the browser's native evaluate call.
+    view.eval(&IDENTITY_FILL_JS.replace("__MINTERNET_IDENTITY_PAYLOAD__",&payload))
+        .map_err(|e|e.to_string())?;
+    Ok(true)
+}
+
 fn fill_payment_card(app:&tauri::AppHandle,id:&str)->Result<bool,String>{
     let (label,url)={
         let state=app.state::<Mutex<Browser>>();
