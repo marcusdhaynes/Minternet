@@ -3242,8 +3242,8 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
     }
     match name.as_str() {
         "browser-preferences" => {
-            let prefs=app.state::<BrowserPreferenceState>().0.lock()
-                .map_err(|e|e.to_string())?;
+            let state=app.state::<BrowserPreferenceState>();
+            let prefs=state.0.lock().map_err(|e|e.to_string())?;
             let selected=prefs.homepage.clone();
             let system=prefs.download_folder.is_none();
             drop(prefs);
