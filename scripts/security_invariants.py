@@ -21,7 +21,8 @@ require(windows, 'if matches!(url.scheme(), "https"|"http")', "Desktop permits o
 require(windows, 'url.host_str().is_some()', "Desktop requires a host for normal page URLs")
 require(windows, 'url.scheme()=="blob"', "Desktop recognizes provenance-checked blob URLs")
 require(windows, 'download_source_allowed(&for_navigation,id,&url)', "Desktop only permits bound blob navigation")
-require(windows, '.on_permission_request(|_view, _kind| PermissionResponse::Deny)', "Desktop default deny permissions")
+require(windows, 'PermissionKind::Other => PermissionResponse::Default', "Desktop permits browser-managed identity/storage requests")
+require(windows, '_ => PermissionResponse::Deny', "Desktop denies sensitive device permissions")
 require(windows, '.incognito(private)', "Desktop private webview profile")
 require(windows, "NewWindowResponse::Deny", "Desktop external popup interception")
 assert cap["local"] is True and cap["webviews"]==["chrome"], "Privileged Tauri API not exclusive to local chrome webview"
