@@ -2776,7 +2776,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             .ok_or("Missing sync category")?;
         let entry=value.get("entry").ok_or("Missing decrypted sync entry")?;
         let deleted=value.get("deleted").and_then(Value::as_bool)==Some(true);
-        if !matches!(kind,"login"|"payment") {return Err("Not a vault record".into());}
+        if !matches!(kind,"login"|"payment"|"identity") {return Err("Not a vault record".into());}
         let state=app.state::<Mutex<password_vault::Vault>>();
         let mut vault=state.lock().map_err(|e|e.to_string())?;
         if !vault.unlocked(){return Ok(json!({"ok":false,"locked":true}));}
