@@ -245,18 +245,27 @@ public class MainActivity extends Activity {
     private static final String SAFE_TO_UNLOAD="(()=>{try{\n if(document.readyState!=='complete'||document.hasFocus()||window.onbeforeunload!==null)return false;\n if(document.querySelector('iframe,canvas,[aria-busy=\"true\"],[role=\"progressbar\"],progress,.loading,.spinner'))return false;\n if([...document.querySelectorAll('audio,video')].some(m=>!m.paused||m.seeking||m.networkState===m.NETWORK_LOADING))return false;\n if([...document.querySelectorAll('input,textarea,select')].some(e=>{\n  if(['hidden','submit','button','reset'].includes(e.type))return false;\n  if(e.type==='checkbox'||e.type==='radio')return e.checked!==e.defaultChecked;\n  if(e.type==='file')return e.files?.length>0;\n  if(e.tagName==='SELECT')return [...e.options].some(o=>o.selected!==o.defaultSelected);\n  return !!e.value;\n }))return false;\n if([...document.querySelectorAll('[contenteditable=\"true\"],[role=\"textbox\"]')].some(e=>e.textContent?.trim()))return false;\n const r=performance.getEntriesByType('resource');if(r.length&&performance.now()-(r[r.length-1].responseEnd||r[r.length-1].startTime)<15000)return false;\n return true;\n }catch(e){return false}})()";
 
     private void openSettings(){
-        if(isolatedPrivate){openIdleSettings();return;}
+        if(isolatedPrivate){
+            new AlertDialog.Builder(this).setTitle("Minternet Settings")
+                .setItems(new String[]{"Unload Inactive Tabs","Tab Limit (0 = Unlimited)"},
+                    (dialog,choice)->{
+                        if(choice==0)openIdleSettings();
+                        else openTabLimitSettings();
+                    }).show();
+            return;
+        }
         new AlertDialog.Builder(this).setTitle("Minternet Settings")
             .setItems(new String[]{"Google Account · Live Sync","Unload Inactive Tabs",
-                "Undo Across All Devices","Stop Google Sync"},(dialog,choice)->{
+                "Tab Limit (0 = Unlimited)","Undo Across All Devices","Stop Google Sync"},(dialog,choice)->{
                 if(choice==0)configureGoogle();
                 else if(choice==1)openIdleSettings();
-                else if(choice==2){
+                else if(choice==2)openTabLimitSettings();
+                else if(choice==3){
                     if(sync!=null&&sync.isActive())sync.undo();
                     else new AlertDialog.Builder(this)
                         .setMessage("Enable Google Live Sync to use shared Undo.")
                         .setPositiveButton("OK",null).show();
-                }else if(choice==3){
+                }else if(choice==4){
                     if(sync!=null)sync.stop();
                     android.widget.Toast.makeText(this,"Google sync stopped",
                         android.widget.Toast.LENGTH_SHORT).show();
@@ -399,6 +408,30 @@ public class MainActivity extends Activity {
         }
     }
 
+    private int configuredTabLimit(){
+        return getSharedPreferences("minternet.settings",MODE_PRIVATE).getInt("tabLimit",0);
+    }
+    private void openTabLimitSettings(){
+        EditText input=new EditText(this);
+        input.setSingleLine(true);
+        input.setInputType(InputType.TYPE_CLASS_NUMBER);
+        input.setText(String.valueOf(configuredTabLimit()));
+        input.setSelectAllOnFocus(true);
+        new AlertDialog.Builder(this).setTitle("Tab Limit")
+            .setMessage("0 = Unlimited. Reducing the limit will not close existing tabs.")
+            .setView(input)
+            .setPositiveButton("Save",(dialog,which)->{
+                try{
+                    int limit=Integer.parseInt(input.getText().toString().trim());
+                    if(limit<0||limit>1000000)throw new NumberFormatException();
+                    getSharedPreferences("minternet.settings",MODE_PRIVATE).edit()
+                        .putInt("tabLimit",limit).apply();
+                }catch(NumberFormatException ex){
+                    android.widget.Toast.makeText(this,"Enter a whole number from 0 to 1000000",
+                        android.widget.Toast.LENGTH_SHORT).show();
+                }
+            }).setNegativeButton("Cancel",null).show();
+    }
     private int autoUnloadMinutes(){
         return getSharedPreferences("minternet.settings",MODE_PRIVATE).getInt("autoUnloadMinutes",1);
     }
@@ -561,8 +594,11 @@ public class MainActivity extends Activity {
     }
 
     private BrowserTab newTab(String url,boolean activate) {
-        if(tabs.size()>=24){
-            new AlertDialog.Builder(this).setMessage("Maximum 24 tabs. Close some before opening more.").setPositiveButton("OK",null).show();
+        int limit=configuredTabLimit();
+        if(limit>0 && tabs.size()>=limit){
+            new AlertDialog.Builder(this).setMessage(
+                "Tab limit reached ("+limit+"). Set Tab Limit to 0 for unlimited.")
+                .setPositiveButton("OK",null).show();
             return null;
         }
         BrowserTab tab=new BrowserTab();
