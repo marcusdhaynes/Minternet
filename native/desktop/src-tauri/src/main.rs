@@ -265,15 +265,15 @@ fn restore_recent_downloads(app:&tauri::AppHandle){
     let Ok(raw)=std::fs::read(file) else{return};
     if raw.len()>200_000 {return;}
     let Ok(entries)=serde_json::from_slice::<Vec<RecentDownload>>(&raw) else{return};
-    let Ok(dir)=app.path().download_dir() else{return};
-    let Ok(real_download_dir)=std::fs::canonicalize(&dir) else{return};
+    let roots=allowed_download_folders(app);
+    if roots.is_empty(){return;}
     let state=app.state::<DownloadsState>();
     let Ok(mut history)=state.0.lock() else{return};
     for mut entry in entries.into_iter().rev().take(50).collect::<Vec<_>>().into_iter().rev(){
         if entry.private || entry.name.len()>160 || entry.source.len()>4096 {continue;}
         let path=PathBuf::from(&entry.path);
         let Ok(real_file)=std::fs::canonicalize(&path) else{continue};
-        if !real_file.starts_with(&real_download_dir)
+        if !roots.iter().any(|root|real_file.starts_with(root))
             || path.file_name().and_then(|n|n.to_str())!=Some(entry.name.as_str())
             || !real_file.is_file(){continue;}
         if entry.status=="downloading"{entry.status="interrupted".into();}
@@ -290,8 +290,7 @@ fn download_name(url:&tauri::Url)->String{
     if name.is_empty() {"download".into()}else{name}
 }
 fn download_path(app:&tauri::AppHandle,url:&tauri::Url,suggested:&std::path::Path)->Result<PathBuf,String>{
-    let dir=app.path().download_dir().map_err(|_|"Downloads directory is unavailable".to_string())?;
-    std::fs::create_dir_all(&dir).map_err(|e|e.to_string())?;
+    let dir=configured_download_folder(app)?;
     // WebView2 supplies the server Content-Disposition suggested filename in
     // destination. Prefer that over a generic /download URL, but never trust
     // its directory or any unsafe filename characters.
@@ -447,10 +446,9 @@ fn checked_download_path(app:&tauri::AppHandle,id:u64)->Result<PathBuf,String>{
             .ok_or("Completed download not found")?;
         (item.path.clone(),item.name.clone())
     };
-    let root=std::fs::canonicalize(app.path().download_dir().map_err(|e|e.to_string())?)
-        .map_err(|e|e.to_string())?;
+    let roots=allowed_download_folders(app);
     let path=std::fs::canonicalize(&saved.0).map_err(|_|"Downloaded file no longer exists")?;
-    if !path.is_file() || !path.starts_with(&root)
+    if !path.is_file() || !roots.iter().any(|root|path.starts_with(root))
         || path.file_name().and_then(|n|n.to_str())!=Some(saved.1.as_str()){
         return Err("Download path is no longer valid".into());
     }
@@ -1570,7 +1568,16 @@ fn display_active(app: &tauri::AppHandle) {
 }
 
 fn update_from_site(app: &tauri::AppHandle, id: u32, url: &str) {
-    if !url.starts_with("https://") && !url.starts_with("http://") { return; }
+    // A hidden WebView2 warmup uses http://tauri.localhost/warmup.html.
+    // NEVER promote that internal renderer URL into the user's address bar
+    // or session history; it is not the homepage, and must remain invisible.
+    let Ok(actual)=tauri::Url::parse(url) else{return};
+    if !matches!(actual.scheme(),"https"|"http")||
+       actual.host_str().is_none()||
+       matches!(actual.host_str(),Some("tauri.localhost")|Some("localhost"))
+       && actual.path()=="/warmup.html" {
+        return;
+    }
     let mut pinned_change=false;
     {
         let state=app.state::<Mutex<Browser>>();
@@ -1759,7 +1766,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
             let mut confirmed_in_app = false;
             if let Ok(mut browser) = state.lock() {
                 if let Some(tab) = browser.tabs.iter_mut().find(|tab| tab.id == id) {
-                    if tab.secret_id.is_some(){return;}
+                    if tab.secret_id.is_some()||tab.url==HOME{return;}
                     // A real webview title from example.com is observable
                     // only after the website loaded inside this child WebView.
                     confirmed_in_app = tab.url.starts_with("https://example.com/")
@@ -3835,6 +3842,9 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             };
             if let Some(url)=address {
                 navigate_tab(&app,id,Some(url),true)?;
+            } else if name=="new" || name=="new-private" {
+                // A new tab is a real homepage, never the hidden warmup page.
+                navigate_tab(&app,id,Some(homepage(&app)),true)?;
             } else { display_active(&app); }
         }
         "deselect" => {
@@ -3895,7 +3905,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         }
         "navigate" | "home" => {
             let mut pending:Option<PendingChatPrompt>=None;
-            let url = if name=="home" { None } else {
+            let url = if name=="home" { Some(homepage(&app)) } else {
                 let address=value.as_str()
                     .or_else(||value.get("address").and_then(Value::as_str))
                     .ok_or("Missing address")?;
@@ -4193,6 +4203,7 @@ fn main() {
         .manage(SplitRatios(Mutex::new((0.5,0.5))))
         .manage(UndoHistory(Mutex::new(VecDeque::new())))
         .manage(Mutex::new(Browser::new()))
+        .manage(BrowserPreferenceState(Mutex::new(BrowserPreferences::default())))
         .manage(Mutex::new(password_vault::Vault::default()))
         .manage(Mutex::new(secret_bookmarks::SecretVault::default()))
         .manage(AuthorizedSecrets::default())
@@ -4200,6 +4211,9 @@ fn main() {
         .manage(Mutex::new(LayoutCache::default()))
         .invoke_handler(tauri::generate_handler![browser_action, browser_snapshot])
         .setup(|app| {
+            if let Ok(mut saved)=app.state::<BrowserPreferenceState>().0.lock(){
+                *saved=load_preferences(app.handle());
+            }
             if let Ok(mut h)=app.state::<Mutex<browsing_history::History>>().lock(){
                 *h=browsing_history::History::load(app.handle());
             }
@@ -4239,6 +4253,23 @@ fn main() {
             let rapid_smoke = std::env::args().any(|a| a == "--minternet-rapid-ui-smoke");
             let pin_smoke = std::env::args().any(|a| a == "--minternet-pin-smoke");
             let pin_reopen_smoke = std::env::args().any(|a| a == "--minternet-pin-reopen-smoke");
+            if !std::env::args().any(|a|a.starts_with("--minternet-") &&
+                (a.ends_with("-smoke")||a.ends_with("-reopen"))) {
+                let target=homepage(app.handle()).to_string();
+                if let Ok(mut browser)=app.state::<Mutex<Browser>>().lock(){
+                    if browser.tabs.is_empty(){let _=browser.add(false);}
+                    // Legacy sessions saved internal blank/warmup tabs. Convert
+                    // only ordinary blank tabs; never expose a Secret Tab URL.
+                    for tab in &mut browser.tabs {
+                        if tab.url==HOME&&tab.secret_id.is_none(){
+                            tab.url=target.clone();
+                            tab.title=title_for(&target);
+                            tab.history=vec![target.clone()];
+                            tab.at=0;
+                        }
+                    }
+                }
+            }
             window.add_child(
                 WebviewBuilder::new("chrome",WebviewUrl::App("index.html".into()))
                     // Tauri's native file-drop handler supersedes HTML5
