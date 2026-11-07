@@ -123,13 +123,17 @@ fn configured_download_folder(app:&tauri::AppHandle)->Result<PathBuf,String>{
         else {app.path().download_dir().map_err(|_|"System Downloads folder unavailable")?};
     if !selected.is_absolute(){return Err("Downloads folder must be an absolute path".into());}
     std::fs::create_dir_all(&selected).map_err(|e|format!("Cannot create Downloads folder: {e}"))?;
-    let path=std::fs::canonicalize(&selected).map_err(|e|e.to_string())?;
-    if !path.is_dir(){return Err("Downloads path is not a folder".into());}
-    Ok(path)
+    let resolved=std::fs::canonicalize(&selected).map_err(|e|e.to_string())?;
+    if !resolved.is_dir(){return Err("Downloads path is not a folder".into());}
+    // Supply WebView2 a conventional Windows path, not a \\?\ extended
+    // canonical path (which some download handlers reject).
+    Ok(selected)
 }
 fn allowed_download_folders(app:&tauri::AppHandle)->Vec<PathBuf>{
     let mut directories=Vec::new();
-    if let Ok(dir)=configured_download_folder(app){directories.push(dir);}
+    if let Ok(dir)=configured_download_folder(app){
+        if let Ok(real)=std::fs::canonicalize(dir){directories.push(real);}
+    }
     if let Ok(dir)=app.path().download_dir(){
         if let Ok(dir)=std::fs::canonicalize(dir){directories.push(dir);}
     }
@@ -288,18 +292,10 @@ fn download_source_allowed(app:&tauri::AppHandle,id:u32,url:&tauri::Url)->bool{
             source.host_str().is_none(){return false;}
         true
     };
-    if url.scheme()=="data"{return address;}
-    if url.scheme()=="blob"{
-        // A download may be created by an allowed cross-origin iframe.
-        // WebView2 has already approved the DownloadStarting event; accept
-        // generated web blobs without requiring the top-frame origin.
-        return address && url.as_str().strip_prefix("blob:")
-            .and_then(|raw|tauri::Url::parse(raw).ok())
-            .map(|candidate|matches!(candidate.scheme(),"http"|"https")||
-                candidate.as_str()=="null")
-            .unwrap_or(false);
-    }
-    false
+    // The event originates inside the exact WebView2 page controller,
+    // including allowed sandboxed iframes with opaque blob:null origins.
+    // Their exports may be byte streams with any file extension.
+    address && matches!(url.scheme(),"blob"|"data")
 }
 fn recent_downloads_file(app:&tauri::AppHandle)->Result<PathBuf,String>{
     Ok(app.path().app_data_dir().map_err(|e|e.to_string())?
@@ -3284,7 +3280,9 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 let folder=std::fs::canonicalize(&requested)
                     .map_err(|e|format!("Downloads folder is unavailable: {e}"))?;
                 if !folder.is_dir(){return Err("Downloads folder must be a directory".into());}
-                Some(folder.to_string_lossy().to_string())
+                // Persist the user's normal path. Canonicalization is used
+                // only when checking that download records stay in a root.
+                Some(requested.to_string_lossy().to_string())
             };
             let state=app.state::<BrowserPreferenceState>();
             let mut prefs=state.0.lock().map_err(|e|e.to_string())?;
