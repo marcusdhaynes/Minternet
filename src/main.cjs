@@ -10,7 +10,20 @@ const { createTab, replacePrivacy, sanitizeTab } = require('./core/tab-model.cjs
 app.enableSandbox();
 const TOP = 52;
 const FOOTER = 14;
-const MAX_TABS = 35;
+const TAB_LIMIT_FILE='tab-limit.v1.json';
+let tabLimit=0; // 0 = Unlimited.
+function loadTabLimit(){
+  try{
+    const stored=JSON.parse(fs.readFileSync(path.join(app.getPath('userData'),TAB_LIMIT_FILE),'utf8'));
+    return Number.isSafeInteger(stored.tabLimit)&&stored.tabLimit>=0&&stored.tabLimit<=1000000?stored.tabLimit:0;
+  }catch{return 0;}
+}
+function saveTabLimit(value){
+  const file=path.join(app.getPath('userData'),TAB_LIMIT_FILE);
+  fs.mkdirSync(path.dirname(file),{recursive:true});
+  fs.writeFileSync(file+'.tmp',JSON.stringify({tabLimit:value}));
+  fs.renameSync(file+'.tmp',file);
+}
 const tabs = [];
 const preparedSessions = new WeakSet();
 const GRANTABLE_PERMISSIONS = new Set(['media', 'geolocation', 'geolocation-approximate', 'notifications', 'clipboard-read', 'pointerLock', 'mediaKeySystem']);
@@ -266,7 +279,7 @@ async function navigate(tab, input) {
 }
 
 function addTab(privateMode = false, url = 'about:blank') {
-  if (tabs.length >= MAX_TABS) return;
+  if (tabLimit>0 && tabs.length>=tabLimit) return false;
   const tab = createTab(nextId++, 'about:blank', privateMode);
   // Blank tabs are lightweight models until they are actually navigated.
   tab.view = null;
@@ -276,6 +289,7 @@ function addTab(privateMode = false, url = 'about:blank') {
   activeId = tab.id;
   redraw();
   if (url !== 'about:blank') void navigate(tab, url);
+  return true;
 }
 
 function closeTab(id = activeId) {
@@ -350,8 +364,15 @@ async function command(event, payload) {
   const tab = currentTab();
   const wc = tab?.view?.webContents;
   switch (name) {
-    case 'new': addTab(); break;
-    case 'new-private': addTab(true); break;
+    case 'new': if(!addTab())return {ok:false,message:'Tab limit reached. Set Tab Limit to 0 for unlimited.'}; break;
+    case 'new-private': if(!addTab(true))return {ok:false,message:'Tab limit reached. Set Tab Limit to 0 for unlimited.'}; break;
+    case 'tab-limit-get': return {ok:true,tabLimit};
+    case 'tab-limit-set': {
+      if(!Number.isSafeInteger(value)||value<0||value>1000000)
+        return {ok:false,message:'Enter a Tab Limit from 0 to 1000000'};
+      try{saveTabLimit(value);}catch{return {ok:false,message:'Could not save Tab Limit'};}
+      tabLimit=value;return {ok:true,tabLimit};
+    }
     case 'activate': if (Number.isSafeInteger(value) && tabs.some(t => t.id === value)) {
       activeId = value;
       const selected = currentTab();
@@ -412,6 +433,7 @@ app.on('web-contents-created', (_event, contents) => {
 });
 
 app.whenReady().then(async () => {
+  tabLimit=loadTabLimit();
   lockDown(normalSession());
   mainWindow = new BrowserWindow({
     width: 1380, height: 880, minWidth: 700, minHeight: 520, show: false,
