@@ -2396,6 +2396,18 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
     // OAuth, Drive and Gmail are only available to the trusted local chrome.
     // All remote network calls run on worker threads so they never pause the
     // native browser event loop. No Google token is returned to web content.
+    if name=="browser-form-context" {
+        let handle=app.clone();
+        return tauri::async_runtime::spawn_blocking(move || {
+            let (origin,mut field)=browser_page_eval(&handle,FORM_FIELD_CONTEXT_JS)?;
+            if let Some(data)=field.as_object_mut(){
+                data.insert("origin".into(),Value::String(origin));
+                data.insert("top".into(),json!(chrome_top(&handle)));
+                return Ok(Value::Object(data.clone()));
+            }
+            Ok(Value::Null)
+        }).await.map_err(|e|e.to_string())?;
+    }
     if name=="live-sync-auth" {
         let url=value.get("url").and_then(Value::as_str)
             .ok_or("Supabase project URL is required")?.to_owned();
@@ -3139,6 +3151,50 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         "vault-lock" => {
             app.state::<Mutex<password_vault::Vault>>().lock().map_err(|e|e.to_string())?.lock();
             return Ok(json!({"ok":true}));
+        }
+        "vault-capture-login" => {
+            // Only the trusted chrome's explicit Save action executes this.
+            // Password values never cross the chrome IPC or appear in a toast.
+            let handle=app.clone();
+            return tauri::async_runtime::spawn_blocking(move||{
+                let (origin,mut value)=browser_page_eval(&handle,CAPTURE_LOGIN_JS)?;
+                let username=value.get("username").and_then(Value::as_str)
+                    .ok_or("No completed login form was found")?.to_owned();
+                let mut password=value.get("password").and_then(Value::as_str)
+                    .ok_or("No password was entered")?.to_owned();
+                value=Value::Null;
+                let state=handle.state::<Mutex<password_vault::Vault>>();
+                let mut vault=state.lock().map_err(|e|e.to_string())?;
+                let result=vault.put(origin,username,password.clone(),true)
+                    .and_then(|_|vault.save(&password_vault::file(&handle)?));
+                password.zeroize();
+                result?;
+                let _=handle.emit_to("chrome","minternet:vault-changed",());
+                Ok(json!({"ok":true}))
+            }).await.map_err(|e|e.to_string())?;
+        }
+        "vault-identity-capture" => {
+            let identity_id=value.get("id").and_then(Value::as_str).map(str::to_owned);
+            let key=value.get("key").and_then(Value::as_str)
+                .ok_or("Field type required")?.to_owned();
+            let handle=app.clone();
+            return tauri::async_runtime::spawn_blocking(move||{
+                let (_origin,field)=browser_page_eval(&handle,CAPTURE_IDENTITY_JS)?;
+                let value=field.get("value").and_then(Value::as_str)
+                    .ok_or("No field value was found")?.to_owned();
+                let state=handle.state::<Mutex<password_vault::Vault>>();
+                let mut vault=state.lock().map_err(|e|e.to_string())?;
+                let existing=identity_id.as_deref().and_then(|id|vault.identity(id));
+                let mut fields=existing.as_ref()
+                    .map(|item|item.fields.clone()).unwrap_or_default();
+                fields.insert(key,value);
+                let name=existing.map(|item|item.label)
+                    .unwrap_or_else(||"New Identity".into());
+                let id=vault.put_identity(identity_id.as_deref(),name,fields)?;
+                vault.save(&password_vault::file(&handle)?)?;
+                let _=handle.emit_to("chrome","minternet:vault-changed",());
+                Ok(json!({"ok":true,"id":id}))
+            }).await.map_err(|e|e.to_string())?;
         }
         "vault-card-list" => {
             let state=app.state::<Mutex<password_vault::Vault>>();
