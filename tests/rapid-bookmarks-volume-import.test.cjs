@@ -243,7 +243,9 @@ test('non-private SPA routes refresh from WebView into persisted session',()=>{
   const native=read('native/desktop/src-tauri/src/main.rs');
   const app=read('ui/app.js');
   assert.match(native,/fn refresh_session_urls\(app:&tauri::AppHandle\)->usize/);
-  assert.match(native,/if address!=previous && is_real_page_url\(address\)/);
+  assert.match(native,/eval_with_callback\(LIVE_PAGE_LOCATION_JS/);
+  assert.match(native,/apply_live_page_location\(&handle,id,&owned_label,&answer\)/);
+  assert.match(native,/WindowEvent::CloseRequested/);
   assert.match(native,/\.on_document_title_changed\(move \|view, title\|/);
   assert.match(native,/"session-refresh-urls" =>/);
   assert.match(native,/browser\.tabs\.iter\(\)\.filter\(\|t\|!t\.private && t\.secret_id\.is_none\(\)\)/);
