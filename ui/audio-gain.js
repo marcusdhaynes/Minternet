@@ -23,6 +23,10 @@
       const AudioContext=window.AudioContext||window.webkitAudioContext;
       if(!AudioContext)return;
       if(!state.context)state.context=new AudioContext();
+      // Never reroute a playing site into a suspended AudioContext: that can
+      // silence it. Keep the original output until a real user gesture lets
+      // the browser start its audio graph.
+      if(state.context.state!=='running')return;
       const source=state.context.createMediaElementSource(media);
       const gain=state.context.createGain();
       gain.gain.value=state.level;
@@ -49,6 +53,13 @@
     if(state.watcher||!document.documentElement)return;
     state.watcher=new MutationObserver(schedule);
     state.watcher.observe(document.documentElement,{childList:true,subtree:true});
+    const activate=()=>{
+      if(state.context?.state==='suspended')
+        void state.context.resume().then(schedule).catch(()=>{});
+    };
+    // Capture normal playback gestures without intercepting site input.
+    document.addEventListener('pointerdown',activate,true);
+    document.addEventListener('keydown',activate,true);
     document.addEventListener('playing',event=>{
       const media=event.target;
       if(!media?.matches?.('audio,video'))return;
