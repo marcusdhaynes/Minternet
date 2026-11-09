@@ -45,11 +45,17 @@
       const root=JSON.parse(data);
       if(Array.isArray(root))return root;
       if(Array.isArray(root?.items)){
-        // Bitwarden JSON: login records contain login.uris, username, password.
-        return root.items.filter(item=>item?.type===1||item?.login).map(item=>({
-          origin:item.login?.uris?.find(x=>x?.uri)?.uri||'',
-          username:item.login?.username||'',password:item.login?.password||'',
-          name:item.name||''
+        // Bitwarden JSON: type 1 = login; type 3 = card.
+        if(kind==='password')return root.items
+          .filter(item=>item?.type===1||item?.login).map(item=>({
+            origin:item.login?.uris?.find(x=>x?.uri)?.uri||'',
+            username:item.login?.username||'',password:item.login?.password||'',
+            name:item.name||''
+          }));
+        return root.items.filter(item=>item?.type===3||item?.card).map(item=>({
+          label:item.name||'',name:item.card?.cardholderName||'',
+          number:item.card?.number||'',month:item.card?.expMonth||'',
+          year:item.card?.expYear||'',postal:item.card?.postal||''
         }));
       }
       const dataRows=kind==='password'
