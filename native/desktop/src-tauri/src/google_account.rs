@@ -8,6 +8,7 @@ use zeroize::Zeroize;
 use rand::{rngs::OsRng,RngCore};
 use base64::{Engine as _,engine::general_purpose::URL_SAFE_NO_PAD};
 use sha2::{Sha256,Digest};
+use tauri::Manager;
 
 const DRIVE_SCOPE:&str="https://www.googleapis.com/auth/drive.appdata";
 const MAIL_SCOPE:&str="https://www.googleapis.com/auth/gmail.readonly";
@@ -215,7 +216,7 @@ fn userinfo(access:&str)->Result<String,String>{
 }
 /// Desktop PKCE authorization uses an OS browser and a random loopback port.
 /// The app cannot read Google website cookies, and no password enters Minternet.
-pub fn login(state:&Mutex<GoogleState>,client_id:&str,mail:bool)->Result<Value,String>{
+pub fn login(app:&tauri::AppHandle,state:&Mutex<GoogleState>,client_id:&str,mail:bool)->Result<Value,String>{
     if !valid_client_id(client_id){
         return Err("Enter the Desktop OAuth Client ID registered for Minternet in Google Cloud".into());
     }
@@ -286,6 +287,9 @@ pub fn login(state:&Mutex<GoogleState>,client_id:&str,mail:bool)->Result<Value,S
             Err(e)=>return Err(e.to_string())
         }
     };
+    // Bring the user back to Minternet as soon as Google redirects to the
+    // verified local callback, without requiring a manual app switch.
+    if let Some(window)=app.get_window("main") { let _=window.set_focus(); }
     let auth=token_reply("https://oauth2.googleapis.com/token",&[
         ("client_id",client_id),("code",&code),("code_verifier",&verifier),
         ("redirect_uri",&redirect),("grant_type","authorization_code")
