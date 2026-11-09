@@ -3175,7 +3175,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         let mail=name=="google-gmail-login";
         let handle=app.clone();
         return tauri::async_runtime::spawn_blocking(move||
-            google_account::login(&handle.state::<Mutex<google_account::GoogleState>>(),&client,mail))
+            google_account::login(&handle.state::<Mutex<google_account::GoogleState>>(),&client,mail,&handle))
             .await.map_err(|e|e.to_string())?;
     }
     if name=="google-sync-enable" {
