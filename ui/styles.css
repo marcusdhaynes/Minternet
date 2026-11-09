@@ -1649,19 +1649,19 @@ html.minternet-overlay-active .group-editor-backdrop {
 
 /* Browser audio: a full three-step 0–300% control with 100/200% ticks. */
 .minternet-volume {
-  flex:0 0 auto;display:flex;align-items:center;gap:2px;
-  min-width:0;height:26px;margin-left:0;padding:0 1px;
+  flex:0 0 auto;display:flex;align-items:center;gap:0;
+  min-width:0;height:26px;margin:0;padding:0;
   color:#d6d7ec;border-left:0;
 }
 .volume-button,.volume-number {
-  box-sizing:border-box;flex:0 0 30px;width:30px;height:23px;
+  box-sizing:border-box;flex:0 0 25px;width:25px;height:23px;
   border:0;border-radius:4px;background:transparent;color:inherit;
-  padding:1px 1px;text-align:center;
+  padding:0;text-align:center;
 }
 .volume-button {display:grid;place-items:center;cursor:pointer;}
 .volume-button:hover {background:#ffffff22;}
-.volume-button svg {pointer-events:none;}
-.volume-button .volume-mute-slash {display:none;stroke:#e8b4cc;stroke-width:2.2;}
+.volume-button svg {pointer-events:none;width:16px;height:16px;}
+.volume-button .volume-mute-slash {display:none;stroke:#e8b4cc;stroke-width:1.65;stroke-linecap:round;}
 .volume-button[aria-pressed="true"] .volume-mute-slash {display:block;}
 .volume-button[aria-pressed="true"] .volume-wave {display:none;}
 .volume-number {
@@ -1669,19 +1669,45 @@ html.minternet-overlay-active .group-editor-backdrop {
   font-size:10px;font-variant-numeric:tabular-nums;
 }
 .volume-number[hidden],.volume-button[hidden]{display:none!important;}
-.volume-slider-wrap {position:relative;width:141px;min-width:120px;height:24px;display:flex;align-items:center;}
+.volume-slider-wrap {
+  --volume-thumb-size:14px;
+  position:relative;width:141px;min-width:120px;height:23px;
+  display:flex;align-items:center;
+}
 .volume-slider-wrap input {
-  width:100%;height:22px;margin:0;cursor:pointer;
-  accent-color:#b1a3f1;background:transparent;
+  position:relative;z-index:1;
+  appearance:none;-webkit-appearance:none;
+  box-sizing:border-box;width:100%;height:23px;
+  border:0;padding:0;margin:0;cursor:pointer;background:transparent;
+}
+.volume-slider-wrap input::-webkit-slider-runnable-track {
+  box-sizing:border-box;height:4px;border-radius:999px;background:#555273;
+}
+.volume-slider-wrap input::-webkit-slider-thumb {
+  appearance:none;-webkit-appearance:none;
+  box-sizing:border-box;width:var(--volume-thumb-size);height:var(--volume-thumb-size);
+  border:1px solid #b9abf7;border-radius:50%;background:#d4cafb;
+  margin-top:-5px;
+}
+.volume-slider-wrap input::-moz-range-track {
+  box-sizing:border-box;height:4px;border-radius:999px;background:#555273;
+}
+.volume-slider-wrap input::-moz-range-thumb {
+  box-sizing:border-box;width:var(--volume-thumb-size);height:var(--volume-thumb-size);
+  border:1px solid #b9abf7;border-radius:50%;background:#d4cafb;
 }
 .volume-tick {
-  position:absolute;top:8px;width:1px;height:8px;
-  background:#f0eaffb8;pointer-events:none;z-index:1;
+  position:absolute;top:50%;width:1px;height:8px;
+  transform:translate(-50%,-50%);
+  background:#f0eaffb8;pointer-events:none;z-index:0;
 }
-.volume-tick-100 {left:33.333%;}
-.volume-tick-200 {left:66.666%;}
+/* Thumb center travels 7px..(width-7px), not 0..width.
+   At 100/300 it is 33.333% + 7/3 px; at 200/300,
+   66.667% - 7/3 px. Both ticks are the same 8px high. */
+.volume-tick-100 {left:calc(33.333333% + 2.333333px);}
+.volume-tick-200 {left:calc(66.666667% - 2.333333px);}
 #volumeValue {
-  min-width:31px;text-align:right;font:10px/1.2 system-ui,sans-serif;
+  min-width:28px;text-align:right;font:10px/1.2 system-ui,sans-serif;
   font-variant-numeric:tabular-nums;color:#aca8cb;
 }
 .auto-unload-setting .volume-hold-setting {display:flex;align-items:center;gap:4px;flex:0 0 auto;}
@@ -1703,5 +1729,22 @@ html.minternet-overlay-active .group-editor-backdrop {
 .credential-import-summary[hidden] {display:none;}
 @media(max-width:900px){
   .volume-slider-wrap{width:120px;min-width:104px;}
-  .minternet-volume{gap:1px;}
+  .minternet-volume{gap:0;}
 }
+
+/* One connected segmented pill, defaulting to 10% range steps. */
+.volume-increment-pills {
+  flex:0 0 auto;display:inline-flex;align-items:stretch;overflow:hidden;
+  padding:0;border:1px solid #5f6684;border-radius:999px;
+  background:#131b31;height:25px;
+}
+.volume-increment-pills button {
+  min-width:40px;border:0;border-radius:0;background:transparent;
+  color:#b4bfd9;font-size:11px;line-height:23px;font-weight:600;
+  padding:0 10px;cursor:pointer;
+}
+.volume-increment-pills button + button {border-left:1px solid #5f6684;}
+.volume-increment-pills button[aria-pressed="true"] {
+  color:#10162a;background:#b9acf6;
+}
+.volume-increment-pills button:focus-visible {outline:2px solid #e7d5ff;outline-offset:-2px;}

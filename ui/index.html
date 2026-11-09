@@ -78,7 +78,7 @@
       </form>
       <div class="minternet-volume" id="minternetVolume" aria-label="Browser Volume">
         <button id="volumeButton" class="volume-button" type="button" title="Click to Mute; Hold to Enter Volume" aria-label="Mute Browser Audio" aria-pressed="false">
-          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z"/><path class="volume-wave" d="M16 9q4 3 0 6"/><path class="volume-mute-slash" d="M4 20 21 3"/></svg>
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z"/><path class="volume-wave" d="M16 9q4 3 0 6"/><path class="volume-mute-slash" d="M7 17 17 7"/></svg>
         </button>
         <input id="volumeNumber" class="volume-number" type="number" min="0" max="300" step="1" inputmode="numeric" aria-label="Enter Browser Volume Percent" hidden>
         <div class="volume-slider-wrap">
@@ -193,6 +193,13 @@
         <label class="bookmark-toggle tab-icon-toggle"><span><strong>Show App Icon in Tab Bar</strong><small>Hide the M icon to shift the group launcher and tabs left</small></span><input id="showTabBarAppIcon" type="checkbox" checked></label>
         <button id="resetTabWidths" class="tab-size-reset" type="button">Reset Width &amp; Padding</button>
       </section>
+      <div class="auto-unload-setting volume-increments-setting" role="group" aria-label="Volume Increments">
+        <span><strong>Volume Increments</strong><small>Choose slider steps of 1% or 10%</small></span>
+        <div class="volume-increment-pills" aria-label="Volume Increment">
+          <button id="volumeIncrement1" type="button" aria-pressed="false" title="Adjust Volume in 1% Increments">1</button>
+          <button id="volumeIncrement10" type="button" aria-pressed="true" title="Adjust Volume in 10% Increments">10</button>
+        </div>
+      </div>
       <label class="auto-unload-setting" for="volumeHoldDelay"><span><strong>Volume Button Hold Duration</strong><small>Hold the speaker icon to enter an exact volume</small></span><span class="volume-hold-setting"><input id="volumeHoldDelay" type="number" min="0.1" max="2" step="0.05" inputmode="decimal" value="0.25" aria-label="Volume hold duration in seconds"> s</span></label>
       <label class="auto-unload-setting" for="autoUnloadMinutes"><span><strong>Unload Inactive Tabs</strong><small>Only when idle, not loading or holding entered data</small></span><select id="autoUnloadMinutes" aria-label="Automatically unload inactive tabs"><option value="0">Never</option><option value="1" selected>1 minute</option><option value="2">2 minutes</option><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option><option value="120">2 hours</option></select></label>
       <div class="zoom-setting-row" aria-label="Page Zoom">

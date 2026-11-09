@@ -146,7 +146,7 @@ test('Web Audio gain numerically amplifies eligible local media up to 300%',()=>
 });
 
 test('volume magnet snaps prominently to 0, 100, 200, 300 with fine keyboard steps',()=>{
-  const elements=Object.fromEntries(['volumeSlider','volumeButton','volumeNumber','volumeValue','volumeHoldDelay']
+  const elements=Object.fromEntries(['volumeSlider','volumeButton','volumeNumber','volumeValue','volumeHoldDelay','volumeIncrement1','volumeIncrement10']
     .map(id=>[id,{value:'',hidden:false,innerText:'',textContent:'',listeners:{},
       addEventListener(type,fn){this.listeners[type]=fn;},
       setAttribute(name,value){this[name]=value;}}]));
@@ -160,6 +160,9 @@ test('volume magnet snaps prominently to 0, 100, 200, 300 with fine keyboard ste
   });
   const slider=elements.volumeSlider,output=elements.volumeValue;
   const send=n=>{slider.value=String(n);slider.listeners.input();return output.textContent;};
+  assert.equal(elements.volumeIncrement10['aria-pressed'],'true');
+  elements.volumeIncrement1.listeners.click();
+  assert.equal(elements.volumeIncrement1['aria-pressed'],'true');
   slider.listeners.pointerdown();
   assert.equal(send(8),'0%');
   assert.equal(send(112),'112%');
@@ -174,10 +177,62 @@ test('volume magnet snaps prominently to 0, 100, 200, 300 with fine keyboard ste
 test('volume chrome has no divider and keeps the slider long enough for evenly spaced ticks',()=>{
   const css=read('ui/styles.css');
   const segment=css.slice(css.indexOf('/* Browser audio:'),css.indexOf('.credential-import-settings'));
-  assert.match(segment,/\.minternet-volume\s*\{[^}]*gap:2px;/);
+  assert.match(segment,/\.minternet-volume\s*\{[^}]*gap:0;/);
   assert.match(segment,/\.minternet-volume\s*\{[^}]*border-left:0;/);
-  assert.match(segment,/flex:0 0 30px;width:30px/);
+  assert.match(segment,/flex:0 0 25px;width:25px/);
   assert.match(segment,/\.volume-slider-wrap\s*\{[^}]*width:141px;/);
-  assert.match(segment,/\.volume-tick-100\s*\{left:33\.333%;\}/);
-  assert.match(segment,/\.volume-tick-200\s*\{left:66\.666%;\}/);
+  assert.match(segment,/\.volume-tick-100\s*\{left:calc\(33\.333333% \+ 2\.333333px\);\}/);
+  assert.match(segment,/\.volume-tick-200\s*\{left:calc\(66\.666667% - 2\.333333px\);\}/);
+  assert.match(segment,/--volume-thumb-size:14px/);
+  assert.match(segment,/top:50%;width:1px;height:8px/);
+});
+
+test('volume increments default to 10 and stay saved across launches',()=>{
+  const store=new Map();
+  const make=()=>{
+    const elements=Object.fromEntries(['volumeSlider','volumeButton','volumeNumber','volumeValue',
+      'volumeHoldDelay','volumeIncrement1','volumeIncrement10'].map(id=>
+      [id,{value:'',listeners:{},setAttribute(k,v){this[k]=v;},
+        addEventListener(k,fn){this.listeners[k]=fn;}}]));
+    const window={minternet:{command:async()=>({ok:true})}};
+    vm.runInNewContext(read('ui/volume-ui.js'),{window,
+      document:{getElementById:id=>elements[id]},
+      localStorage:{getItem:k=>store.get(k)||null,setItem:(k,v)=>store.set(k,v)},
+      requestAnimationFrame:fn=>fn(),setTimeout,clearTimeout,Number,Math,JSON,String,Object});
+    return {elements,window};
+  };
+  const {elements,window}=make(),slider=elements.volumeSlider;
+  const set=n=>{slider.value=String(n);slider.listeners.input();return elements.volumeValue.textContent;};
+  assert.equal(window.minternetVolume.get().increments,10);
+  assert.equal(elements.volumeIncrement10['aria-pressed'],'true');
+  assert.equal(set(13),'10%');
+  assert.equal(set(24),'20%');
+  assert.equal(set(198),'200%');
+  slider.listeners.keydown({key:'ArrowRight',preventDefault(){}});
+  assert.equal(elements.volumeValue.textContent,'210%');
+  elements.volumeIncrement1.listeners.click();
+  assert.equal(set(213),'213%');
+  assert.equal(JSON.parse(store.get('minternet.volume.v1')).increments,1);
+  const restored=make();
+  assert.equal(restored.window.minternetVolume.get().increments,1);
+  restored.elements.volumeIncrement10.listeners.click();
+  assert.equal(restored.window.minternetVolume.get().increments,10);
+});
+
+test('two equal-height volume ticks precisely align with the 14px thumb travel',()=>{
+  const styles=read('ui/styles.css');
+  const volume=styles.slice(styles.indexOf('/* Browser audio:'));
+  const travel=(width,fraction)=>7+(width-14)*fraction;
+  const tick100=width=>width/3+2.333333;
+  const tick200=width=>width*2/3-2.333333;
+  for(const width of [120,141,180]){
+    assert.ok(Math.abs(travel(width,1/3)-tick100(width))<0.00001);
+    assert.ok(Math.abs(travel(width,2/3)-tick200(width))<0.00001);
+  }
+  assert.match(volume,/\.volume-tick\s*\{[^}]*top:50%;width:1px;height:8px;/);
+  assert.match(volume,/transform:translate\(-50%,-50%\)/);
+  assert.match(volume,/\.volume-mute-slash \{display:none;stroke:[^;]+;stroke-width:1\.65;/);
+  assert.match(html,/class="volume-mute-slash" d="M7 17 17 7"/);
+  assert.match(html,/id="volumeIncrement1"[^>]*aria-pressed="false"/);
+  assert.match(html,/id="volumeIncrement10"[^>]*aria-pressed="true"/);
 });

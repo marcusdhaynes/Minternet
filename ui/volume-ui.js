@@ -5,6 +5,7 @@
   const $=id=>document.getElementById(id);
   const slider=$('volumeSlider'),button=$('volumeButton');
   const input=$('volumeNumber'),display=$('volumeValue'),hold=$('volumeHoldDelay');
+  const increment1=$('volumeIncrement1'),increment10=$('volumeIncrement10');
   if(!slider||!button||!input||!display||!hold||!window.minternet)return;
   const KEY='minternet.volume.v1';
   const clamp=n=>Math.max(0,Math.min(300,Math.round(n)));
@@ -22,16 +23,17 @@
     }
     return n;
   };
-  let level=100,muted=false,holdSeconds=0.25;
+  let level=100,muted=false,holdSeconds=0.25,increments=10;
   try{
     const saved=JSON.parse(localStorage.getItem(KEY)||'null');
     if(Number.isInteger(saved?.level)&&saved.level>=0&&saved.level<=300)level=saved.level;
     if(typeof saved?.muted==='boolean')muted=saved.muted;
+    if(saved?.increments===1||saved?.increments===10)increments=saved.increments;
     if(Number.isFinite(saved?.holdSeconds)&&saved.holdSeconds>=0.1&&saved.holdSeconds<=2)
       holdSeconds=saved.holdSeconds;
   }catch{}
   const persist=()=>{
-    try{localStorage.setItem(KEY,JSON.stringify({level,muted,holdSeconds}));}catch{}
+    try{localStorage.setItem(KEY,JSON.stringify({level,muted,holdSeconds,increments}));}catch{}
   };
   let pending=false,dirty=false;
   async function flush(){
@@ -56,7 +58,13 @@
   }
   function render(){
     slider.value=String(level);
+    // Native step stays 1 to allow exact typed values; pointer and keyboard
+    // selection are quantized below using the selected step of 1 or 10.
+    slider.step='1';
     slider.setAttribute('aria-valuetext',level+' percent');
+    slider.setAttribute('data-increments',String(increments));
+    if(increment1)increment1.setAttribute('aria-pressed',String(increments===1));
+    if(increment10)increment10.setAttribute('aria-pressed',String(increments===10));
     button.setAttribute('aria-pressed',String(muted||level===0));
     button.title=muted?'Unmute Browser Audio · Hold for Exact Volume':
       'Mute Browser Audio · Hold for Exact Volume';
@@ -112,7 +120,32 @@
   for(const kind of ['pointerup','pointercancel','lostpointercapture']){
     slider.addEventListener(kind,()=>{pointerDragging=false;magnet=null;});
   }
-  slider.addEventListener('input',()=>update(snap(Number(slider.value),pointerDragging)));
+  // Mouse/touch and keyboard selection obey the 1% / 10% setting.
+  // The held speaker icon still allows an exact typed percentage.
+  slider.addEventListener('input',()=>{
+    const value=Math.round(Number(slider.value)/increments)*increments;
+    update(snap(value,pointerDragging));
+  });
+  slider.addEventListener('keydown',event=>{
+    const keys={ArrowRight:increments,ArrowUp:increments,
+      ArrowLeft:-increments,ArrowDown:-increments,
+      PageUp:increments*10,PageDown:-increments*10};
+    if(Object.hasOwn(keys,event.key)){
+      event.preventDefault();
+      update(clamp(level+keys[event.key]));
+    }else if(event.key==='Home'||event.key==='End'){
+      event.preventDefault();
+      update(event.key==='Home'?0:300);
+    }
+  });
+  function setIncrements(value){
+    if(value!==1&&value!==10)return;
+    increments=value;
+    magnet=null;
+    render();persist();
+  }
+  increment1?.addEventListener('click',()=>setIncrements(1));
+  increment10?.addEventListener('click',()=>setIncrements(10));
   input.addEventListener('keydown',event=>{
     if(event.key==='Enter'){event.preventDefault();closeEdit(true);button.focus();}
     if(event.key==='Escape'){event.preventDefault();closeEdit(false);button.focus();}
@@ -129,5 +162,5 @@
   hold.addEventListener('change',changeHold);
   render();
   requestApply();
-  window.minternetVolume={get:()=>({level,muted,holdSeconds})};
+  window.minternetVolume={get:()=>({level,muted,holdSeconds,increments})};
 })();
