@@ -7,6 +7,8 @@
   const badge=document.getElementById('downloadsBadge');
   if(!api||!button||!badge)return;
   let entries=[],panel=null,refreshing=false,activeProgress=false;
+  const viewedDownloadIds=new Set();
+  let downloadsOpened=false;
   const command=(name,value)=>api.command(name,value);
   function close(){
     if(!panel)return;
@@ -21,12 +23,17 @@
   }
   function key(event){if(event.key==='Escape'){event.preventDefault();close();button.focus();}}
   function updateBadge(){
-    const active=entries.filter(entry=>entry.status==='downloading').length;
-    const count=active||entries.filter(entry=>entry.status==='completed').length;
-    badge.hidden=!count;
+    // The badge represents unseen downloads, not a perpetual history count.
+    // Opening the panel acknowledges its existing entries; new downloads can
+    // still notify the user when the panel is subsequently closed.
+    if(panel)for(const entry of entries)viewedDownloadIds.add(entry.id);
+    const unseen=entries.filter(entry=>!viewedDownloadIds.has(entry.id)&&
+      (entry.status==='downloading'||entry.status==='completed')).length;
+    const count=unseen;
+    badge.hidden=Boolean(panel)||!count;
     badge.textContent=count>9?'9+':String(count);
-    badge.classList.toggle('in-progress',active>0);
-    button.title=active?active+' downloads in progress':'Recent Downloads';
+    badge.classList.toggle('in-progress',entries.some(entry=>entry.status==='downloading'));
+    button.title=unseen?unseen+' new download(s)':'Recent Downloads';
   }
   function formatBytes(n){
     if(!Number.isFinite(n)||n<1)return '0 B';
@@ -76,8 +83,10 @@
       const actions=document.createElement('div');actions.className='downloads-actions';
       const openFile=document.createElement('button');openFile.type='button';
       openFile.className='downloads-open';
-      openFile.textContent=/\.(exe|msi)$/i.test(entry.name)?'Run':'Open';
-      openFile.title='Open '+entry.name+' using the operating system';
+      const runnable=/\.(exe|msi)$/i.test(entry.name);
+      openFile.textContent=runnable?'▶':'Open';
+      openFile.classList.toggle('downloads-run',runnable);
+      openFile.title=(runnable?'Run ':'Open ')+entry.name+' using the operating system';
       openFile.setAttribute('aria-label',openFile.title);
       openFile.disabled=!completed;
       openFile.addEventListener('click',async()=>{
@@ -100,22 +109,36 @@
         // A native drag is necessary: HTML5 can only drag URLs, not real
         // filesystem files, into Windows Explorer. Wait for a short genuine
         // pointer movement so simple clicks still open the correct controls.
-        let start=null;
+        let start=null,dragged=false;
+        // Capture this *row's* pointer, not the last item under the mouse.
+        // HTML5's drag payload is never substituted for the real OS file.
+        row.draggable=false;
+        name.draggable=false;
+        row.addEventListener('dragstart',event=>event.preventDefault());
         row.addEventListener('pointerdown',event=>{
           if(event.button!==0||event.target.closest('button'))return;
+          dragged=false;
           start={id:event.pointerId,x:event.clientX,y:event.clientY};
+          if(row.setPointerCapture)row.setPointerCapture(event.pointerId);
         });
         row.addEventListener('pointermove',event=>{
           if(!start||event.pointerId!==start.id||!(event.buttons&1))return;
           if(Math.hypot(event.clientX-start.x,event.clientY-start.y)<6)return;
-          start=null;
-          if(window.__TAURI__)void command('downloads-drag',entry.id).then(result=>{
+          const id=Number(row.dataset.downloadId);
+          const pointerId=start.id;
+          start=null;dragged=true;
+          if(row.hasPointerCapture?.(pointerId))row.releasePointerCapture(pointerId);
+          event.preventDefault();
+          if(window.__TAURI__)void command('downloads-drag',id).then(result=>{
             if(result?.message)window.minternetToast?.(result.message);
-          });
+          }).catch(error=>window.minternetToast?.(String(error?.message||error)));
         });
         for(const type of ['pointerup','pointercancel','lostpointercapture'])
           row.addEventListener(type,()=>{start=null;});
-        name.addEventListener('click',()=>{void command('downloads-open',entry.id);});
+        name.addEventListener('click',event=>{
+          if(dragged){event.preventDefault();dragged=false;return;}
+          void command('downloads-open',entry.id);
+        });
       }
       row.append(symbol,details,actions);list.append(row);
     }
@@ -154,7 +177,7 @@
     clear.textContent='Clear';clear.title='Clear download history (does not delete files)';
     clear.addEventListener('click',async()=>{
       const result=await command('downloads-clear');
-      if(result?.ok){entries=[];render();}
+      if(result?.ok){entries=[];viewedDownloadIds.clear();render();}
     });
     header.append(title,clear);
     const list=document.createElement('div');list.className='downloads-entries';
@@ -162,7 +185,7 @@
     footer.textContent='Files are saved in your Downloads folder';
     host.append(header,list,footer);
     document.body.append(host);
-    panel=host;button.setAttribute('aria-expanded','true');
+    panel=host;downloadsOpened=true;button.setAttribute('aria-expanded','true');
     position();render();
     document.addEventListener('pointerdown',outside,true);
     document.addEventListener('keydown',key,true);
