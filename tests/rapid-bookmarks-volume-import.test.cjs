@@ -113,3 +113,34 @@ test('source importer never scans browser profiles and uses unlocked vault',()=>
   assert.match(native,/if !vault\.unlocked\(\)/);
   assert.match(native,/vault\.save\(&password_vault::file\(&app\)\?\)\?/);
 });
+
+
+test('Web Audio gain numerically amplifies eligible local media up to 300%',()=>{
+  let gain=null;
+  const media={currentSrc:'https://example.com/video.mp4',src:'',srcObject:null,
+    mediaKeys:null,crossOrigin:null,paused:true};
+  const context={
+    destination:{},state:'running',
+    createMediaElementSource(node){
+      assert.equal(node,media);
+      return {connect(target){return target;}};
+    },
+    createGain(){gain={gain:{value:1},connect(){}};return gain;}
+  };
+  const document={
+    documentElement:{},
+    addEventListener(){},
+    querySelectorAll(){return [media];}
+  };
+  const win={AudioContext:function(){return context;}};
+  vm.runInNewContext(audio,{window:win,document,location:{href:'https://example.com/',origin:'https://example.com'},
+    MutationObserver:function(){this.observe=()=>{};},
+    requestAnimationFrame:callback=>callback(),URL,Number,Set,WeakMap});
+  assert.equal(typeof win.__minternetAudioGain?.setLevel,'function');
+  win.__minternetAudioGain.setLevel(2);
+  assert.equal(gain?.gain.value,2);
+  win.__minternetAudioGain.setLevel(3);
+  assert.equal(gain?.gain.value,3);
+  win.__minternetAudioGain.setLevel(1);
+  assert.equal(gain?.gain.value,1);
+});
