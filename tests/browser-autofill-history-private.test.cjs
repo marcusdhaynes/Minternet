@@ -16,11 +16,12 @@ test('payment method button opens the encrypted native vault, not an untrusted w
  assert.match(ui,/vault-card-remove/);
  assert.match(ui,/vault-lock/);
 });
-test('new normal and private blank tabs focus the address bar',()=>{
+test('new normal and private homepage tabs focus the address bar',()=>{
  const ui=get('ui/app.js');
  assert.match(ui,/const isNewTab=/);
- assert.match(ui,/data\.tabs\.some\(tab=>tab\.id===data\.activeId&&tab\.url==='about:blank'&&\!tab\.secretTab\)/);
- assert.match(ui,/address\?\.focus\(\)/);
+ assert.match(ui,/pendingNewTabFocus && data\.activeId/);
+ assert.match(ui,/data\.tabs\.some\(tab=>tab\.id===data\.activeId&&\!tab\.secretTab\)/);
+ assert.match(ui,/field\.focus\(\)/);
  assert.match(ui,/\['newPrivate','new-private'\]/);
 });
 test('private tab history cannot be saved or queried in the native browser',()=>{
