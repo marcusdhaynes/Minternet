@@ -376,8 +376,16 @@
     for(const element of elements){
       const rect=element.getBoundingClientRect();
       if(event.clientX<=rect.right){
+        const item=model.find(data,element.dataset.bookmarkId);
+        const fraction=(event.clientX-rect.left)/Math.max(rect.width,1);
+        // The center of any folder on the bookmark bar accepts a real move
+        // into that folder. The outer quarters remain before/after reorder
+        // targets so bookmarks can still be pulled back out onto the bar.
+        if(item?.kind==='folder'&&fraction>=0.25&&fraction<=0.75){
+          return {anchorId:null,parentId:item.id,inside:true,element};
+        }
         return {anchorId:element.dataset.bookmarkId,
-          after:event.clientX>=rect.left+rect.width/2,element};
+          after:fraction>=0.5,element};
       }
     }
     const last=elements[elements.length-1];
@@ -626,7 +634,7 @@
   }
   function internalPlacement(event){
     const bar=barPlacement(event);
-    if(bar)return {...bar,parentId:model.BOOKMARK_BAR_ID};
+    if(bar)return {...bar,parentId:bar.parentId||model.BOOKMARK_BAR_ID};
     const target=event.target;
     if(!target?.closest)return null;
     const row=target.closest('.bookmark-tree-line,.bookmark-folder-row');
@@ -1136,6 +1144,7 @@
     },
     openLink, toggleBookmark, manager:()=>{renderManager();setMode('manager');},
     toggleBar:()=>changeVisibility(!data.visible),
+    openSettings:()=>setMode('settings'),
     closeOverlay,restoreUndoBookmark,
     applySyncedState:incoming=>{
       if(!incoming || !Array.isArray(incoming.items))return false;
