@@ -3126,7 +3126,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         let mail=name=="google-gmail-login";
         let handle=app.clone();
         return tauri::async_runtime::spawn_blocking(move||
-            google_account::login(&handle.state::<Mutex<google_account::GoogleState>>(),&client,mail))
+            google_account::login(&handle,&handle.state::<Mutex<google_account::GoogleState>>(),&client,mail))
             .await.map_err(|e|e.to_string())?;
     }
     if name=="google-sync-enable" {
@@ -5102,6 +5102,13 @@ fn main() {
                                 pending.store(false,Ordering::Release);
                             }
                         });
+                    },
+                    tauri::WindowEvent::CloseRequested { .. } => {
+                        // On title-bar close / Alt-F4, capture the last SPA path
+                        // before the WebView2 controllers and their URLs vanish.
+                        // Ordinary browser state is retained; private URLs are excluded.
+                        refresh_session_urls(&handle);
+                        let _=save_session(&handle);
                     },
                     tauri::WindowEvent::Focused(true) => {
                         // Force a compositor refresh on restore/focus even when
