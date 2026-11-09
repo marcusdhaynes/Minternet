@@ -6,7 +6,7 @@
   const button=document.getElementById('downloadsButton');
   const badge=document.getElementById('downloadsBadge');
   if(!api||!button||!badge)return;
-  let entries=[],panel=null,refreshing=false,activeProgress=false,seenDownloads=false;
+  let entries=[],panel=null,refreshing=false,activeProgress=false,seenDownloads=false,dragPending=false;
   const command=(name,value)=>api.command(name,value);
   function close(){
     if(!panel)return;
@@ -36,6 +36,9 @@
   }
   function render(){
     updateBadge();
+    // Preserve the originating row while the OS drag is being started.
+    // Download progress polling must not replace it under the pointer.
+    if(dragPending)return;
     activeProgress=entries.some(entry=>entry.status==='downloading');
     button.classList.toggle('downloads-running',activeProgress);
     if(!panel)return;
@@ -108,6 +111,7 @@
         row.addEventListener('pointerdown',event=>{
           if(event.button!==0||event.target.closest('button'))return;
           start={id:event.pointerId,x:event.clientX,y:event.clientY,downloadId:entry.id};
+          dragPending=true;
         });
         row.addEventListener('pointermove',event=>{
           if(!start||event.pointerId!==start.id||!(event.buttons&1))return;
@@ -115,10 +119,13 @@
           start=null;
           if(window.__TAURI__)void command('downloads-drag',entry.id).then(result=>{
             if(result?.message)window.minternetToast?.(result.message);
+          }).catch(error=>window.minternetToast?.(String(error))).finally(()=>{
+            dragPending=false;render();
           });
+          else {dragPending=false;render();}
         });
         for(const type of ['pointerup','pointercancel','lostpointercapture'])
-          row.addEventListener(type,()=>{start=null;});
+          row.addEventListener(type,()=>{start=null;if(dragPending){dragPending=false;render();}});
         name.addEventListener('click',()=>{void command('downloads-open',entry.id);});
       }
       row.append(symbol,details,actions);list.append(row);
