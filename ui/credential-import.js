@@ -109,27 +109,25 @@
        !(year>=2020&&year<=2100))return null;
     return {label,name,number,month,year,postal};
   }
-  async function begin(which){
+  function begin(which){
     kind=which;
     if(!window.__TAURI__){say('Importing into the encrypted vault requires the desktop app.');return;}
-    try{
-      const state=await api.command('vault-status');
-      if(!state?.unlocked){
-        say('Unlock Passwords or Payment Methods in Settings first, then import your export.');
-        return;
-      }
-      chooser.value='';
-      chooser.click();
-    }catch{say('Unable to verify the vault. Unlock it before importing.');}
+    // Opening a file picker must occur synchronously inside the user's click:
+    // an awaited native status check can consume transient user activation.
+    chooser.value='';
+    chooser.click();
   }
-  passwords.addEventListener('click',()=>void begin('password'));
-  cards.addEventListener('click',()=>void begin('card'));
+  passwords.addEventListener('click',()=>begin('password'));
+  cards.addEventListener('click',()=>begin('card'));
   chooser.addEventListener('change',async()=>{
     const file=chooser.files?.[0];
     if(!file)return;
     if(file.size>10_000_000){say('Export exceeds 10 MB. Split it into smaller files.');return;}
     passwords.disabled=cards.disabled=true;
     try{
+      const state=await api.command('vault-status');
+      if(!state?.unlocked)
+        throw Error('Unlock Passwords or Payment Methods in Settings first.');
       const text=await file.text();
       const parsed=recordsFrom(text,file.name);
       const candidates=parsed.map(kind==='password'?asLogin:asCard).filter(Boolean);
