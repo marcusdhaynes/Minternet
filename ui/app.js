@@ -11,7 +11,7 @@ const command = async (name, value) => {
     const result = await api.command(name, value);
     if (result?.message) toast(result.message);
     // A new tab should be immediately ready for typing, no second click.
-    if(!result?.message && (name==='new'||name==='new-private')){
+    if(name==='new'||name==='new-private'){
       requestAnimationFrame(()=>{
         const field=byId('address');
         if(field){field.focus({preventScroll:true});field.select();}
@@ -206,8 +206,7 @@ function render(data) {
   if(isNewTab){
     requestAnimationFrame(()=>{
       const address=byId('address');
-      address?.focus();
-      address?.select();
+      if(address){ address.value=''; address.focus({preventScroll:true}); address.select(); }
     });
   }
     byId('back').disabled = !active?.canBack;
