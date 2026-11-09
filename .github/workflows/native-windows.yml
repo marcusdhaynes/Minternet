@@ -48,7 +48,10 @@ jobs:
           node --check ../../ui/tab-group-ui.js
           node --check ../../ui/chrome-native-menu.js
           node --check ../../ui/search-settings.js
-          node --test ../../tests/bookmarks.test.cjs ../../tests/bookmark-import.test.cjs ../../tests/tab-groups.test.cjs ../../tests/native-menus.test.cjs ../../tests/search-settings.test.cjs ../../tests/tab-blank-zones.test.cjs ../../tests/browser-home-download.test.cjs ../../tests/tab-limit.test.cjs
+          node --check ../../ui/volume-ui.js
+          node --check ../../ui/audio-gain.js
+          node --check ../../ui/credential-import.js
+          node --test ../../tests/bookmarks.test.cjs ../../tests/bookmark-import.test.cjs ../../tests/tab-groups.test.cjs ../../tests/native-menus.test.cjs ../../tests/search-settings.test.cjs ../../tests/rapid-bookmarks-volume-import.test.cjs ../../tests/tab-blank-zones.test.cjs ../../tests/browser-home-download.test.cjs ../../tests/tab-limit.test.cjs
       - name: Generate Branded Minternet App Icons
         run: |
           python -m pip install --disable-pip-version-check --quiet pillow
