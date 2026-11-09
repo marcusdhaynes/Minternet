@@ -627,6 +627,13 @@ mod auth_popup_tests {
 
 struct PopupDeduper(Mutex<HashMap<(u32,String),Instant>>);
 struct ZoomState(Mutex<f64>);
+// Keep global output level separate from individually muted site tabs.
+struct VolumeConfig { level:u16,muted:bool,manually_muted:HashSet<u32> }
+impl Default for VolumeConfig {
+    fn default()->Self { Self {level:100,muted:false,manually_muted:HashSet::new()} }
+}
+#[derive(Default)]
+struct VolumeState(Mutex<VolumeConfig>);
 #[derive(Default)]
 struct SplitState(Mutex<Vec<u32>>);
 struct SplitRatios(Mutex<(f64,f64)>);
@@ -1905,6 +1912,9 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                 update_from_site(&for_load, id, event.url().as_str());
                 if matches!(event.event(), PageLoadEvent::Finished) {
                     record_page_history(&for_load,id,event.url().as_str(),None);
+                    if is_real_page_url(event.url().as_str()) {
+                        apply_volume_to_site(&for_load,id,view.label(),true);
+                    }
                     let _=fill_saved_credential(&for_load,id,false,None);
                     // CI only: open about:blank exactly as OAuth popup libraries
                     // do, then assert a same-origin opener can write to it.
@@ -2013,6 +2023,39 @@ fn update_audio_state(app:&tauri::AppHandle,id:u32,playing:bool,muted:bool){
     }
     if changed{notify(app);}
 }
+// Apply volume without handing any native IPC capability to remote documents.
+// Web Audio amplifies eligible HTML5 audio; Windows native audio mute also
+// silences unsupported streams, cross-origin frames, and DRM protected media.
+fn apply_volume_to_site(app:&tauri::AppHandle,id:u32,label:&str,initialize:bool) {
+    let Some(view)=app.get_webview(label) else{return};
+    let (level,mute)={
+        let state=app.state::<VolumeState>();
+        let Ok(config)=state.0.lock() else{return};
+        (config.level,config.muted||config.level==0||config.manually_muted.contains(&id))
+    };
+    let ratio=level as f64/100.0;
+    if initialize {
+        let script=format!("{}\nwindow.__minternetAudioGain?.setLevel({ratio});",
+            include_str!("../../../../ui/audio-gain.js"));
+        let _=view.eval(&script);
+    }else{
+        let _=view.eval(&format!("window.__minternetAudioGain?.setLevel({ratio});"));
+    }
+    #[cfg(windows)]
+    {
+        let _=view.with_webview(move |native|{
+            use windows::core::Interface;
+            use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_8;
+            if let Ok(audio)=(unsafe{native.controller().CoreWebView2()})
+                .and_then(|webview|webview.cast::<ICoreWebView2_8>()){
+                let _=unsafe{audio.SetIsMuted(mute)};
+            }
+        });
+    }
+    #[cfg(not(windows))]
+    let _=mute;
+}
+
 #[cfg(windows)]
 fn native_audio_poll(app:&tauri::AppHandle,id:u32,label:&str)->Result<(),String>{
     let Some(view)=app.get_webview(label) else{return Ok(())};
@@ -2683,6 +2726,33 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
     // OAuth, Drive and Gmail are only available to the trusted local chrome.
     // All remote network calls run on worker threads so they never pause the
     // native browser event loop. No Google token is returned to web content.
+    if name=="volume-get" {
+        let state=app.state::<VolumeState>();
+        let config=state.0.lock().map_err(|e|e.to_string())?;
+        return Ok(json!({"level":config.level,"muted":config.muted}));
+    }
+    if name=="volume-set" {
+        let level=value.get("level").and_then(Value::as_u64)
+            .filter(|v|*v<=300).ok_or("Volume must be 0–300%")? as u16;
+        let muted=value.get("muted").and_then(Value::as_bool)
+            .ok_or("Mute setting must be a boolean")?;
+        let changed={
+            let state=app.state::<VolumeState>();
+            let mut config=state.0.lock().map_err(|e|e.to_string())?;
+            let changed=config.level!=level||config.muted!=muted;
+            config.level=level;config.muted=muted;changed
+        };
+        if changed {
+            let active={
+                let browser=app.state::<Mutex<Browser>>();
+                let b=browser.lock().map_err(|e|e.to_string())?;
+                b.tabs.iter().filter_map(|t|t.view.as_ref().map(|l|(t.id,l.clone())))
+                    .collect::<Vec<_>>()
+            };
+            for (id,label) in active {apply_volume_to_site(&app,id,&label,false);}
+        }
+        return Ok(json!({"ok":true,"level":level,"muted":muted}));
+    }
     if name=="browser-form-context" {
         let handle=app.clone();
         return tauri::async_runtime::spawn_blocking(move || {
@@ -4047,23 +4117,16 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 browser.tabs.iter().find(|tab|tab.id==id).and_then(|t|t.view.clone())
                     .ok_or("Tab has no active audio renderer")?
             };
+            let muted={
+                let state=app.state::<VolumeState>();
+                let mut config=state.0.lock().map_err(|e|e.to_string())?;
+                if !config.manually_muted.insert(id){config.manually_muted.remove(&id);false}
+                else{true}
+            };
+            apply_volume_to_site(&app,id,&label,false);
             #[cfg(windows)]
-            {
-                let view=app.get_webview(&label).ok_or("Tab renderer unavailable")?;
-                view.with_webview(move |native| {
-                    use windows::core::Interface;
-                    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_8;
-                    if let Ok(audio)=(unsafe{native.controller().CoreWebView2()}).and_then(|webview|webview.cast::<ICoreWebView2_8>()){
-                        let mut current=windows::core::BOOL::default();
-                        let _=unsafe{audio.IsMuted(&mut current)};
-                        let _=unsafe{audio.SetIsMuted(!current.as_bool())};
-                    }
-                }).map_err(|e|e.to_string())?;
-                native_audio_poll(&app,id,&label)?;
-                return Ok(json!({"ok":true}));
-            }
-            #[cfg(not(windows))]
-            {let _=label;return Err("Native tab mute is currently supported on Windows".into());}
+            native_audio_poll(&app,id,&label)?;
+            return Ok(json!({"ok":true,"muted":muted}));
         }
         "zoom" => {
             let value=value.as_f64().ok_or("Zoom must be numeric")?;
@@ -4465,6 +4528,7 @@ fn main() {
         .manage(DownloadsState::default())
         .manage(Mutex::new(browsing_history::History::default()))
         .manage(ZoomState(Mutex::new(1.0)))
+        .manage(VolumeState::default())
         .manage(SplitState::default())
         .manage(SplitRatios(Mutex::new((0.5,0.5))))
         .manage(UndoHistory(Mutex::new(VecDeque::new())))
