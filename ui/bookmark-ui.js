@@ -779,6 +779,9 @@
     if (window.__TAURI__) void act('chrome-overlay', open);
   }
   function setMode(next) {
+    // History is nested in Settings; close the embedded panel whenever the
+    // Settings view is dismissed so reopening requires only one click.
+    if(next!=='settings')window.minternetHistory?.close?.();
     mode = next;
     $('bookmarkOverlay').hidden = !next;
     for (const [name, id] of [
