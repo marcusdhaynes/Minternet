@@ -1793,3 +1793,8 @@ html.minternet-overlay-active .group-editor-backdrop {
 /* Hide scrollbars without disabling scrolling in menus, dialogs or the downloads panel. */
 html, body, body * { scrollbar-width: none; }
 html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; }
+
+/* Keep wheel, trackpad, touch and keyboard scrolling without visible tracks. */
+html, body, body * { scrollbar-width: none; }
+html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; }
+.downloads-open svg { display:block; pointer-events:none; }
