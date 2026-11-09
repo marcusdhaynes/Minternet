@@ -206,7 +206,7 @@ function render(data) {
   if(isNewTab){
     requestAnimationFrame(()=>{
       const address=byId('address');
-      if(address){ address.value=''; address.focus({preventScroll:true}); address.select(); }
+      if(address){ address.value=''; address?.focus(); address?.select(); }
     });
   }
     byId('back').disabled = !active?.canBack;
