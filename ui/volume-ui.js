@@ -88,12 +88,18 @@
   for(const kind of ['pointerup','pointercancel','pointerleave','lostpointercapture']){
     button.addEventListener(kind,cancelPress);
   }
+  // Some WebView2 configurations suppress the click after a long press when
+  // the button becomes hidden. Release the suppression on the next task so
+  // the next intentional short click always toggles mute.
+  button.addEventListener('pointerup',()=>{
+    if(held)setTimeout(()=>{held=false;},0);
+  });
   button.addEventListener('click',event=>{
     if(held){held=false;event.preventDefault();return;}
     toggle();
   });
   button.addEventListener('keydown',event=>{
-    if(event.key==='F2'){event.preventDefault();edit();}
+    if(event.key==='F2'){event.preventDefault();edit();held=false;}
   });
   slider.addEventListener('pointerdown',()=>{pointerDragging=true;});
   for(const kind of ['pointerup','pointercancel','lostpointercapture']){
