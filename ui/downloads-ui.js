@@ -22,7 +22,7 @@
   function key(event){if(event.key==='Escape'){event.preventDefault();close();button.focus();}}
   function updateBadge(){
     const active=entries.filter(entry=>entry.status==='downloading').length;
-    const count=seenDownloads?active:active||entries.filter(entry=>entry.status==='completed').length;
+    const count=seenDownloads?0:active||entries.filter(entry=>entry.status==='completed').length;
     badge.hidden=!count;
     badge.textContent=count>9?'9+':String(count);
     badge.classList.toggle('in-progress',active>0);
@@ -76,7 +76,9 @@
       const actions=document.createElement('div');actions.className='downloads-actions';
       const openFile=document.createElement('button');openFile.type='button';
       openFile.className='downloads-open';
-      openFile.textContent=/\.(exe|msi)$/i.test(entry.name)?'▶':'↗';
+      openFile.innerHTML=/\.(exe|msi)$/i.test(entry.name)
+        ?'<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="m9 5 10 7-10 7V5Z"/></svg>'
+        :'<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M14 4h6v6M20 4 10 14M20 13v7H4V4h7"/></svg>';
       openFile.title=(/\.(exe|msi)$/i.test(entry.name)?'Run ':'Open ')+entry.name+' using the operating system';
       openFile.setAttribute('aria-label',openFile.title);
       openFile.disabled=!completed;
@@ -101,9 +103,11 @@
         // filesystem files, into Windows Explorer. Wait for a short genuine
         // pointer movement so simple clicks still open the correct controls.
         let start=null;
+        row.draggable=false;
+        row.addEventListener('dragstart',event=>event.preventDefault());
         row.addEventListener('pointerdown',event=>{
           if(event.button!==0||event.target.closest('button'))return;
-          start={id:event.pointerId,x:event.clientX,y:event.clientY};
+          start={id:event.pointerId,x:event.clientX,y:event.clientY,downloadId:entry.id};
         });
         row.addEventListener('pointermove',event=>{
           if(!start||event.pointerId!==start.id||!(event.buttons&1))return;
