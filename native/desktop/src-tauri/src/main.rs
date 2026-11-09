@@ -1752,28 +1752,77 @@ fn update_from_site(app: &tauri::AppHandle, id: u32, url: &str) {
     notify(app);
 }
 
-// Periodically inspect only native WebView URLs, not DOM text or website scripts.
-// React/Vue/ChatGPT history.pushState changes the current path without a
-// PageLoadEvent; saving the last load event would reopen a landing page.
+// Read only the current URL, never page text, cookies or authentication data.
+// WebView2's cached native URL can lag React/ChatGPT pushState navigation.
+// Each callback is confined to its original, non-private WebView and origin.
+const LIVE_PAGE_LOCATION_JS:&str="(()=>window.location.href)()";
+fn page_location_from_eval(reply:&str)->Option<String>{
+    let location=serde_json::from_str::<String>(reply).ok()?;
+    if location.len()>8192 || !is_real_page_url(&location){return None;}
+    Some(location)
+}
+fn apply_live_page_location(app:&tauri::AppHandle,id:u32,label:&str,reply:&str){
+    let Some(location)=page_location_from_eval(reply) else{return};
+    let Some(view)=app.get_webview(label) else{return};
+    let Ok(native)=view.url() else{return};
+    let Ok(candidate)=tauri::Url::parse(&location) else{return};
+    // pushState can change paths but not origins. A stale callback must never
+    // write an unrelated URL after the tab navigates or is reassigned.
+    if native.origin()!=candidate.origin(){return;}
+    let current={
+        let state=app.state::<Mutex<Browser>>();
+        let Ok(browser)=state.lock() else{return};
+        browser.tabs.iter().find(|tab|tab.id==id)
+            .is_some_and(|tab|!tab.private && tab.secret_id.is_none() &&
+                tab.view.as_deref()==Some(label) &&
+                tauri::Url::parse(&tab.url).ok().is_some_and(|url|
+                    url.origin()==candidate.origin()))
+    };
+    if current{update_from_site(app,id,&location);}
+}
+// Poll every loaded ordinary tab at a modest cadence, including inactive
+// ChatGPT conversations. No website bridge or cross-origin script is exposed.
 fn refresh_session_urls(app:&tauri::AppHandle)->usize{
     let candidates={
         let store=app.state::<Mutex<Browser>>();
         let Ok(browser)=store.lock() else{return 0};
         browser.tabs.iter().filter(|t|!t.private && t.secret_id.is_none())
-            .filter_map(|t|t.view.as_ref().map(|label|(t.id,label.clone(),t.url.clone())))
+            .filter_map(|t|t.view.as_ref().map(|label|(t.id,label.clone())))
             .collect::<Vec<_>>()
     };
-    let mut changed=0;
-    for (id,label,previous) in candidates{
+    let mut requested=0;
+    for (id,label) in candidates{
         let Some(view)=app.get_webview(&label) else{continue};
-        let Ok(actual)=view.url() else{continue};
-        let address=actual.as_str();
-        if address!=previous && is_real_page_url(address){
-            update_from_site(app,id,address);
-            changed+=1;
+        let handle=app.clone();
+        let owned_label=label.clone();
+        if view.eval_with_callback(LIVE_PAGE_LOCATION_JS,move |answer|{
+            apply_live_page_location(&handle,id,&owned_label,&answer);
+        }).is_ok(){
+            requested+=1;
+        }else if let Ok(native)=view.url(){
+            // A suspended/busy controller can still report its last full
+            // navigation safely. Never use the internal warmup URL.
+            if is_real_page_url(native.as_str()){update_from_site(app,id,native.as_str());}
         }
     }
-    changed
+    requested
+}
+#[cfg(test)]
+mod live_page_location_tests{
+    use super::page_location_from_eval;
+    #[test]
+    fn chatgpt_pushstate_urls_survive_serialization(){
+        let source="https://chatgpt.com/c/abc0123?model=gpt-6";
+        let payload=serde_json::to_string(source).unwrap();
+        assert_eq!(page_location_from_eval(&payload).as_deref(),Some(source));
+    }
+    #[test]
+    fn malformed_or_internal_url_is_not_restorable(){
+        for raw in ["null","false","42","\"javascript:alert(1)\"",
+            "\"http://tauri.localhost/warmup.html\"","\"about:blank\""]{
+            assert!(page_location_from_eval(raw).is_none(),"{raw}");
+        }
+    }
 }
 
 fn record_page_history(app:&tauri::AppHandle,id:u32,url:&str,title_hint:Option<&str>){
@@ -3574,10 +3623,22 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 // CF_HDROP / Finder file drag on the native window thread.
                 app.run_on_main_thread(move||{
                     if let Some(window)=handle.get_window("main"){
+                        // The drag payload is the exact checked file path,
+                        // not an HTML URL or a browser-chrome asset. For image
+                        // downloads, preview that very image instead of the
+                        // unrelated Minternet app icon.
+                        let preview=if path.extension().and_then(|s|s.to_str())
+                            .is_some_and(|ext|matches!(ext.to_ascii_lowercase().as_str(),
+                                "png"|"jpg"|"jpeg"|"bmp"|"gif"|"webp")){
+                            drag::Image::File(path.clone())
+                        }else{
+                            drag::Image::Raw(include_bytes!("../icons/icon.png").to_vec())
+                        };
                         let item=drag::DragItem::Files(vec![path]);
-                        let preview=drag::Image::Raw(include_bytes!("../icons/icon.png").to_vec());
-                        let _=drag::start_drag(&window,item,preview,
-                            |_result,_position|{},drag::Options::default());
+                        if let Err(error)=drag::start_drag(&window,item,preview,
+                            |_result,_position|{},drag::Options::default()){
+                            eprintln!("Minternet native download drag failed: {error}");
+                        }
                     }
                 }).map_err(|e|e.to_string())?;
                 return Ok(json!({"ok":true}));
@@ -5085,8 +5146,26 @@ fn main() {
             // bounds pass per display frame. Do not block the UI event handler
             // on repeated COM resizing while a border is being dragged.
             let resize_pending=std::sync::Arc::new(AtomicBool::new(false));
+            let closing=std::sync::Arc::new(AtomicBool::new(false));
             window.on_window_event(move |event| {
                 match event {
+                    tauri::WindowEvent::CloseRequested {api,..} => {
+                        // Keep WebViews alive just long enough for in-flight
+                        // asynchronous SPA URL snapshots to reach local disk.
+                        // This also covers the OS close button and Alt+F4.
+                        if !closing.swap(true,Ordering::AcqRel){
+                            api.prevent_close();
+                            refresh_session_urls(&handle);
+                            let app=handle.clone();
+                            std::thread::spawn(move||{
+                                std::thread::sleep(Duration::from_millis(400));
+                                let _=save_session(&app);
+                                if let Some(window)=app.get_window("main"){
+                                    let _=window.destroy();
+                                }
+                            });
+                        }
+                    },
                     tauri::WindowEvent::Resized(_) => {
                         if resize_pending.swap(true, Ordering::AcqRel) { return; }
                         let app=handle.clone();
