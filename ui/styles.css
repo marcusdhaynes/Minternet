@@ -1627,3 +1627,21 @@ html.minternet-overlay-active .group-editor-backdrop {
   padding:5px 8px;margin-top:3px;
 }
 .tab-size-reset:hover {background:#445675;}
+
+
+/* History lives within the scrollable Settings panel, not in the toolbar. */
+.history-popup.history-settings-embedded {
+  position:relative!important;
+  z-index:auto!important;
+  inset:auto!important;
+  top:auto!important;
+  left:auto!important;
+  width:calc(100% - 18px);
+  max-width:none;
+  margin:4px 9px 8px;
+  max-height:min(440px,58vh);
+  border:1px solid #716688;
+  border-radius:6px;
+}
+.history-settings-embedded .history-entries {max-height:min(330px,45vh);}
+.bookmark-reorder-inside {outline:2px solid #a3d6bf!important;outline-offset:-2px;}
