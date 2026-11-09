@@ -1789,3 +1789,16 @@ html.minternet-overlay-active .group-editor-backdrop {
   .downloads-progress-fill,.downloads-running::after{animation:none;}
   .downloads-progress-fill{transform:none;width:100%;opacity:.55;}
 }
+
+
+/* All trusted Minternet chrome panels remain scrollable using wheel, touch,
+   trackpad and keyboard; the scrollbar track is purely decorative. Remote
+   website WebViews are separate and keep each site's own scroll behavior. */
+html,body,body * {scrollbar-width:none!important;}
+html::-webkit-scrollbar,body::-webkit-scrollbar,body *::-webkit-scrollbar {
+  display:none!important;width:0!important;height:0!important;
+}
+.downloads-actions .downloads-run {
+  min-width:22px;width:22px;padding:0;display:grid;place-items:center;
+  font-size:12px;line-height:1;
+}
