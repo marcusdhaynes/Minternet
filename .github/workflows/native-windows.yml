@@ -9,6 +9,12 @@ on:
       - 'docs/preview-bridge.js'
       - '.github/workflows/native-windows.yml'
       - '.github/workflows/publish-current-portable.yml'
+  pull_request:
+    paths:
+      - 'native/desktop/**'
+      - 'ui/**'
+      - 'tests/**'
+      - '.github/workflows/native-windows.yml'
   workflow_dispatch:
 permissions:
   contents: read
