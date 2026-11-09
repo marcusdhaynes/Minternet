@@ -6,7 +6,7 @@
   const button=document.getElementById('downloadsButton');
   const badge=document.getElementById('downloadsBadge');
   if(!api||!button||!badge)return;
-  let entries=[],panel=null,refreshing=false,activeProgress=false;
+  let entries=[],panel=null,refreshing=false,activeProgress=false,seenDownloads=false;
   const command=(name,value)=>api.command(name,value);
   function close(){
     if(!panel)return;
@@ -22,7 +22,7 @@
   function key(event){if(event.key==='Escape'){event.preventDefault();close();button.focus();}}
   function updateBadge(){
     const active=entries.filter(entry=>entry.status==='downloading').length;
-    const count=active||entries.filter(entry=>entry.status==='completed').length;
+    const count=seenDownloads?active:active||entries.filter(entry=>entry.status==='completed').length;
     badge.hidden=!count;
     badge.textContent=count>9?'9+':String(count);
     badge.classList.toggle('in-progress',active>0);
@@ -76,8 +76,8 @@
       const actions=document.createElement('div');actions.className='downloads-actions';
       const openFile=document.createElement('button');openFile.type='button';
       openFile.className='downloads-open';
-      openFile.textContent=/\.(exe|msi)$/i.test(entry.name)?'Run':'Open';
-      openFile.title='Open '+entry.name+' using the operating system';
+      openFile.textContent=/\.(exe|msi)$/i.test(entry.name)?'▶':'↗';
+      openFile.title=(/\.(exe|msi)$/i.test(entry.name)?'Run ':'Open ')+entry.name+' using the operating system';
       openFile.setAttribute('aria-label',openFile.title);
       openFile.disabled=!completed;
       openFile.addEventListener('click',async()=>{
@@ -142,6 +142,7 @@
   }
   async function open(){
     if(panel){close();return;}
+    seenDownloads=true;updateBadge();
     if(window.__TAURI__)await command('chrome-overlay',true);
     const host=document.createElement('section');
     host.className='system-popup-root minternet-context-menu downloads-popup';
