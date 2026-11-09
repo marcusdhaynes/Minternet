@@ -3573,6 +3573,87 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 .spawn().map_err(|e|e.to_string())?;
             return Ok(json!({"ok":true}));
         }
+        "vault-import" => {
+            // Only trusted browser chrome can call this command. A person must
+            // select an export file and unlock the local encrypted vault first.
+            // Import once into memory and encrypt once, not per CSV row.
+            let kind=value.get("kind").and_then(Value::as_str)
+                .ok_or("Import type required")?;
+            if kind!="password"&&kind!="card"{
+                return Err("Unsupported credential import type".into());
+            }
+            let records=value.get("entries").and_then(Value::as_array)
+                .ok_or("Import records required")?;
+            if records.is_empty()||records.len()>2000{
+                return Err("Import supports 1–2,000 records per file".into());
+            }
+            let state=app.state::<Mutex<password_vault::Vault>>();
+            let mut vault=state.lock().map_err(|e|e.to_string())?;
+            if !vault.unlocked(){return Err("Unlock the encrypted vault before importing".into());}
+            let mut imported=0usize;
+            let mut skipped=0usize;
+            if kind=="password" {
+                let current=vault.list()?;
+                let mut existing=HashSet::<String>::new();
+                if let Some(saved)=current.as_array(){
+                    for login in saved {
+                        if let (Some(origin),Some(username))=(
+                            login.get("origin").and_then(Value::as_str),
+                            login.get("username").and_then(Value::as_str)){
+                            existing.insert(format!("{origin}\u{0}{username}"));
+                        }
+                    }
+                }
+                for record in records {
+                    let origin=record.get("origin").and_then(Value::as_str).unwrap_or("");
+                    let username=record.get("username").and_then(Value::as_str).unwrap_or("");
+                    let password=record.get("password").and_then(Value::as_str).unwrap_or("");
+                    let Ok(origin)=password_vault::origin(origin) else{skipped+=1;continue};
+                    if username.len()>320||password.is_empty()||password.len()>4096{
+                        skipped+=1;continue;
+                    }
+                    let key=format!("{origin}\u{0}{username}");
+                    if !existing.insert(key){skipped+=1;continue;}
+                    if vault.put(origin,username.to_owned(),password.to_owned(),false).is_ok(){
+                        imported+=1;
+                    }else{skipped+=1;}
+                }
+            }else{
+                let current=vault.list_cards()?;
+                let mut existing=HashSet::<String>::new();
+                if let Some(saved)=current.as_array(){
+                    for card in saved {
+                        let name=card.get("name").and_then(Value::as_str).unwrap_or("");
+                        let last=card.get("last4").and_then(Value::as_str).unwrap_or("");
+                        let month=card.get("month").and_then(Value::as_u64).unwrap_or(0);
+                        let year=card.get("year").and_then(Value::as_u64).unwrap_or(0);
+                        existing.insert(format!("{name}:{last}:{month}:{year}"));
+                    }
+                }
+                for record in records {
+                    let number=record.get("number").and_then(Value::as_str).unwrap_or("");
+                    let name=record.get("name").and_then(Value::as_str).unwrap_or("");
+                    let label=record.get("label").and_then(Value::as_str).unwrap_or("");
+                    let postal=record.get("postal").and_then(Value::as_str).unwrap_or("");
+                    let month=record.get("month").and_then(Value::as_u64).unwrap_or(0);
+                    let year=record.get("year").and_then(Value::as_u64).unwrap_or(0);
+                    let last=number.chars().rev().take(4).collect::<String>().chars().rev().collect::<String>();
+                    let key=format!("{name}:{last}:{month}:{year}");
+                    if existing.contains(&key) || month>u8::MAX as u64 || year>u16::MAX as u64{
+                        skipped+=1;continue;
+                    }
+                    if vault.put_card(label.to_owned(),name.to_owned(),number.to_owned(),
+                                      month as u8,year as u16,postal.to_owned()).is_ok(){
+                        existing.insert(key);imported+=1;
+                    }else{skipped+=1;}
+                }
+            }
+            if imported>0 {
+                vault.save(&password_vault::file(&app)?)?;
+                let _=app.emit_to("chrome","minternet:vault-changed",());
+            }
+            return Ok(json!({"ok":true,"imported":imported,"skipped":skipped}));
+        }
         "vault-status" => {
             let exists=password_vault::file(&app)?.exists();
             let unlocked=app.state::<Mutex<password_vault::Vault>>().lock().map_err(|e|e.to_string())?.unlocked();
