@@ -3,7 +3,7 @@
 // non-private visit index with all saved bookmarks; no network suggestions.
 (() => {
   const $=id=>document.getElementById(id);
-  const address=$('address'),form=$('addressForm'),historyButton=$('historyButton');
+  const address=$('address'),form=$('addressForm'),historyButton=$('historyManagerOpen');
   if(!address||!form||!historyButton||!window.minternet)return;
   const api=window.minternet;
   const command=(name,value)=>api.command(name,value);
@@ -131,12 +131,12 @@
     historyButton.setAttribute('aria-expanded','false');
     document.removeEventListener('pointerdown',outside,true);
     document.removeEventListener('keydown',escape,true);
-    if(window.__TAURI__)void command('chrome-overlay',false);
+    // History is embedded in Settings, which owns the native overlay lifetime.
   }
   function outside(event){
     if(manager&&!manager.contains(event.target)&&!historyButton.contains(event.target))closeHistory();
   }
-  function escape(event){if(event.key==='Escape'){event.preventDefault();closeHistory();}}
+  function escape(event){if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeHistory();}}
   function row(entry){
     const r=document.createElement('div');r.className='history-entry';
     const open=document.createElement('button');open.type='button';open.className='history-entry-open';
@@ -184,13 +184,16 @@
   async function openHistory(){
     if(manager){closeHistory();return;}
     hideSuggestions();
-    window.minternetBookmarks?.closeOverlay();
+    window.minternetBookmarks?.openSettings?.();
     window.minternetPayment?.close?.();
     const panel=document.createElement('section');
-    panel.className='system-popup-root minternet-context-menu history-popup';
+    panel.className='system-popup-root minternet-context-menu history-popup history-settings-embedded';
     panel.setAttribute('role','dialog');panel.setAttribute('aria-label','Browsing History');
     const head=document.createElement('div');head.className='history-head';
     const title=document.createElement('strong');title.textContent='Browsing History';
+    const close=document.createElement('button');close.type='button';close.textContent='×';
+    close.title='Close History';close.setAttribute('aria-label','Close History');
+    close.addEventListener('click',closeHistory);
     const clear=document.createElement('button');clear.type='button';clear.textContent='Clear';
     clear.title='Delete all saved browsing history';
     clear.addEventListener('click',async()=>{
@@ -207,19 +210,14 @@
     const load=document.createElement('button');load.type='button';
     load.className='history-more';load.textContent='Show More';load.hidden=true;
     load.addEventListener('click',()=>void renderHistory(true));
-    head.append(title,clear);panel.append(head,filter,list,load);
-    document.body.append(panel);manager=panel;
-    const rect=historyButton.getBoundingClientRect();
-    panel.style.top=Math.max(4,Math.min(innerHeight-310,rect.bottom+5))+'px';
-    panel.style.left=Math.max(4,Math.min(innerWidth-275,rect.right-275))+'px';
+    head.append(title,clear,close);panel.append(head,filter,list,load);
+    historyButton.insertAdjacentElement('afterend',panel);manager=panel;
     historyButton.setAttribute('aria-expanded','true');
     document.addEventListener('pointerdown',outside,true);
     document.addEventListener('keydown',escape,true);
-    if(window.__TAURI__)void command('chrome-overlay',true);
     await renderHistory();
   }
   historyButton.addEventListener('click',()=>void openHistory());
-  $('historyManagerOpen')?.addEventListener('click',()=>void openHistory());
   window.addEventListener('keydown',event=>{
     if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='h'){
       event.preventDefault();void openHistory();
