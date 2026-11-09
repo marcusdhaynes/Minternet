@@ -1649,14 +1649,14 @@ html.minternet-overlay-active .group-editor-backdrop {
 
 /* Browser audio: a full three-step 0–300% control with 100/200% ticks. */
 .minternet-volume {
-  flex:0 0 auto;display:flex;align-items:center;gap:4px;
-  min-width:0;height:26px;padding:0 3px;
-  color:#d6d7ec;border-left:1px solid #55506d;
+  flex:0 0 auto;display:flex;align-items:center;gap:2px;
+  min-width:0;height:26px;margin-left:0;padding:0 1px;
+  color:#d6d7ec;border-left:0;
 }
 .volume-button,.volume-number {
-  box-sizing:border-box;flex:0 0 40px;width:40px;height:23px;
+  box-sizing:border-box;flex:0 0 30px;width:30px;height:23px;
   border:0;border-radius:4px;background:transparent;color:inherit;
-  padding:2px 3px;text-align:center;
+  padding:1px 1px;text-align:center;
 }
 .volume-button {display:grid;place-items:center;cursor:pointer;}
 .volume-button:hover {background:#ffffff22;}
@@ -1681,7 +1681,7 @@ html.minternet-overlay-active .group-editor-backdrop {
 .volume-tick-100 {left:33.333%;}
 .volume-tick-200 {left:66.666%;}
 #volumeValue {
-  min-width:35px;text-align:right;font:10px/1.2 system-ui,sans-serif;
+  min-width:31px;text-align:right;font:10px/1.2 system-ui,sans-serif;
   font-variant-numeric:tabular-nums;color:#aca8cb;
 }
 .auto-unload-setting .volume-hold-setting {display:flex;align-items:center;gap:4px;flex:0 0 auto;}
@@ -1703,5 +1703,5 @@ html.minternet-overlay-active .group-editor-backdrop {
 .credential-import-summary[hidden] {display:none;}
 @media(max-width:900px){
   .volume-slider-wrap{width:120px;min-width:104px;}
-  .minternet-volume{gap:2px;}
+  .minternet-volume{gap:1px;}
 }

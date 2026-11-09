@@ -9,10 +9,17 @@
   const KEY='minternet.volume.v1';
   const clamp=n=>Math.max(0,Math.min(300,Math.round(n)));
   const anchors=[0,100,200,300];
+  // Magnetic snap is deliberately stronger than before: 9% capture,
+  // 13% release hysteresis. Keyboard and exact-value entry retain 1% control.
+  let magnet=null;
   const snap=(raw,isPointer)=>{
     const n=clamp(raw);
-    // Gentle 2-unit magnetism when dragged; keyboard and text preserve 1% steps.
-    if(isPointer)for(const v of anchors)if(Math.abs(v-n)<=2)return v;
+    if(!isPointer){magnet=null;return n;}
+    if(magnet!==null&&Math.abs(n-magnet)<=13)return magnet;
+    magnet=null;
+    for(const anchor of anchors){
+      if(Math.abs(n-anchor)<=9){magnet=anchor;return anchor;}
+    }
     return n;
   };
   let level=100,muted=false,holdSeconds=0.25;
@@ -103,7 +110,7 @@
   });
   slider.addEventListener('pointerdown',()=>{pointerDragging=true;});
   for(const kind of ['pointerup','pointercancel','lostpointercapture']){
-    slider.addEventListener(kind,()=>{pointerDragging=false;});
+    slider.addEventListener(kind,()=>{pointerDragging=false;magnet=null;});
   }
   slider.addEventListener('input',()=>update(snap(Number(slider.value),pointerDragging)));
   input.addEventListener('keydown',event=>{

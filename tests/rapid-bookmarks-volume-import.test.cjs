@@ -144,3 +144,40 @@ test('Web Audio gain numerically amplifies eligible local media up to 300%',()=>
   win.__minternetAudioGain.setLevel(1);
   assert.equal(gain?.gain.value,1);
 });
+
+test('volume magnet snaps prominently to 0, 100, 200, 300 with fine keyboard steps',()=>{
+  const elements=Object.fromEntries(['volumeSlider','volumeButton','volumeNumber','volumeValue','volumeHoldDelay']
+    .map(id=>[id,{value:'',hidden:false,innerText:'',textContent:'',listeners:{},
+      addEventListener(type,fn){this.listeners[type]=fn;},
+      setAttribute(name,value){this[name]=value;}}]));
+  const win={minternet:{command:async()=>({ok:true})}};
+  const storage=new Map();
+  vm.runInNewContext(read('ui/volume-ui.js'),{
+    document:{getElementById:id=>elements[id]},window:win,
+    localStorage:{getItem:key=>storage.get(key)||null,setItem:(key,val)=>storage.set(key,val)},
+    requestAnimationFrame:fn=>fn(),setTimeout,clearTimeout,
+    Number,Math,JSON,String
+  });
+  const slider=elements.volumeSlider,output=elements.volumeValue;
+  const send=n=>{slider.value=String(n);slider.listeners.input();return output.textContent;};
+  slider.listeners.pointerdown();
+  assert.equal(send(8),'0%');
+  assert.equal(send(112),'112%');
+  assert.equal(send(193),'200%');
+  assert.equal(send(211),'200%'); // 13-point hysteresis prevents jitter
+  assert.equal(send(214),'214%');
+  assert.equal(send(291),'300%');
+  slider.listeners.pointerup();
+  assert.equal(send(299),'299%'); // 1% step remains available by keyboard
+  assert.equal(send(198),'198%');
+});
+test('volume chrome has no divider and keeps the slider long enough for evenly spaced ticks',()=>{
+  const css=read('ui/styles.css');
+  const segment=css.slice(css.indexOf('/* Browser audio:'),css.indexOf('.credential-import-settings'));
+  assert.match(segment,/\.minternet-volume\s*\{[^}]*gap:2px;/);
+  assert.match(segment,/\.minternet-volume\s*\{[^}]*border-left:0;/);
+  assert.match(segment,/flex:0 0 30px;width:30px/);
+  assert.match(segment,/\.volume-slider-wrap\s*\{[^}]*width:141px;/);
+  assert.match(segment,/\.volume-tick-100\s*\{left:33\.333%;\}/);
+  assert.match(segment,/\.volume-tick-200\s*\{left:66\.666%;\}/);
+});
