@@ -14,7 +14,7 @@ const command = async (name, value) => {
     if(!result?.message && (name==='new'||name==='new-private')){
       requestAnimationFrame(()=>{
         const field=byId('address');
-        if(field){field.focus();field.select();}
+        if(field){field.focus({preventScroll:true});field.select();}
       });
     }
   } catch {
