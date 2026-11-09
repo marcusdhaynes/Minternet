@@ -111,6 +111,7 @@
         item('Exit Split View',()=>window.minternet?.command('split-clear'))
       ]),
       sep(),
+      item('⇣  Unload All Other Tabs',()=>window.minternet?.command('unload-others',tabId)),
       sub('×  Close…',[
         item('Close Tab',()=>window.minternet?.command('close',tabId)),
         item('All To Left',()=>closeRelative(tabId,'left')),
@@ -130,7 +131,10 @@
     if(!tab)return null;
     return [
       {title:'Reload Tab',glyph:'reload',action:()=>window.minternet?.command('reload-tab',id)},
-      {title:tab.suspended?'Already Unloaded':'Unload Tab',glyph:'unload',action:()=>window.minternet?.command('unload-tab',id)},
+      {title:tab.suspended?'Already Unloaded':'Unload Tab',glyph:'unload',
+       action:()=>window.minternet?.command('unload-tab',id),
+       hold:()=>window.minternet?.command('unload-others',id),
+       holdTitle:'Hold to Unload All Other Tabs'},
       {title:'Duplicate Tab',glyph:'duplicate',action:()=>window.minternet?.command('duplicate',id)},
       ...(!tab.secretTab?[{title:tab.pinned?'Unpin Tab':'Pin Tab',
         glyph:'pin',action:()=>groups()?.pin(id,!tab.pinned)}]:[])
@@ -249,7 +253,25 @@
         button.className='tab-context-quick-icon';
         button.title=action.title;button.setAttribute('aria-label',action.title);
         button.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">'+quickIcons[action.glyph]+'</svg>';
-        button.addEventListener('click',()=>{closeFallback();action.action();});
+        if(action.hold){
+          button.title=action.title+' · '+action.holdTitle;
+          let timer=null,longFired=false;
+          const cancel=()=>{if(timer!==null)clearTimeout(timer);timer=null;button.classList.remove('quick-holding');};
+          button.addEventListener('pointerdown',event=>{
+            if(event.button!==0)return;
+            longFired=false;cancel();button.classList.add('quick-holding');
+            timer=setTimeout(()=>{
+              timer=null;longFired=true;
+              closeFallback();void action.hold();
+            },500);
+          });
+          for(const kind of ['pointerup','pointerleave','pointercancel','lostpointercapture'])
+            button.addEventListener(kind,cancel);
+          button.addEventListener('click',event=>{
+            if(longFired){event.preventDefault();longFired=false;return;}
+            cancel();closeFallback();action.action();
+          });
+        }else button.addEventListener('click',()=>{closeFallback();action.action();});
         toolbar.append(button);
       }
       host.append(toolbar);

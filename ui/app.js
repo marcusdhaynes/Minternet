@@ -308,6 +308,13 @@ if(window.__TAURI__){
   });
 }
 
+// Read live native WebView URLs so client-side SPA navigation is restored
+// on the next launch, including /c/<chat-id> style conversation routes.
+// Private and secret tabs are excluded by the native command.
+if(window.__TAURI__){
+  setInterval(()=>{void api.command('session-refresh-urls').catch(()=>{});},2000);
+}
+
 // Auto-unload requests run in native code, which independently verifies each
 // page is safe to discard before freeing its webview memory.
 const AUTO_UNLOAD_KEY='minternet.autoUnloadMinutes.v1';

@@ -236,3 +236,49 @@ test('two equal-height volume ticks precisely align with the 14px thumb travel',
   assert.match(html,/id="volumeIncrement1"[^>]*aria-pressed="false"/);
   assert.match(html,/id="volumeIncrement10"[^>]*aria-pressed="true"/);
 });
+
+// Rapid fixes: session deep-link restore, progress UI, bulk unload, secret
+// group cleanup, and ordered Settings navigation.
+test('non-private SPA routes refresh from WebView into persisted session',()=>{
+  const native=read('native/desktop/src-tauri/src/main.rs');
+  const app=read('ui/app.js');
+  assert.match(native,/fn refresh_session_urls\(app:&tauri::AppHandle\)->usize/);
+  assert.match(native,/if address!=previous && is_real_page_url\(address\)/);
+  assert.match(native,/\.on_document_title_changed\(move \|view, title\|/);
+  assert.match(native,/"session-refresh-urls" =>/);
+  assert.match(native,/if t\.secret_id\.is_some\(\)\{return;\}/);
+  assert.match(native,/browser\.tabs\.iter\(\)\.filter\(\|tab\|!tab\.private\)/);
+  assert.match(app,/api\.command\('session-refresh-urls'\)/);
+});
+test('downloading files display progress bars, tracked bytes and a live toolbar indicator',()=>{
+  const down=read('ui/downloads-ui.js');
+  const styles=read('ui/styles.css');
+  assert.match(down,/bar\.setAttribute\('role','progressbar'\)/);
+  assert.match(down,/className='downloads-progress-fill'/);
+  assert.match(down,/entry\.receivedBytes/);
+  assert.match(down,/setInterval\(\(\)=>\{if\(activeProgress\)/);
+  assert.match(styles,/\.downloads-progress-fill/);
+  assert.match(read('native/desktop/src-tauri/src/main.rs'),/"receivedBytes":received/);
+});
+test('holding unload quick button unloads other tabs but keeps clicked tab',()=>{
+  const menu=read('ui/chrome-native-menu.js');
+  const native=read('native/desktop/src-tauri/src/main.rs');
+  assert.match(menu,/hold:\(\)=>window\.minternet\?\.command\('unload-others',id\)/);
+  assert.match(menu,/timer=setTimeout\(\(\)=>\{/);
+  assert.match(native,/"unload-others" =>/);
+  assert.match(native,/browser\.active_id=keep_id;/);
+  assert.match(native,/if tab\.id==keep_id\{continue;\}/);
+});
+test('secret group removes itself once its last secret tab closes',()=>{
+  const g=read('ui/tab-group-ui.js');
+  assert.match(g,/const previous=latest\.tabs\.some\(t=>t\.secretTab/);
+  assert.match(g,/if\(previous&&!current\)\{/);
+  assert.match(g,/model\.remove\(state,secretGroupId\);/);
+});
+test('Settings submenus offer User Data in requested order',()=>{
+  const source=read('ui/settings-sections.js');
+  assert.match(source,/User Data/);
+  for(const key of ['identityManagerOpen','passwordManagerOpen','paymentManagerOpen',
+    'bookmarkSettingsManage','settingsSecretsOpen'])assert.ok(source.includes(key));
+  assert.match(source,/details/);
+});

@@ -6,7 +6,7 @@
   const button=document.getElementById('downloadsButton');
   const badge=document.getElementById('downloadsBadge');
   if(!api||!button||!badge)return;
-  let entries=[],panel=null;
+  let entries=[],panel=null,refreshing=false,activeProgress=false;
   const command=(name,value)=>api.command(name,value);
   function close(){
     if(!panel)return;
@@ -28,8 +28,16 @@
     badge.classList.toggle('in-progress',active>0);
     button.title=active?active+' downloads in progress':'Recent Downloads';
   }
+  function formatBytes(n){
+    if(!Number.isFinite(n)||n<1)return '0 B';
+    const units=['B','KB','MB','GB'];let i=0;
+    while(n>=1024&&i<units.length-1){n/=1024;i++;}
+    return (i?n.toFixed(n>=10?1:2):Math.round(n))+' '+units[i];
+  }
   function render(){
     updateBadge();
+    activeProgress=entries.some(entry=>entry.status==='downloading');
+    button.classList.toggle('downloads-running',activeProgress);
     if(!panel)return;
     const list=panel.querySelector('.downloads-entries');
     list.replaceChildren();
@@ -54,6 +62,17 @@
         entry.status==='invalid'?'Invalid executable: server returned non-EXE data':
         entry.status==='failed'?'Download failed':entry.status==='interrupted'?'Interrupted':'Downloading…';
       details.append(name,status);
+      if(entry.status==='downloading'){
+        const bar=document.createElement('div');bar.className='downloads-progress';
+        bar.setAttribute('role','progressbar');
+        bar.setAttribute('aria-label','Downloading '+entry.name);
+        bar.setAttribute('aria-valuetext','Downloading'+(entry.receivedBytes?' · '+formatBytes(entry.receivedBytes)+' received':''));
+        const fill=document.createElement('div');fill.className='downloads-progress-fill';
+        bar.append(fill);details.append(bar);
+        if(entry.receivedBytes){
+          status.textContent='Downloading · '+formatBytes(entry.receivedBytes)+' received';
+        }
+      }
       const actions=document.createElement('div');actions.className='downloads-actions';
       const openFile=document.createElement('button');openFile.type='button';
       openFile.className='downloads-open';
@@ -104,9 +123,16 @@
     clear.disabled=!entries.length;
   }
   async function refresh(){
-    const data=await command('downloads-list');
-    if(Array.isArray(data)){entries=data;render();}
+    if(refreshing)return;
+    refreshing=true;
+    try{
+      const data=await command('downloads-list');
+      if(Array.isArray(data)){entries=data;render();}
+    }finally{refreshing=false;}
   }
+  // Native DownloadEvent emits started/finished; while active, query bytes
+  // from the destination file without ever exposing its path to the UI.
+  setInterval(()=>{if(activeProgress)void refresh().catch(()=>{});},450);
   function position(){
     if(!panel)return;
     const rect=button.getBoundingClientRect();
@@ -146,7 +172,7 @@
   button.addEventListener('click',()=>{void open();});
   if(window.__TAURI__?.event?.listen){
     window.__TAURI__.event.listen('minternet:downloads',event=>{
-      if(Array.isArray(event.payload)){entries=event.payload;render();}
+      if(Array.isArray(event.payload)){entries=event.payload;render();if(activeProgress)void refresh().catch(()=>{});}
     }).catch(()=>{});
   }
   void refresh();

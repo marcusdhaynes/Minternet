@@ -1752,6 +1752,30 @@ fn update_from_site(app: &tauri::AppHandle, id: u32, url: &str) {
     notify(app);
 }
 
+// Periodically inspect only native WebView URLs, not DOM text or website scripts.
+// React/Vue/ChatGPT history.pushState changes the current path without a
+// PageLoadEvent; saving the last load event would reopen a landing page.
+fn refresh_session_urls(app:&tauri::AppHandle)->usize{
+    let candidates={
+        let store=app.state::<Mutex<Browser>>();
+        let Ok(browser)=store.lock() else{return 0};
+        browser.tabs.iter().filter(|t|!t.private && t.secret_id.is_none())
+            .filter_map(|t|t.view.as_ref().map(|label|(t.id,label.clone(),t.url.clone())))
+            .collect::<Vec<_>>()
+    };
+    let mut changed=0;
+    for (id,label,previous) in candidates{
+        let Some(view)=app.get_webview(&label) else{continue};
+        let Ok(actual)=view.url() else{continue};
+        let address=actual.as_str();
+        if address!=previous && is_real_page_url(address){
+            update_from_site(app,id,address);
+            changed+=1;
+        }
+    }
+    changed
+}
+
 fn record_page_history(app:&tauri::AppHandle,id:u32,url:&str,title_hint:Option<&str>){
     let details={
         let state=app.state::<Mutex<Browser>>();
@@ -1956,7 +1980,9 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                 }
             }
         })
-        .on_document_title_changed(move |_view, title| {
+        .on_document_title_changed(move |view, title| {
+            // A SPA may change its route and title without reloading WebView2.
+            if let Ok(address)=view.url(){update_from_site(&for_title,id,address.as_str());}
             let state = for_title.state::<Mutex<Browser>>();
             let mut confirmed_in_app = false;
             if let Ok(mut browser) = state.lock() {
@@ -3515,12 +3541,22 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             return Ok(json!({"ok":true,"downloadFolder":current.to_string_lossy(),
                 "usingSystemDownloads":system}));
         }
+        "session-refresh-urls" => {
+            let count=refresh_session_urls(&app);
+            return Ok(json!({"ok":true,"updated":count}));
+        }
         "downloads-list" => {
             let state=app.state::<DownloadsState>();
             let history=state.0.lock().map_err(|e|e.to_string())?;
-            return Ok(json!(history.iter().rev().map(|d|json!({
-                "id":d.id,"name":d.name,"status":d.status,"private":d.private
-            })).collect::<Vec<_>>()));
+            return Ok(json!(history.iter().rev().map(|d|{
+                let received=if d.status=="downloading" {
+                    std::fs::metadata(&d.path).ok().map(|m|m.len()).unwrap_or(0)
+                }else if d.status=="completed"{
+                    std::fs::metadata(&d.path).ok().map(|m|m.len()).unwrap_or(0)
+                }else{0};
+                json!({"id":d.id,"name":d.name,"status":d.status,
+                       "private":d.private,"receivedBytes":received})
+            }).collect::<Vec<_>>()));
         }
         "downloads-clear" => {
             let state=app.state::<DownloadsState>();
@@ -4464,6 +4500,39 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 }
             }
         }
+        "unload-others" => {
+            let keep_id=value.as_u64().ok_or("Invalid tab ID")? as u32;
+            if app.state::<DownloadsState>().0.lock().map_err(|e|e.to_string())?
+                .iter().any(|d|d.status=="downloading"){
+                return Err("Wait until active downloads finish before unloading other tabs".into());
+            }
+            let labels={
+                let state=app.state::<Mutex<Browser>>();
+                let mut browser=state.lock().map_err(|e|e.to_string())?;
+                if !browser.tabs.iter().any(|t|t.id==keep_id){
+                    return Err("Selected tab no longer exists".into());
+                }
+                browser.active_id=keep_id;
+                let mut labels=Vec::new();
+                for tab in &mut browser.tabs{
+                    if tab.id==keep_id{continue;}
+                    tab.loading=false;
+                    tab.checking_unload=false;
+                    tab.audio_playing=false;
+                    tab.audio_muted=false;
+                    if tab.secret_id.is_some(){scrub_secret_tab(tab);}
+                    if let Some(label)=tab.view.take(){labels.push(label);}
+                }
+                labels
+            };
+            *app.state::<SplitState>().0.lock().map_err(|e|e.to_string())?=Vec::new();
+            prune_splits(&app);
+            for label in labels.iter(){
+                if let Some(view)=app.get_webview(label){let _=view.close();}
+            }
+            activated(&app)?;
+            return Ok(json!({"ok":true,"unloaded":labels.len()}));
+        }
         "reload-tab" | "unload-tab" => {
             let id=value.as_u64().ok_or("Invalid tab ID")? as u32;
             let (label,was_active,url)={
@@ -4593,7 +4662,12 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                         window.unmaximize().map_err(|e|e.to_string())?
                     } else { window.maximize().map_err(|e|e.to_string())? }
                 }
-                _=>window.close().map_err(|e|e.to_string())?,
+                _=>{
+                    // Persist current SPA routes immediately on an in-app quit.
+                    refresh_session_urls(&app);
+                    save_session(&app)?;
+                    window.close().map_err(|e|e.to_string())?
+                },
             }
         }
         _ => return Err("Unsupported command".into()),

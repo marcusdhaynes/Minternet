@@ -237,6 +237,20 @@
     return node;
   }
   function renderTabs(data,host,buildTab) {
+    let secretGroupId=null;
+    try{secretGroupId=localStorage.getItem('minternet.secret-tabs-group-id.v1');}catch{}
+    if(secretGroupId&&model.get(state,secretGroupId)){
+      const previous=latest.tabs.some(t=>t.secretTab &&
+        state.assignments[String(t.id)]===secretGroupId);
+      const current=data.tabs.some(t=>t.secretTab &&
+        state.assignments[String(t.id)]===secretGroupId);
+      // An actual last-tab closure, not the temporary empty group created
+      // while opening encrypted bookmarks. Other user groups are untouched.
+      if(previous&&!current){
+        model.remove(state,secretGroupId);
+        try{localStorage.removeItem('minternet.secret-tabs-group-id.v1');}catch{}
+      }
+    }
     latest=data;
     if(state.restoredSlots&&data.tabs.length){
       // Native session restores in the saved tab order; never reuse old tab IDs.

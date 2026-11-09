@@ -1748,3 +1748,44 @@ html.minternet-overlay-active .group-editor-backdrop {
   color:#10162a;background:#b9acf6;
 }
 .volume-increment-pills button:focus-visible {outline:2px solid #e7d5ff;outline-offset:-2px;}
+
+/* Nested Settings sections: preserve existing form IDs, listeners and state. */
+.bookmark-settings .settings-sections{display:flex;flex-direction:column;gap:4px;padding:6px 8px;}
+.bookmark-settings .settings-section{border:1px solid #464462;border-radius:7px;overflow:hidden;background:#191a2c;}
+.bookmark-settings .settings-section>summary{
+  list-style:none;display:flex;align-items:center;justify-content:space-between;
+  cursor:pointer;user-select:none;padding:8px 9px;
+  font-size:11px;font-weight:650;color:#e8e4fa;
+}
+.bookmark-settings .settings-section>summary::-webkit-details-marker{display:none;}
+.bookmark-settings .settings-section>summary::after{content:'›';font-size:15px;font-weight:500;color:#aaa2c5;transition:transform .1s;}
+.bookmark-settings .settings-section[open]>summary::after{transform:rotate(90deg);}
+.bookmark-settings .settings-section>summary:hover{background:#3c365250;}
+.bookmark-settings .settings-section .settings-section-body{display:flex;flex-direction:column;gap:3px;padding:2px 5px 7px;}
+.bookmark-settings .settings-section .settings-section{margin:1px 0 0;background:#121626;border-color:#454864;}
+.bookmark-settings .settings-section .settings-section>summary{font-size:10px;padding:6px 8px;}
+.bookmark-settings .settings-section .bookmark-menu-action{width:100%;margin:0;}
+.bookmark-settings .settings-section .credential-import-settings{padding:7px 8px;}
+.bookmark-settings .settings-section .auto-unload-setting{margin:0;}
+.downloads-entry-details .downloads-progress{
+  box-sizing:border-box;position:relative;overflow:hidden;width:100%;height:4px;
+  border-radius:999px;background:#4e496a;margin:2px 0 1px;
+}
+.downloads-progress-fill{
+  position:absolute;top:0;left:0;height:100%;width:35%;border-radius:999px;
+  background:#c1aafa;animation:minternet-download-running 1.45s ease-in-out infinite alternate;
+}
+@keyframes minternet-download-running{
+  0%{transform:translateX(-100%)}100%{transform:translateX(290%)}
+}
+.downloads-running{position:relative;}
+.downloads-running::after{
+  content:'';position:absolute;left:4px;right:4px;bottom:1px;height:2px;
+  border-radius:1px;background:#bca2f2;animation:minternet-download-opacity .8s ease infinite alternate;
+}
+@keyframes minternet-download-opacity{from{opacity:.25}to{opacity:1}}
+.tab-context-quick-icon.quick-holding{background:#675389!important;box-shadow:inset 0 0 0 1px #cbb1ff;}
+@media(prefers-reduced-motion:reduce){
+  .downloads-progress-fill,.downloads-running::after{animation:none;}
+  .downloads-progress-fill{transform:none;width:100%;opacity:.55;}
+}
