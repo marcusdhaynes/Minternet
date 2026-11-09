@@ -13,6 +13,11 @@
 
   const CONFIG='minternet.google-live-config.v2';
   const CLIENT_KEY='minternet.google-oauth-client.v1';
+  // Public desktop OAuth client ID from the owner's Minternet Google Cloud
+  // configuration. OAuth client IDs are not secrets; never embed client secrets.
+  const DEFAULT_CLIENT_ID='258766390355-7i4nq2vlf9a9vkfh6bud70alftf3v5b2.apps.googleusercontent.com';
+  const DEFAULT_SYNC_URL='https://tbrqqjrzknhdnwcpkqro.supabase.co';
+  const DEFAULT_PUBLISHABLE_KEY='sb_publishable_BlALANbrrBPf_0IHiuL7HQ_55P6XiTS';
   const remote=new Map();
   const waitingVault=new Map();
   const seenCodes=new Set();
@@ -267,7 +272,7 @@
   async function googleLogin(mail){
     if(!window.__TAURI__){setStatus('Google account connection requires native Minternet.');return;}
     if(loginInProgress)return;
-    let clientId=$('googleClientId').value.trim()||localStorage.getItem(CLIENT_KEY)||'';
+    let clientId=$('googleClientId').value.trim()||localStorage.getItem(CLIENT_KEY)||DEFAULT_CLIENT_ID;
     if(!/^\d+-[\w.-]+\.apps\.googleusercontent\.com$/.test(clientId)){
       $('googleAccountConfig').hidden=false;
       $('googleClientId').focus();
@@ -279,7 +284,7 @@
     $('googleAccountLogin').disabled=true;
     $('googleConnectContinue').disabled=true;
     // The external authorization is not a Minternet website-cookie login.
-    setStatus('Finish authorization in your system browser. It must redirect to a localhost page saying sign-in was received.');
+    setStatus('Approve Google in your system browser. Minternet will reopen automatically when authorization completes.');
     try{
       const result=await command(mail?'google-gmail-login':'google-login',{clientId});
       if(!result?.authorized||!result.email)
@@ -420,9 +425,9 @@
   setInterval(()=>{if(mailboxes.length)void checkCodes();},60000);
 
   const defaults=storedConfig();
-  if($('googleLiveUrl'))$('googleLiveUrl').value=defaults.url||'';
-  if($('googleLiveKey'))$('googleLiveKey').value=defaults.publishableKey||'';
-  try{$('googleClientId').value=localStorage.getItem(CLIENT_KEY)||'';}catch{}
+  if($('googleLiveUrl'))$('googleLiveUrl').value=defaults.url||DEFAULT_SYNC_URL;
+  if($('googleLiveKey'))$('googleLiveKey').value=defaults.publishableKey||DEFAULT_PUBLISHABLE_KEY;
+  try{$('googleClientId').value=localStorage.getItem(CLIENT_KEY)||DEFAULT_CLIENT_ID;}catch{}
   updateUi();
 
   window.minternetSyncV2={
