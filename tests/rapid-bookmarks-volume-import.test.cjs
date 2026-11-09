@@ -246,7 +246,7 @@ test('non-private SPA routes refresh from WebView into persisted session',()=>{
   assert.match(native,/if address!=previous && is_real_page_url\(address\)/);
   assert.match(native,/\.on_document_title_changed\(move \|view, title\|/);
   assert.match(native,/"session-refresh-urls" =>/);
-  assert.match(native,/if t\.secret_id\.is_some\(\)\{return;\}/);
+  assert.match(native,/browser\.tabs\.iter\(\)\.filter\(\|t\|!t\.private && t\.secret_id\.is_none\(\)\)/);
   assert.match(native,/browser\.tabs\.iter\(\)\.filter\(\|tab\|!tab\.private\)/);
   assert.match(app,/api\.command\('session-refresh-urls'\)/);
 });
