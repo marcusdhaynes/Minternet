@@ -6,18 +6,31 @@ let lastUrl = 'about:blank';
 let addressFocused = false;
 const PRIVATE_EYE='<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 12s3.7-5.7 9.5-5.7 9.5 5.7 9.5 5.7-3.7 5.7-9.5 5.7S2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.7"/></svg>';
 
+let pendingNewTabFocus=false;
+function focusNewTabAddress() {
+  if(!pendingNewTabFocus)return;
+  const field=byId('address');
+  if(!field)return;
+  // Do not reselect or replace text the user has already started typing.
+  if(document.activeElement!==field){
+    field.focus();
+    field.select();
+  }
+}
 const command = async (name, value) => {
+  const opensTab=name==='new'||name==='new-private';
+  if(opensTab)pendingNewTabFocus=true;
   try {
     const result = await api.command(name, value);
     if (result?.message) toast(result.message);
-    // A new tab should be immediately ready for typing, no second click.
-    if(!result?.message && (name==='new'||name==='new-private')){
-      requestAnimationFrame(()=>{
-        const field=byId('address');
-        if(field){field.focus();field.select();}
-      });
-    }
+    if(opensTab&&!result?.message){
+      requestAnimationFrame(focusNewTabAddress);
+      // Creating a native WebView can steal keyboard focus after the command
+      // returns. Restore focus once more after WebView2 takes ownership.
+      setTimeout(()=>{focusNewTabAddress();pendingNewTabFocus=false;},350);
+    }else if(opensTab)pendingNewTabFocus=false;
   } catch {
+    if(opensTab)pendingNewTabFocus=false;
     toast('The action could not be completed.');
   }
 };
@@ -174,8 +187,9 @@ window.minternetRenderTabs = () => {
 };
 function render(data) {
   const previouslyKnown=new Set(snapshot.tabs.map(tab=>tab.id));
-  const isNewTab=data.activeId && !previouslyKnown.has(data.activeId) &&
-    data.tabs.some(tab=>tab.id===data.activeId&&tab.url==='about:blank'&&!tab.secretTab);
+  const isNewTab=pendingNewTabFocus && data.activeId &&
+    !previouslyKnown.has(data.activeId) &&
+    data.tabs.some(tab=>tab.id===data.activeId&&!tab.secretTab);
   snapshot = data;
   const tabs = byId('tabs');
   const active = data.tabs.find(t => t.id === data.activeId);
@@ -203,13 +217,7 @@ function render(data) {
     }
   }
   document.documentElement.classList.toggle('private-active',Boolean(active?.private));
-  if(isNewTab){
-    requestAnimationFrame(()=>{
-      const address=byId('address');
-      address?.focus();
-      address?.select();
-    });
-  }
+  if(isNewTab)requestAnimationFrame(focusNewTabAddress);
     byId('back').disabled = !active?.canBack;
   byId('forward').disabled = !active?.canForward;
   byId('reload').disabled = !active || active.secretTab || active.url === 'about:blank';
@@ -257,7 +265,7 @@ byId('address').addEventListener('focus', event => {
   event.target.select();
   prepareBlankTab();
 });
-byId('homeSearch').addEventListener('focus', prepareBlankTab);
+byId('homeSearch').addEventListener('focus', () => {pendingNewTabFocus=false;prepareBlankTab();});
 byId('address').addEventListener('blur', () => {
   addressFocused = false;
   const active = snapshot.tabs.find(t => t.id === snapshot.activeId);
