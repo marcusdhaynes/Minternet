@@ -1684,7 +1684,7 @@ html.minternet-overlay-active .group-editor-backdrop {
   min-width:35px;text-align:right;font:10px/1.2 system-ui,sans-serif;
   font-variant-numeric:tabular-nums;color:#aca8cb;
 }
-.volume-hold-setting {display:flex;align-items:center;gap:4px;}
+.auto-unload-setting .volume-hold-setting {display:flex;align-items:center;gap:4px;flex:0 0 auto;}
 .volume-hold-setting input {
   box-sizing:border-box;width:60px;height:26px;min-width:0;
   border:1px solid #55617d;border-radius:5px;background:#121a2c;
