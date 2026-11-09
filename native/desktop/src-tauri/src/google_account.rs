@@ -8,6 +8,7 @@ use zeroize::Zeroize;
 use rand::{rngs::OsRng,RngCore};
 use base64::{Engine as _,engine::general_purpose::URL_SAFE_NO_PAD};
 use sha2::{Sha256,Digest};
+use tauri::Manager;
 
 const DRIVE_SCOPE:&str="https://www.googleapis.com/auth/drive.appdata";
 const MAIL_SCOPE:&str="https://www.googleapis.com/auth/gmail.readonly";
@@ -213,9 +214,17 @@ fn userinfo(access:&str)->Result<String,String>{
     }
     Ok(email.to_ascii_lowercase())
 }
+// Google forbids embedded-webview OAuth. The system browser is only used
+// for consent; a verified loopback callback refocuses Minternet automatically.
+fn focus_minternet(app:&tauri::AppHandle){
+    if let Some(window)=app.get_window("main"){
+        let _=window.show();
+        let _=window.set_focus();
+    }
+}
 /// Desktop PKCE authorization uses an OS browser and a random loopback port.
 /// The app cannot read Google website cookies, and no password enters Minternet.
-pub fn login(state:&Mutex<GoogleState>,client_id:&str,mail:bool)->Result<Value,String>{
+pub fn login(state:&Mutex<GoogleState>,client_id:&str,mail:bool,app:&tauri::AppHandle)->Result<Value,String>{
     if !valid_client_id(client_id){
         return Err("Enter the Desktop OAuth Client ID registered for Minternet in Google Cloud".into());
     }
@@ -226,10 +235,12 @@ pub fn login(state:&Mutex<GoogleState>,client_id:&str,mail:bool)->Result<Value,S
     let verifier=random(48);
     let challenge=URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
     let nonce=random(24);
+    // Normal Minternet sync uses Google identity + Supabase, not Drive.
+    // Request no unnecessary Drive-wide API authorization on sign-in.
     let scopes=if mail {
         format!("openid email {MAIL_SCOPE}")
     } else {
-        format!("openid email {DRIVE_SCOPE}")
+        "openid email".to_owned()
     };
     // Existing authorization is renewed via the stored refresh credential;
     // do not force a new consent and invalidate older grants on every login.
@@ -273,6 +284,9 @@ pub fn login(state:&Mutex<GoogleState>,client_id:&str,mail:bool)->Result<Value,S
                 };
                 let _=socket.write_all(response.as_bytes());
                 if authorized {
+                    // Bring the user back to the app, including when consent
+                    // was denied. The exact error is shown by Settings.
+                    focus_minternet(app);
                     if let Some(reason)=failure {
                         return Err(format!("Google denied authorization: {}",
                             reason.chars().take(110).collect::<String>()));
@@ -294,7 +308,9 @@ pub fn login(state:&Mutex<GoogleState>,client_id:&str,mail:bool)->Result<Value,S
     let refresh=auth.get("refresh_token").and_then(Value::as_str).unwrap_or_default();
     let verified=userinfo(access)?;
     let granted=auth.get("scope").and_then(Value::as_str).unwrap_or("");
-    let required=if mail{MAIL_SCOPE}else{DRIVE_SCOPE};
+    // A Google ID token (OpenID Connect) is sufficient for Minternet's
+    // Supabase account handshake; Gmail has a separate explicit grant.
+    let required=if mail{MAIL_SCOPE}else{"openid"};
     if !granted.split_whitespace().any(|s|s==required){
         return Err("Google did not grant the requested permission".into());
     }
