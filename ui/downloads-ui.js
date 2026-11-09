@@ -8,7 +8,6 @@
   if(!api||!button||!badge)return;
   let entries=[],panel=null,refreshing=false,activeProgress=false;
   const viewedDownloadIds=new Set();
-  let downloadsOpened=false;
   const command=(name,value)=>api.command(name,value);
   function close(){
     if(!panel)return;
@@ -185,7 +184,7 @@
     footer.textContent='Files are saved in your Downloads folder';
     host.append(header,list,footer);
     document.body.append(host);
-    panel=host;downloadsOpened=true;button.setAttribute('aria-expanded','true');
+    panel=host;button.setAttribute('aria-expanded','true');
     position();render();
     document.addEventListener('pointerdown',outside,true);
     document.addEventListener('keydown',key,true);
