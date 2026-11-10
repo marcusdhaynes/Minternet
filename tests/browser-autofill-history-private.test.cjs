@@ -16,10 +16,12 @@ test('payment method button opens the encrypted native vault, not an untrusted w
  assert.match(ui,/vault-card-remove/);
  assert.match(ui,/vault-lock/);
 });
-test('new normal and private blank tabs focus the address bar',()=>{
+test('new normal and private homepage tabs focus the native address bar',()=>{
  const ui=get('ui/app.js');
  assert.match(ui,/const isNewTab=/);
- assert.match(ui,/data\.tabs\.some\(tab=>tab\.id===data\.activeId&&tab\.url==='about:blank'&&\!tab\.secretTab\)/);
+ assert.match(ui,/data\.tabs\.some\(tab=>tab\.id===data\.activeId&&\!tab\.secretTab\)/);
+ assert.match(ui,/focusNewTabAddress/);
+ assert.match(get('native/desktop/src-tauri/src/main.rs'),/focus_address_bar\(&app\)/);
  assert.match(ui,/address\?\.focus\(\)/);
  assert.match(ui,/\['newPrivate','new-private'\]/);
 });
