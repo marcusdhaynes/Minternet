@@ -893,12 +893,33 @@ fn session_file(app: &tauri::AppHandle) -> Result<PathBuf,String> {
     Ok(dir.join("browser-session.v1.json"))
 }
 fn save_session(app: &tauri::AppHandle) -> Result<(),String> {
+    // Capture live locations even for background tabs. ChatGPT and other SPAs
+    // can change routes without a top-level WebView navigation callback.
+    // Never query site DOM or save private / secret URLs.
+    let live_views={
+        let store=app.state::<Mutex<Browser>>();
+        let browser=store.lock().map_err(|e|e.to_string())?;
+        browser.tabs.iter().filter(|t|!t.private && t.secret_id.is_none() &&
+            !t.loading).filter_map(|t|t.view.as_ref().map(|v|(t.id,v.clone())))
+            .collect::<Vec<_>>()
+    };
+    let mut actual_urls=HashMap::new();
+    for (id,label) in live_views {
+        if let Some(view)=app.get_webview(&label) {
+            if let Ok(url)=view.url() {
+                if is_real_page_url(url.as_str()) {
+                    actual_urls.insert(id,url.to_string());
+                }
+            }
+        }
+    }
     if std::env::args().any(|a|a.starts_with("--minternet-") && a.ends_with("smoke")) {return Ok(());}
     let data={
         let store=app.state::<Mutex<Browser>>();
         let browser=store.lock().map_err(|e|e.to_string())?;
         let tabs=browser.tabs.iter().filter(|tab|!tab.private).map(|tab|{
-            json!({"url":tab.url,"pinned":tab.pinned,"syncId":tab.sync_id})
+            let location=actual_urls.get(&tab.id).unwrap_or(&tab.url);
+            json!({"url":location,"pinned":tab.pinned,"syncId":tab.sync_id})
         }).collect::<Vec<_>>();
         let selected=browser.active().filter(|t|!t.private).map(|t|t.id);
         let active=tabs.iter().enumerate().find_map(|(i,_)|{
@@ -2661,6 +2682,19 @@ fn navigate_tab(app: &tauri::AppHandle, id: u32, url: Option<tauri::Url>, append
     Ok(())
 }
 
+// The website is a separate native WebView: DOM.focus alone cannot reclaim
+// keyboard focus from that child on Windows. Focus the chrome controller first.
+fn focus_address_bar(app:&tauri::AppHandle) {
+    if let Some(chrome)=app.get_webview("chrome"){
+        let _=chrome.set_focus();
+        let _=chrome.eval(r#"(() => {
+            const field=document.getElementById('address');
+            if(!field)return;
+            field.focus({preventScroll:true});
+            field.select();
+        })()"#);
+    }
+}
 fn activated(app: &tauri::AppHandle) -> Result<(), String> {
     let current={
         let state=app.state::<Mutex<Browser>>();
@@ -2784,6 +2818,16 @@ fn check_idle_tabs(app:&tauri::AppHandle, minutes:u64) -> Result<(),String>{
         };
         let evaluation=view.eval_with_callback(AUTO_UNLOAD_ELIGIBILITY,move |response|{
             let eligible=response.trim()=="true";
+            // Preserve the route before taking the WebView from its tab.
+            if eligible {
+                if let Some(view)=handle.get_webview(&captured){
+                    if let Ok(location)=view.url(){
+                        if is_real_page_url(location.as_str()){
+                            update_from_site(&handle,id,location.as_str());
+                        }
+                    }
+                }
+            }
             let split_visible=handle.state::<SplitState>().0.lock().map(|s|s.contains(&id)).unwrap_or(true);
             let released={
                 let store=handle.state::<Mutex<Browser>>();
@@ -4354,6 +4398,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             return Ok(json!({"zoom":zoom}));
         }
         "prepare-tab" => { prepare_active(&app)?; }
+        "focus-address" => {focus_address_bar(&app);return Ok(json!({"ok":true}));}
         "new" | "new-private" | "new-url" | "new-background-url" | "new-private-background-url" => {
             let private = name == "new-private" || name == "new-private-background-url";
             let background = name == "new-background-url" || name == "new-private-background-url";
@@ -4386,6 +4431,9 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 // A new tab is a real homepage, never the hidden warmup page.
                 navigate_tab(&app,id,Some(homepage(&app)),true)?;
             } else { display_active(&app); }
+            if !background && matches!(name.as_str(),"new"|"new-private") {
+                focus_address_bar(&app);
+            }
         }
         "deselect" => {
             {
@@ -4594,6 +4642,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             }
         }
         "unload-others" => {
+            refresh_session_urls(&app);
             let keep_id=value.as_u64().ok_or("Invalid tab ID")? as u32;
             if app.state::<DownloadsState>().0.lock().map_err(|e|e.to_string())?
                 .iter().any(|d|d.status=="downloading"){
@@ -4627,6 +4676,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             return Ok(json!({"ok":true,"unloaded":labels.len()}));
         }
         "reload-tab" | "unload-tab" => {
+            if name=="unload-tab" { refresh_session_urls(&app); }
             let id=value.as_u64().ok_or("Invalid tab ID")? as u32;
             let (label,was_active,url)={
                 let state=app.state::<Mutex<Browser>>();
@@ -4714,6 +4764,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             let _=save_pinned(&app);
         }
         "free-memory" => {
+            refresh_session_urls(&app);
             let candidates = {
                 let state=app.state::<Mutex<Browser>>();
                 let mut b=state.lock().map_err(|e|e.to_string())?;
