@@ -2020,6 +2020,12 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                         .is_some_and(|browser|browser.active_id==id);
                     if is_active {restore_visible_surfaces(&for_load);}
                     record_page_history(&for_load,id,event.url().as_str(),None);
+                    // Automatically fill one enabled, encrypted saved login
+                    // after the exact HTTPS page has loaded. Locked vaults,
+                    // private/secret tabs and ambiguous accounts are skipped.
+                    if event.url().scheme()=="https" {
+                        let _=fill_saved_credential(&for_load,id,false,None);
+                    }
                     // ChatGPT can occasionally finish a WebView2 navigation
                     // while leaving an empty document surface. Retry the same
                     // conversation URL exactly once if it remains textless and
@@ -2215,7 +2221,7 @@ fn fill_saved_credential(app:&tauri::AppHandle,id:u32,manual:bool,username:Optio
         let browser=app.state::<Mutex<Browser>>();
         let b=browser.lock().map_err(|e|e.to_string())?;
         let tab=b.tabs.iter().find(|t|t.id==id).ok_or("Tab not found")?;
-        (tab.view.clone(),tab.url.clone(),tab.private)
+        (tab.view.clone(),tab.url.clone(),tab.private||tab.secret_id.is_some())
     };
     if private{return Ok(false);}
     let Some(label)=label else {return Ok(false)};
@@ -2230,34 +2236,65 @@ fn fill_saved_credential(app:&tauri::AppHandle,id:u32,manual:bool,username:Optio
         vault.matching(&actual_origin,manual,username)
     };
     let Some(mut entry)=credential else {return Ok(false)};
-    let values=serde_json::json!({"origin":actual_origin,"username":entry.username,"password":entry.password});
-    // JSON escaping prevents credential values from becoming executable code.
-    let script=format!(r#"(function(){{
+    let data=serde_json::json!({"origin":actual_origin,"username":entry.username,"password":entry.password});
+    // Exact-origin login forms only. A short, bounded observer accommodates
+    // React/SPA forms added after the load event; never submit automatically,
+    // change existing input, or select an arbitrary login on multi-account sites.
+    const LOGIN_FILL_JS:&str=r###"(function(){
         'use strict';
-        const data={};
-        if(location.origin!==data.origin || window.top!==window)return;
-        const visible=e=>!e.disabled&&!e.readOnly&&e.getClientRects().length>0;
-        const passwords=[...document.querySelectorAll('input[type="password"]')].filter(visible);
-        // Never populate registration, confirmation or password-change forms.
-        if(passwords.length!==1)return;
-        const password=passwords[0];
-        const form=password.form||document;
-        const inputs=[...form.querySelectorAll('input')].filter(visible);
-        const user=inputs.find(e=>e.autocomplete==='username')||
+        const credential=__MINTERNET_LOGIN_PAYLOAD__;
+        if(location.protocol!=='https:'||location.origin!==credential.origin||
+           window!==window.top)return;
+        // Never fill registration, reset or password-change pages.
+        if(/\/(?:sign-up|signup|register|join|create-account|password-reset|forgot-password|reset-password|change-password)(?:[/?#]|$)/i.test(location.pathname))return;
+        const visible=e=>e instanceof HTMLInputElement&&
+          !e.disabled&&!e.readOnly&&e.getClientRects().length>0;
+        const put=(element,value)=>{
+          if(!element)return;
+          const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')?.set;
+          if(setter)setter.call(element,value);else element.value=value;
+          element.dispatchEvent(new Event('input',{bubbles:true}));
+          element.dispatchEvent(new Event('change',{bubbles:true}));
+        };
+        function tryFill(){
+          if(location.origin!==credential.origin)return true;
+          const passwords=[...document.querySelectorAll('input[type="password"]')].filter(visible);
+          if(passwords.length!==1)return false;
+          const password=passwords[0];
+          if(password.autocomplete==='new-password'||
+             password.autocomplete==='one-time-code')return true;
+          const form=password.form||document;
+          if(form instanceof HTMLFormElement &&
+             /(?:sign.?up|register|create.?account|reset.?password)/i.test(
+               (form.getAttribute('action')||'')+' '+form.id+' '+form.className))return true;
+          const inputs=[...form.querySelectorAll('input')].filter(visible);
+          const user=inputs.find(e=>e.autocomplete==='username')||
             inputs.find(e=>e.type==='email')||
             inputs.find(e=>e.type==='text'&&/user|email|login/i.test(e.name+' '+e.id));
-        const put=(element,value)=>{{
-            if(!element)return;
-            const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')?.set;
-            if(setter)setter.call(element,value);else element.value=value;
-            element.dispatchEvent(new Event('input',{{bubbles:true}}));
-            element.dispatchEvent(new Event('change',{{bubbles:true}}));
-        }};
-        put(user,data.username);put(password,data.password);
-    }})();"#,values);
+          // A user already entering credentials always wins.
+          if(password.value||user?.value&&user.value!==credential.username)return true;
+          put(user,credential.username);
+          put(password,credential.password);
+          return true;
+        }
+        if(tryFill())return;
+        // In SPA applications, the input may mount after page-load. Keep the
+        // observer bounded; credentials never cross native chrome IPC or logs.
+        if(!document.documentElement)return;
+        const observer=new MutationObserver(()=>{
+          if(tryFill())observer.disconnect();
+        });
+        observer.observe(document.documentElement,{childList:true,subtree:true});
+        setTimeout(()=>observer.disconnect(),9000);
+    })()"###;
+    let mut payload=data.to_string();
+    let mut script=LOGIN_FILL_JS.replace("__MINTERNET_LOGIN_PAYLOAD__",&payload);
     use zeroize::Zeroize;
     entry.password.zeroize();
-    view.eval(&script).map_err(|e|e.to_string())?;
+    payload.zeroize();
+    let result=view.eval(&script).map_err(|e|e.to_string());
+    script.zeroize();
+    result?;
     Ok(true)
 }
 
@@ -3862,6 +3899,9 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 &password_vault::file(&app)?,password,name=="vault-create"
             )?;
             let _=app.emit_to("chrome","minternet:vault-unlocked",());
+            // A login page may already be open when the vault is unlocked.
+            let active=app.state::<Mutex<Browser>>().lock().map_err(|e|e.to_string())?.active_id;
+            let _=fill_saved_credential(&app,active,false,None);
             return Ok(json!({"ok":true}));
         }
         "vault-lock" => {
