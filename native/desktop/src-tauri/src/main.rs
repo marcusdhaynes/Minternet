@@ -4949,6 +4949,40 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
     Ok(json!({"ok": true}))
 }
 
+// A previous process that disappeared without a CloseRequested event may
+// have been killed by the OS or crashed in WebView2. Preserve every saved URL
+// but avoid automatically reopening the suspect site on the next start.
+fn running_guard(app:&tauri::AppHandle)->Option<PathBuf>{
+    app.path().app_data_dir().ok().map(|dir|dir.join("minternet-running.v1"))
+}
+fn start_crash_guard(app:&tauri::AppHandle)->bool{
+    let Some(path)=running_guard(app) else{return false};
+    if let Some(parent)=path.parent(){let _=std::fs::create_dir_all(parent);}
+    let prior=path.exists();
+    let _=std::fs::write(&path,format!("pid={}\\n",std::process::id()));
+    prior
+}
+fn clear_crash_guard(app:&tauri::AppHandle){
+    if let Some(path)=running_guard(app){let _=std::fs::remove_file(path);}
+}
+fn install_panic_diagnostics(app:&tauri::AppHandle){
+    use std::io::Write;
+    let Ok(dir)=app.path().app_data_dir() else{return};
+    let _=std::fs::create_dir_all(&dir);
+    let log=dir.join("minternet-crashes.log");
+    std::panic::set_hook(Box::new(move|info|{
+        // Never include credential values, URLs or panic payloads in logs.
+        // Keep only the source location and process ID.
+        let where_at=info.location().map(|loc|format!("{}:{}",loc.file(),loc.line()))
+            .unwrap_or_else(||"unknown".into());
+        if std::fs::metadata(&log).map(|m|m.len()>131072).unwrap_or(false){
+            let _=std::fs::rename(&log,log.with_extension("previous.log"));
+        }
+        if let Ok(mut file)=std::fs::OpenOptions::new().create(true).append(true).open(&log){
+            let _=writeln!(file,"Minternet Rust panic at {where_at}; process={}",std::process::id());
+        }
+    }));
+}
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -4972,6 +5006,10 @@ fn main() {
         .manage(privacy_shield::ShieldState(Mutex::new(privacy_shield::ShieldConfig::default())))
         .invoke_handler(tauri::generate_handler![browser_action, browser_snapshot])
         .setup(|app| {
+            let real_launch=!std::env::args().any(|arg|
+                arg.starts_with("--minternet-")&&(arg.ends_with("-smoke")||arg.ends_with("-reopen")));
+            if real_launch {install_panic_diagnostics(app.handle());}
+            let previous_crash=real_launch&&start_crash_guard(app.handle());
             let shield=privacy_shield::load(app.handle());
             if let Ok(mut state)=app.state::<privacy_shield::ShieldState>().0.lock(){
                 *state=shield;
@@ -4996,6 +5034,13 @@ fn main() {
                 b.add(false)?;
             } else {
                 restore_session(app.handle());
+            }
+            if previous_crash {
+                if let Ok(mut b)=app.state::<Mutex<Browser>>().lock(){
+                    // Existing tabs remain in the strip, but no page is
+                    // opened until the user explicitly selects one.
+                    b.active_id=0;
+                }
             }
             let builder = WindowBuilder::new(app, "main")
                 .title("Minternet")
@@ -5049,6 +5094,10 @@ fn main() {
                     .transparent(true)
                     .on_page_load(move |view, event| {
                         if matches!(event.event(), PageLoadEvent::Finished) {
+                            if previous_crash {
+                                let _=view.eval(r#"setTimeout(() =>
+                                    window.minternetToast?.('Previous session ended unexpectedly. All saved tabs were preserved. Select a tab to reopen it.'),400)"#);
+                            }
                             if smoke || auth_popup_smoke {
                                 let _ = view.eval(
                                     "setTimeout(() => window.minternet?.command('navigate', 'https://example.com'), 200)"
@@ -5389,6 +5438,7 @@ fn main() {
                         // Ordinary browser state is retained; private URLs are excluded.
                         refresh_session_urls(&handle);
                         let _=save_session(&handle);
+                        clear_crash_guard(&handle);
                     },
                     tauri::WindowEvent::Focused(true) => {
                         // Force a compositor refresh on restore/focus even when
