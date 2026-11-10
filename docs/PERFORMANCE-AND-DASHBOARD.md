@@ -9,7 +9,7 @@ Desktop Minternet continues to use Rust and Tauri 2, with a shared lightweight H
 - Tabless Dashboard is a command hub with no widgets initially, only an inert dotted CSS background. Grid spacing and snapping preferences are stored in a separate small local record.
 - Closing the selected tab returns to Dashboard without activating a suspended page.
 - User-entered addresses retain their displayed value while navigation begins. Late load events from the old homepage are ignored.
-- Native Find in Page gets a 31 px search row below Bookmark Bar; Ctrl+F is forwarded from website WebViews without a general native IPC bridge.
+- Native Find in Page gets a 22 px search row below Bookmark Bar; Ctrl+F is forwarded from website WebViews without a general native IPC bridge.
 - Bookmarks and encrypted Logins have local search; display names are derived from URLs when none is supplied.
 - Chrome tab nodes and group chips are reused using keyed DOM reconciliation to avoid reconstructing the tab bar on every state change.
 
@@ -24,3 +24,12 @@ Existing tabs, pinned tabs, groups, history, settings, bookmark imports, encrypt
 - Rollback builds are published by a separate per-build GitHub release workflow when a native build completes successfully and the release upload is accepted by GitHub.
 
 Current limitation: Find uses WebView2 page JavaScript window.find as a first pass; this is not a complete native match-count/highlight engine across every platform.
+
+## November 10 compact UI and unrequested download protection
+- Find appears in a 22-pixel row, right aligned and without a separate text label.
+- Tab row buttons and toolbar actions are aligned; new tabs show the Minternet icon.
+- Windows shortcut artwork is enlarged 10% inside the .ico output.
+- Balanced/Strict Shield now deny unapproved cross-site popups and about:blank popunders. Some legitimate third-party popup experiences may require a user site exception.
+- Windows website downloads require a native Yes/No confirmation with No as the default. Unapproved downloads are canceled before saving. Potentially executable formats are explicitly flagged; PE executables disguised as non-EXE files are removed on completion.
+- Native login popups cannot download files. Non-Windows site-initiated downloads fail closed until trusted OS consent UI is implemented.
+- Chrome Web Store and Firefox Add-ons can be browsed, but their browser-specific install buttons are not working Minternet installers. Supporting full Chrome/Firefox ecosystems requires a distinct browser engine or additional safe extension hosting architecture.
