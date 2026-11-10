@@ -21,7 +21,9 @@ test('Every successful native platform build is saved under a distinct permanent
   assert.match(workflow,/--target "\$SHA"/);
   assert.match(workflow,/gh release view "\$TAG"/);
   assert.doesNotMatch(workflow,/--clobber/);
-  assert.doesNotMatch(workflow,/gh release edit/);
+  // The only allowed edit is publishing a fully uploaded draft; previous
+  // binary assets and completed releases must never be overwritten.
+  assert.match(workflow,/gh release edit "\\$TAG" --draft=false/);
   assert.doesNotMatch(workflow,/LATEST=.*gh run list/);
 });
 
