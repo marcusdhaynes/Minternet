@@ -8,21 +8,27 @@ let addressFocused = false;
 // A fresh tab has a short, cancellable address-focus lease.
 let focusLease=0;
 let focusCancelled=false;
+let focusTargetTabId=null;
+let addressEditedSinceNew=false;
 function focusNewTabAddress(){
+  const target=snapshot.activeId;
+  if(target===focusTargetTabId&&!focusCancelled)return;
+  focusTargetTabId=target;
+  addressEditedSinceNew=false;
   const lease=++focusLease;
   focusCancelled=false;
   const field=byId('address');
   const tryFocus=()=>{
-    if(lease!==focusLease||focusCancelled)return;
+    if(lease!==focusLease||focusCancelled||snapshot.activeId!==target)return;
     if(document.activeElement===field)return;
     if(window.__TAURI__)void api.command('focus-address').catch(()=>{});
     field?.focus({preventScroll:true});
-    field?.select();
+    if(!addressEditedSinceNew)field?.select();
   };
   tryFocus();
   // WebView2 hands focus to its site as navigation starts and ends.
   // Reclaim only while this is the newest tab, never after a user click.
-  for(const delay of [80,220,480,850,1350])setTimeout(tryFocus,delay);
+  for(const delay of [80,220,480,850,1350,2100,3300,5200])setTimeout(tryFocus,delay);
 }
 document.addEventListener('pointerdown',event=>{
   if(!event.target.closest('#newTab,#newPrivate,#addressForm,#tabs')) {
@@ -196,6 +202,9 @@ function render(data) {
   const isNewTab=Boolean(render.hasSnapshot && data.activeId && !previouslyKnown.has(data.activeId) &&
     data.tabs.some(tab=>tab.id===data.activeId&&!tab.secretTab));
   render.hasSnapshot=true;
+  if(focusTargetTabId!==null&&data.activeId!==focusTargetTabId){
+    focusCancelled=true;
+  }
   snapshot = data;
   const tabs = byId('tabs');
   const active = data.tabs.find(t => t.id === data.activeId);
@@ -273,6 +282,7 @@ function prepareBlankTab() {
     if (active?.url === 'about:blank') void api.command('prepare-tab').catch(() => {});
   }, 75);
 }
+byId('address').addEventListener('input',()=>{addressEditedSinceNew=true;});
 byId('address').addEventListener('focus', event => {
   addressFocused = true;
   event.target.select();
