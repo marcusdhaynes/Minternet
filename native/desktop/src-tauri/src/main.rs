@@ -223,6 +223,9 @@ struct Tab {
     inactive_since: Option<Instant>,
     loading: bool,
     checking_unload: bool,
+    // Suppress late PageLoad events from the previous homepage after a user
+    // has entered a new URL. Redirects from the requested URL still work.
+    pending_previous_url:Option<String>,
     // Only Ctrl-click-created tabs have an explicit source; the frontend uses
     // this to restore immediate visual adjacency within tab groups.
     opener_id: Option<u32>,
@@ -269,6 +272,7 @@ struct Snapshot {
 fn scrub_secret_tab(tab:&mut Tab){
     if tab.secret_id.is_none(){return;}
     tab.url.zeroize();tab.url=HOME.into();
+    tab.pending_previous_url=None;
     for page in &mut tab.history{page.zeroize();}
     tab.history=vec![HOME.into()];
     tab.title.zeroize();tab.title="Secret Tab".into();
@@ -775,6 +779,7 @@ impl Browser {
             pinned: false, audio_playing:false, audio_muted:false,
             view: None, history: vec![HOME.into()], at: 0,
             inactive_since: None, loading: false, checking_unload: false,
+            pending_previous_url:None,
             opener_id: None, pending_chatgpt: None,
             sync_id: new_sync_id(),
             secret_id:None,secret_revealed:false,
@@ -1837,6 +1842,11 @@ fn update_from_site(app: &tauri::AppHandle, id: u32, url: &str) {
         if let Ok(mut browser)=state.lock(){
             if let Some(tab)=browser.tabs.iter_mut().find(|tab|tab.id==id){
                 if tab.secret_id.is_some(){return;}
+                if tab.pending_previous_url.as_deref()==Some(url)&&tab.url!=url{
+                    // The old homepage finished after the new address was
+                    // submitted; don't revert its address bar or history.
+                    return;
+                }
                 if tab.url!=url {
                     pinned_change=tab.pinned && !tab.private;
                     tab.url=url.into();
@@ -2085,15 +2095,23 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
         })
         .on_page_load(move |view, event| {
             if matches!(event.event(), PageLoadEvent::Started | PageLoadEvent::Finished) {
+                let mut stale=false;
                 {
                     let state=for_load.state::<Mutex<Browser>>();
                     if let Ok(mut b)=state.lock(){
                         if let Some(tab)=b.tabs.iter_mut().find(|tab|tab.id==id){
-                            tab.loading=matches!(event.event(),PageLoadEvent::Started);
-                            tab.checking_unload=false;
+                            if tab.pending_previous_url.as_deref()==Some(event.url().as_str())
+                                && tab.url!=event.url().as_str() {
+                                stale=true;
+                            }else{
+                                tab.pending_previous_url=None;
+                                tab.loading=matches!(event.event(),PageLoadEvent::Started);
+                                tab.checking_unload=false;
+                            }
                         }
                     };
                 }
+                if stale{return;}
                 update_from_site(&for_load, id, event.url().as_str());
                 if matches!(event.event(), PageLoadEvent::Finished) {
                     // A completed navigation can still display an unrepainted
@@ -2791,6 +2809,8 @@ fn navigate_tab(app: &tauri::AppHandle, id: u32, url: Option<tauri::Url>, append
             tab.history.push(str_url.clone());
             tab.at = tab.history.len()-1;
         }
+        tab.pending_previous_url=if url.is_some()&&tab.url!=str_url &&
+            tab.url!=HOME {Some(tab.url.clone())}else{None};
         tab.url = str_url.clone();
         tab.title = title_for(&str_url);
         tab.loading=url.is_some();
