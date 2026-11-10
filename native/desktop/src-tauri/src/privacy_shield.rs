@@ -92,12 +92,10 @@ pub fn block_popup(config:&ShieldConfig,source:&str,target:&str)->bool{
     if is_allowed(config,&source_host)||is_allowed(config,&target_host){return false;}
     if config.blocked_domains.iter().any(|s|host_matches(&target_host,s)) {return true;}
     if config.block_ads && built_in_popup(&target_host){return true;}
-    // A click is not sufficient evidence of intent: popunders deliberately
-    // piggyback on Play/Download clicks. All untrusted third-party popup
-    // windows are blocked by default, even when user-activated.
-    // Same-site tabs, explicit site exceptions, and separately verified OAuth
-    // handshakes continue to work.
-    !source_host.is_empty() &&
+    // Balanced must not mistake a cross-origin playback window for an ad.
+    // Only known advertising hosts and explicit user block rules are
+    // denied in Balanced. Strict keeps its stronger cross-site policy.
+    config.mode=="strict" && !source_host.is_empty() &&
         !host_matches(&target_host,&source_host) && !host_matches(&source_host,&target_host)
 }
 pub fn block_navigation(config:&ShieldConfig,target:&tauri::Url)->bool{
@@ -181,30 +179,12 @@ const SCRIPT:&str=r###"
         /(?:client_id|redirect_uri|code_challenge|response_type)=/.test(u.search));
     } catch {return false;}
   };
-  const riskyPopupPage=hostname==='123moviesfree.net'||hostname.endsWith('.123moviesfree.net');
-  // Genuine window.open links and OAuth popups keep their opener relationship.
-  const originalOpen=window.open;
-  if(typeof originalOpen==='function'){
-    try{
-      window.open=function(url,...args){
-        if(enabled()&&!authenticating(url)){
-          const activated=navigator.userActivation?.isActive===true;
-          const suspicious=blockedHost(url);
-          let destination=null;
-          try{destination=new URL(String(url||'about:blank'),location.href);}catch{}
-          const blank=!destination||destination.protocol==='about:';
-          const foreign=destination&&destination.protocol==='https:' &&
-            destination.hostname!==hostname &&
-            !domainMatches(destination.hostname,hostname) &&
-            !domainMatches(hostname,destination.hostname);
-          if(suspicious ||
-             (blank && (riskyPopupPage||configuration.mode==='strict')) ||
-             foreign || !activated)return null;
-        }
-        return Reflect.apply(originalOpen,this,[url,...args]);
-      };
-    }catch{}
-  }
+  // Do not replace window.open. Returning null on a Play click can cause
+  // legitimate embedded players to abort their own playback initialization.
+  // All popup decisions run in native WebView2 NewWindowRequested instead.
+  // When native rejects a popunder, WebView2 returns a dummy WindowProxy to
+  // the initiating script without creating an actual advertising window.
+  // This keeps window.open, OAuth window.opener and site playback semantics.
   // Prevent common third-party ad/tracking requests initiated by page JS.
   // This is page-level interception, not a substitute for WebView2's native
   // WebResourceRequested API or a complete ABP/uBlock filter-list engine.
@@ -343,9 +323,18 @@ mod tests{
     #[test]
     fn click_driven_popunders_and_blank_windows_are_denied(){
         let mut p=ShieldConfig::default();
+        // An arbitrary third-party player is not proof of advertising.
+        assert!(!block_popup(&p,
+            "https://ww8.123moviesfree.net/movie/example",
+            "https://cdn-streaming-player.example/embed"));
         assert!(block_popup(&p,
             "https://ww8.123moviesfree.net/movie/example",
-            "https://unrelated-ad-network.example/landing"));
+            "https://popads.net/landing"));
+        p.mode="strict".into();
+        assert!(block_popup(&p,
+            "https://ww8.123moviesfree.net/movie/example",
+            "https://cdn-streaming-player.example/embed"));
+        p.mode="balanced".into();
         assert!(block_blank_popup(&p,
             "https://ww8.123moviesfree.net/movie/example"));
         assert!(!block_blank_popup(&p,"https://www.example.org/login"));
