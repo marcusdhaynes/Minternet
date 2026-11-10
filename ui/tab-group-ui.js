@@ -7,7 +7,7 @@
   let state;
   try { state=model.hydrate(localStorage.getItem(KEY)); } catch {state=model.blank();}
   let latest={tabs:[],activeId:null};
-  let lastRenderKey='', editing=null, assignTarget=null, fallbackPending=false;
+  let lastRenderKey='', lastStoredGroupJson='', editing=null, assignTarget=null, fallbackPending=false;
   let draggingTabId=null;
   let gesture=null, ghost=null, splitPreview=null, dragOverlay=false, suppressedClick=null;
   const ungroupTarget=$('tabUngroupDrop');
@@ -287,7 +287,7 @@
     if(lastRenderKey===signature)return;
     lastRenderKey=signature;
     // Save the current slot order so group membership survives native restarts.
-    try {const stored=JSON.parse(model.serialize(state));stored.slots=data.tabs.filter(t=>!t.private).map(t=>state.assignments[String(t.id)]||null);stored.visualOrder=state.order.map(id=>data.tabs.filter(t=>!t.private).findIndex(t=>t.id===id)).filter(i=>i>=0);localStorage.setItem(KEY,JSON.stringify(stored));}catch{}
+    try {const stored=JSON.parse(model.serialize(state));stored.slots=data.tabs.filter(t=>!t.private).map(t=>state.assignments[String(t.id)]||null);stored.visualOrder=state.order.map(id=>data.tabs.filter(t=>!t.private).findIndex(t=>t.id===id)).filter(i=>i>=0);const updated=JSON.stringify(stored);if(updated!==lastStoredGroupJson){localStorage.setItem(KEY,updated);lastStoredGroupJson=updated;}}catch{}
     const items=[];
     // Chrome/Firefox-style pinned tabs precede groups and show no close X.
     for(const tab of model.sortedTabs(state,data.tabs).filter(t=>t.pinned)){
