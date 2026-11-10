@@ -154,7 +154,7 @@ const SCRIPT:&str=r###"
       return u.protocol==='about:' ||
         ['accounts.google.com','login.microsoftonline.com','appleid.apple.com',
          'github.com','auth0.com','firebaseapp.com'].some(rule=>domainMatches(h,rule)) ||
-        /\/(oauth|authorize|auth\/handler)(\/|$|\?)/i.test(u.pathname);
+        (u.origin===location.origin && /\/(oauth|authorize|auth\/handler)(\/|$|\?)/i.test(u.pathname));
     } catch {return String(url)==='about:blank';}
   };
   // Genuine window.open links and OAuth popups keep their opener relationship.
