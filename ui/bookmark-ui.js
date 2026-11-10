@@ -276,7 +276,10 @@
     return slot;
   }
   function textFor(node) {
-    return node.name || (node.kind === 'folder' ? 'Unnamed Folder' : model.url(node.url)?.replace(/^https:\/\//, '') || 'Bookmark');
+    if(node.name)return node.name;
+    if(node.kind==='folder')return 'Unnamed Folder';
+    return window.MinternetSiteNames?.label(node.url) ||
+      model.url(node.url)?.replace(/^https:\/\//,'') || 'Bookmark';
   }
   function act(name, arg) { return api.command(name, arg); }
   function applyVisibility() {
@@ -860,9 +863,29 @@
     for (const item of folder.children) contents.append(entryForMenu(item));
     $('bookmarkFolderEdit').hidden=folder.id===model.BOOKMARK_BAR_ID;
   }
+  let bookmarkSearchTimer=0;
+  $('bookmarkManagerSearch')?.addEventListener('input',()=>{
+    clearTimeout(bookmarkSearchTimer);
+    bookmarkSearchTimer=setTimeout(()=>{if(mode==='manager')renderManager();},60);
+  });
   function renderManager() {
     const tree = $('bookmarkTree');
     tree.replaceChildren();
+    const term=($('bookmarkManagerSearch')?.value||'').trim().toLocaleLowerCase();
+    const matched=new Set();
+    if(term){
+      const eligible=items=>{
+        let hits=false;
+        for(const item of items||[]){
+          const own=[textFor(item),item.kind==='link'?item.url:'']
+            .join(' ').toLocaleLowerCase().includes(term);
+          const descendants=item.kind==='folder'&&eligible(item.children);
+          if(own||descendants){matched.add(item.id);hits=true;}
+        }
+        return hits;
+      };
+      eligible(data.items);
+    }
     if (!model.barItems(data).length) {
       const empty = document.createElement('div');
       empty.className = 'bookmark-settings-foot';
@@ -871,6 +894,7 @@
     }
     function walk(items, depth) {
       for (const item of items) {
+        if(term&&!matched.has(item.id))continue;
         const row = document.createElement('div');
         row.className = 'bookmark-tree-line';
         row.dataset.bookmarkId=item.id;
@@ -885,7 +909,7 @@
         const label = document.createElement('button');
         label.className = 'label';
         label.textContent = item.kind==='folder'
-          ?(expandedFolders.has(item.id)?'▾ ':'▸ ')+textFor(item):textFor(item);
+          ?((term||expandedFolders.has(item.id))?'▾ ':'▸ ')+textFor(item):textFor(item);
         label.title = item.kind==='link'?item.url:'Expand/collapse '+textFor(item);
         label.setAttribute('aria-expanded',item.kind==='folder'?String(expandedFolders.has(item.id)):'false');
         label.addEventListener('click',()=>{
@@ -915,10 +939,13 @@
           row.append(editButton);
         }
         tree.append(row);
-        if (item.kind === 'folder'&&expandedFolders.has(item.id))walk(item.children, depth + 1);
+        if (item.kind === 'folder'&&(term||expandedFolders.has(item.id)))walk(item.children, depth + 1);
       }
     }
     walk(data.items, 0);
+    if(term&&!tree.childElementCount){
+      tree.textContent='No matching bookmarks or websites';
+    }
   }
   function edit(id) {
     if(id===model.BOOKMARK_BAR_ID)return openFolder(id);
@@ -932,7 +959,12 @@
     const node = id ? model.find(data, id) : null;
     draft = { kind, id, parentId };
     $('bookmarkEditorTitle').textContent = id ? 'Edit ' + (kind === 'folder' ? 'Folder' : 'Bookmark') : 'New ' + (kind === 'folder' ? 'Folder' : 'Bookmark');
-    $('bookmarkName').value = node?.name || '';
+    $('bookmarkName').value = node?.name ||
+      (kind==='link'
+        ?(currentTitle&&currentTitle!=='New Tab'
+           ?currentTitle
+           :window.MinternetSiteNames?.label(currentUrl)||'')
+        :'');
     $('bookmarkUrlField').hidden = kind === 'folder';
     $('bookmarkUrl').value = node?.url || (kind === 'link' ? model.url(currentUrl) || '' : '');
     $('bookmarkRemove').hidden = !id;
@@ -990,7 +1022,8 @@
     event.preventDefault();
     if (!draft) return;
     const parent = $('bookmarkParent').value || model.BOOKMARK_BAR_ID;
-    const name = $('bookmarkName').value;
+    const name = $('bookmarkName').value.trim() ||
+      (draft.kind==='link'?(window.MinternetSiteNames?.label($('bookmarkUrl').value)||''):'');
     const url = draft.kind === 'link' ? model.url($('bookmarkUrl').value) : null;
     if (draft.kind === 'link' && !url) return toast('Enter a valid HTTPS website address.');
     if (draft.id) {
