@@ -1799,6 +1799,30 @@ html, body, body * { scrollbar-width: none; }
 html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; }
 .downloads-open svg { display:block; pointer-events:none; }
 
+/* Tab right-edge affordance, without changing tab dimensions as it appears. */
+.tabs .tab:not(.pinned-tab) .tab-close {
+  opacity:0;visibility:hidden;pointer-events:none;
+  transition:opacity 85ms ease,color 85ms ease;
+}
+.tabs .tab:not(.pinned-tab):hover .tab-close,
+.tabs .tab:not(.pinned-tab).tab-close-near .tab-close,
+.tabs .tab:not(.pinned-tab):focus-within .tab-close {
+  opacity:1;visibility:visible;pointer-events:auto;
+}
+.tabs .tab.tab-close-near .tab-close {color:#fff;background:#ffffff18;}
+/* Native-style context header: close tab sits opposite 'TAB'. */
+.minternet-context-menu.compact-tab-menu .tab-context-heading{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:3px 4px 4px 7px;min-height:23px;
+}
+.tab-context-close{
+  display:grid;place-items:center;width:17px;height:17px;flex:0 0 17px;
+  margin:0;padding:0;border:0;border-radius:4px;
+  background:transparent;color:#ddcbea;font:600 16px/1 sans-serif;
+}
+.tab-context-close:hover{background:#953e5575;color:#fff;}
+
+
 /* Compact Privacy Shield controls (in trusted browser chrome only). */
 .toolbar-actions #shieldButton{
   position:relative;display:grid;place-items:center;flex:0 0 24px;
