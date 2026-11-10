@@ -66,6 +66,7 @@
   const imports=section('Import & Export',userData);
   move(imports,'importPasswords','.credential-import-settings');
   const privacy=section('Privacy & History');
+  move(privacy,'shieldSettings');
   move(privacy,'historyManagerOpen');
   const accounts=section('Accounts & Sync');
   move(accounts,'googleSettings');
