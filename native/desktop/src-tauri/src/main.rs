@@ -4,6 +4,7 @@ mod browsing_history;
 mod google_account;
 mod firefox_bookmarks;
 mod secret_bookmarks;
+mod privacy_shield;
 use base64::Engine as _;
 use rand::{rngs::OsRng,RngCore};
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -1806,8 +1807,11 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     let for_title = app.clone();
     let for_popup = app.clone();
     let for_download=app.clone();
+    let shield_preferences=app.state::<privacy_shield::ShieldState>().0.lock()
+        .map(|s|s.clone()).unwrap_or_default();
     let builder = WebviewBuilder::new(label.clone(), url)
         .incognito(private)
+        .initialization_script(privacy_shield::script(&shield_preferences))
         // Honor Ctrl/Cmd + plus/minus and Ctrl + mouse-wheel when focus is
         // inside the actual website WebView, not just the browser toolbar.
         .zoom_hotkeys_enabled(true)
@@ -1816,6 +1820,12 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
         // is legitimate browser content but remains visibly marked insecure.
         .on_navigation(move |url| {
             if matches!(url.scheme(), "https"|"http") {
+                let blocked=for_navigation.state::<privacy_shield::ShieldState>().0.lock()
+                    .map(|settings|privacy_shield::block_navigation(&settings,url)).unwrap_or(false);
+                if blocked {
+                    let _=for_navigation.emit_to("chrome","minternet:shield-blocked",json!({"kind":"navigation"}));
+                    return false;
+                }
                 return url.host_str().is_some();
             }
             if url.scheme()=="blob" {
@@ -1905,6 +1915,16 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                 };
             }
             if matches!(url.scheme(),"https"|"http") && url.host_str().is_some() {
+                let opener=for_popup.state::<Mutex<Browser>>().lock().ok()
+                    .and_then(|b|b.tabs.iter().find(|t|t.id==id).map(|t|t.url.clone()))
+                    .unwrap_or_default();
+                let deny=for_popup.state::<privacy_shield::ShieldState>().0.lock()
+                    .map(|settings|privacy_shield::block_popup(&settings,&opener,url.as_str()))
+                    .unwrap_or(false);
+                if deny {
+                    let _=for_popup.emit_to("chrome","minternet:shield-blocked",json!({"kind":"popup"}));
+                    return NewWindowResponse::Deny;
+                }
                 // Normal Ctrl-click and plain-link requests still become
                 // Minternet tabs. Only auth handshakes use a related window.
                 let key=(id,url.to_string());
@@ -3115,6 +3135,25 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             }
             return Err(err);
         }
+        return Ok(json!({"ok":true}));
+    }
+    if name=="shield-get"{
+        let current=app.state::<privacy_shield::ShieldState>().0.lock()
+            .map_err(|e|e.to_string())?.clone();
+        return Ok(serde_json::to_value(current).map_err(|e|e.to_string())?);
+    }
+    if name=="shield-set"{
+        let next=privacy_shield::parse_config(&value)?;
+        privacy_shield::save(&app,&next)?;
+        *app.state::<privacy_shield::ShieldState>().0.lock()
+            .map_err(|e|e.to_string())?=next.clone();
+        // Apply immediately to existing pages. New WebViews receive it at
+        // document start, without granting remote sites access to native APIs.
+        let injection=privacy_shield::script(&next);
+        let labels=app.state::<Mutex<Browser>>().lock()
+            .map_err(|e|e.to_string())?.tabs.iter()
+            .filter_map(|t|t.view.clone()).collect::<Vec<_>>();
+        for label in labels {if let Some(view)=app.get_webview(&label){let _=view.eval(&injection);}}
         return Ok(json!({"ok":true}));
     }
     if name=="google-status"{
@@ -4694,8 +4733,13 @@ fn main() {
         .manage(AuthorizedSecrets::default())
         .manage(Mutex::new(google_account::restore()))
         .manage(Mutex::new(LayoutCache::default()))
+        .manage(privacy_shield::ShieldState(Mutex::new(privacy_shield::ShieldConfig::default())))
         .invoke_handler(tauri::generate_handler![browser_action, browser_snapshot])
         .setup(|app| {
+            let shield=privacy_shield::load(app.handle());
+            if let Ok(mut state)=app.state::<privacy_shield::ShieldState>().0.lock(){
+                *state=shield;
+            }
             let preferences=load_preferences(app.handle());
             if let Ok(mut saved)=app.state::<BrowserPreferenceState>().0.lock(){
                 *saved=preferences.clone();
