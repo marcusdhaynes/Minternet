@@ -1913,7 +1913,28 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
             }
         })
         .on_new_window(move |url, features| {
-            if is_auth_popup_url(&url) {
+            let opener=for_popup.state::<Mutex<Browser>>().lock().ok()
+                .and_then(|b|b.tabs.iter().find(|t|t.id==id).map(|t|t.url.clone()))
+                .unwrap_or_default();
+            let auth_target=is_auth_popup_url(&url);
+            // Check before the auth-popup exception: ad scripts routinely
+            // open about:blank on a Play click and redirect it to an ad.
+            // Keep legitimate OAuth popups and same-site clicks functional.
+            let deny=for_popup.state::<privacy_shield::ShieldState>().0.lock()
+                .map(|settings|{
+                    if url.as_str()=="about:blank"{
+                        privacy_shield::block_blank_popup(&settings,&opener)
+                    } else if auth_target {
+                        false
+                    } else {
+                        privacy_shield::block_popup(&settings,&opener,url.as_str())
+                    }
+                }).unwrap_or(false);
+            if deny {
+                let _=for_popup.emit_to("chrome","minternet:shield-blocked",json!({"kind":"popup"}));
+                return NewWindowResponse::Deny;
+            }
+            if auth_target {
                 // Create a real WebView2 popup using the opener's *same*
                 // environment. Passing the original window features is
                 // critical for window.opener, cookies, and private profiles.
@@ -1961,16 +1982,8 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                 };
             }
             if matches!(url.scheme(),"https"|"http") && url.host_str().is_some() {
-                let opener=for_popup.state::<Mutex<Browser>>().lock().ok()
-                    .and_then(|b|b.tabs.iter().find(|t|t.id==id).map(|t|t.url.clone()))
-                    .unwrap_or_default();
-                let deny=for_popup.state::<privacy_shield::ShieldState>().0.lock()
-                    .map(|settings|privacy_shield::block_popup(&settings,&opener,url.as_str()))
-                    .unwrap_or(false);
-                if deny {
-                    let _=for_popup.emit_to("chrome","minternet:shield-blocked",json!({"kind":"popup"}));
-                    return NewWindowResponse::Deny;
-                }
+                // Same-site links, allowlisted sources and verified OAuth
+                // requests remain usable; rejected popunders never create tabs.
                 // Normal Ctrl-click and plain-link requests still become
                 // Minternet tabs. Only auth handshakes use a related window.
                 let key=(id,url.to_string());
