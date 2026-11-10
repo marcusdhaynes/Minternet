@@ -361,6 +361,9 @@ byId('homeSearchForm')?.addEventListener('submit', event => {
 let warmTimer;
 function prepareBlankTab() {
   if (!window.__TAURI__) return;
+  // A focused but empty Dashboard must remain truly zero-renderer.
+  // Prewarm only when the user has actually begun entering an address.
+  if(!byId('address')?.value?.trim())return;
   clearTimeout(warmTimer);
   warmTimer = setTimeout(() => {
     const active = snapshot.tabs.find(t => t.id === snapshot.activeId);
@@ -370,6 +373,7 @@ function prepareBlankTab() {
 byId('address').addEventListener('input',event=>{
   addressEditedSinceNew=true;
   event.currentTarget.dataset.minternetTyped='true';
+  prepareBlankTab();
 });
 byId('address').addEventListener('focus', event => {
   addressFocused = true;
