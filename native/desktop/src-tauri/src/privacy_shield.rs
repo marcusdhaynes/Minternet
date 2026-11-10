@@ -165,20 +165,6 @@ const SCRIPT:&str=r###"
           adHosts.some(rule=>domainMatches(target,rule)));
     }catch{return false;}
   };
-  const authenticating=url=>{
-    try {
-      const u=new URL(String(url),location.href);
-      const h=u.hostname.toLowerCase();
-      const path=u.pathname.toLowerCase();
-      if(u.protocol!=='https:')return false;
-      if(['accounts.google.com','login.microsoftonline.com',
-        'login.live.com','appleid.apple.com','id.apple.com'].includes(h))return true;
-      if(h==='github.com'&&path.startsWith('/login/oauth/'))return true;
-      if(h.endsWith('.firebaseapp.com')&&path.startsWith('/__/auth/'))return true;
-      return (/\/(oauth|authorize|auth\/handler)(\/|$)/i.test(path) &&
-        /(?:client_id|redirect_uri|code_challenge|response_type)=/.test(u.search));
-    } catch {return false;}
-  };
   // Do not replace window.open. Returning null on a Play click can cause
   // legitimate embedded players to abort their own playback initialization.
   // All popup decisions run in native WebView2 NewWindowRequested instead.
