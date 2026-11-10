@@ -123,7 +123,9 @@
     const enabled=config.enabled&&config.mode!=='off';
     master.textContent=enabled?'Shield On':'Shield Off';
     master.setAttribute('aria-pressed',String(enabled));
-    master.onclick=()=>void persist({...config,enabled:!enabled}).then(ok=>{if(ok)paintPopup();});
+    master.onclick=()=>void persist(enabled?{...config,enabled:false}:
+      {...config,enabled:true,mode:config.mode==='off'?'balanced':config.mode})
+      .then(ok=>{if(ok)paintPopup();});
     popup.append(section('Global Protection',master));
     const site=document.createElement('button');
     site.type='button';site.className='shield-popup-action';
@@ -131,7 +133,9 @@
     site.textContent=allowedSite()?'Enable on This Site':'Disable on This Site';
     site.onclick=()=>{
       const next=new Set(config.allowSites);
-      if(allowedSite())next.delete(activeHost);else next.add(activeHost);
+      if(allowedSite()){
+        for(const rule of next)if(matched(activeHost,rule))next.delete(rule);
+      }else next.add(activeHost);
       void persist({...config,allowSites:[...next]}).then(ok=>{if(ok)paintPopup();});
     };
     popup.append(section('Current Website',site));
