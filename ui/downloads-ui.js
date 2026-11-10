@@ -98,8 +98,8 @@
       });
       const reveal=document.createElement('button');reveal.type='button';
       reveal.className='downloads-reveal';
-      reveal.textContent='⌕';
-      reveal.title='Show in folder';
+      reveal.innerHTML='<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"/><path d="m14.6 14.6 5.1 5.1"/></svg>';
+      reveal.title='Show File Selected in Explorer';
       reveal.setAttribute('aria-label','Show '+entry.name+' in folder');
       reveal.disabled=!completed;
       reveal.addEventListener('click',async()=>{
