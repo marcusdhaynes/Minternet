@@ -63,8 +63,24 @@ pub fn is_allowed(config:&ShieldConfig,host:&str)->bool{
 }
 fn built_in_popup(host:&str)->bool{
     ["popads.net","popcash.net","propellerads.com","onclickads.net",
-     "exoclick.com","trafficstars.com","adsterra.com","ad-maven.com"]
+     "exoclick.com","trafficstars.com","adsterra.com","ad-maven.com",
+     "popunder.net","clickadu.com","hilltopads.net","clickaine.com",
+     "adexchangeclear.com","onclickperformance.com"]
     .iter().any(|s|host_matches(host,s))
+}
+// On some streaming pages a "Play" click intentionally opens an ad
+// window first, often through about:blank. Treat these as abusive
+// popunders even when JavaScript still has transient user activation.
+fn high_risk_popup_source(host:&str)->bool{
+    ["123moviesfree.net"].iter().any(|s|host_matches(host,s))
+}
+pub fn block_blank_popup(config:&ShieldConfig,source:&str)->bool{
+    if !config.enabled||config.mode=="off"{return false;}
+    let source_host=tauri::Url::parse(source).ok()
+        .and_then(|u|u.host_str().map(str::to_ascii_lowercase))
+        .unwrap_or_default();
+    if is_allowed(config,&source_host){return false;}
+    config.mode=="strict" || high_risk_popup_source(&source_host)
 }
 pub fn block_popup(config:&ShieldConfig,source:&str,target:&str)->bool{
     if !config.enabled||config.mode=="off"{return false;}
@@ -76,8 +92,12 @@ pub fn block_popup(config:&ShieldConfig,source:&str,target:&str)->bool{
     if is_allowed(config,&source_host)||is_allowed(config,&target_host){return false;}
     if config.blocked_domains.iter().any(|s|host_matches(&target_host,s)) {return true;}
     if config.block_ads && built_in_popup(&target_host){return true;}
-    // Strict blocks third-party popups, not normal in-page navigations.
-    config.mode=="strict" && !source_host.is_empty() &&
+    // A click is not sufficient evidence of intent: popunders deliberately
+    // piggyback on Play/Download clicks. All untrusted third-party popup
+    // windows are blocked by default, even when user-activated.
+    // Same-site tabs, explicit site exceptions, and separately verified OAuth
+    // handshakes continue to work.
+    !source_host.is_empty() &&
         !host_matches(&target_host,&source_host) && !host_matches(&source_host,&target_host)
 }
 pub fn block_navigation(config:&ShieldConfig,target:&tauri::Url)->bool{
@@ -151,12 +171,17 @@ const SCRIPT:&str=r###"
     try {
       const u=new URL(String(url),location.href);
       const h=u.hostname.toLowerCase();
-      return u.protocol==='about:' ||
-        ['accounts.google.com','login.microsoftonline.com','appleid.apple.com',
-         'github.com','auth0.com','firebaseapp.com'].some(rule=>domainMatches(h,rule)) ||
-        (u.origin===location.origin && /\/(oauth|authorize|auth\/handler)(\/|$|\?)/i.test(u.pathname));
-    } catch {return String(url)==='about:blank';}
+      const path=u.pathname.toLowerCase();
+      if(u.protocol!=='https:')return false;
+      if(['accounts.google.com','login.microsoftonline.com',
+        'login.live.com','appleid.apple.com','id.apple.com'].includes(h))return true;
+      if(h==='github.com'&&path.startsWith('/login/oauth/'))return true;
+      if(h.endsWith('.firebaseapp.com')&&path.startsWith('/__/auth/'))return true;
+      return (/\/(oauth|authorize|auth\/handler)(\/|$)/i.test(path) &&
+        /(?:client_id|redirect_uri|code_challenge|response_type)=/.test(u.search));
+    } catch {return false;}
   };
+  const riskyPopupPage=hostname==='123moviesfree.net'||hostname.endsWith('.123moviesfree.net');
   // Genuine window.open links and OAuth popups keep their opener relationship.
   const originalOpen=window.open;
   if(typeof originalOpen==='function'){
@@ -165,7 +190,16 @@ const SCRIPT:&str=r###"
         if(enabled()&&!authenticating(url)){
           const activated=navigator.userActivation?.isActive===true;
           const suspicious=blockedHost(url);
-          if(suspicious || (!activated && (configuration.mode==='strict'||configuration.mode==='balanced')))return null;
+          let destination=null;
+          try{destination=new URL(String(url||'about:blank'),location.href);}catch{}
+          const blank=!destination||destination.protocol==='about:';
+          const foreign=destination&&destination.protocol==='https:' &&
+            destination.hostname!==hostname &&
+            !domainMatches(destination.hostname,hostname) &&
+            !domainMatches(hostname,destination.hostname);
+          if(suspicious ||
+             (blank && (riskyPopupPage||configuration.mode==='strict')) ||
+             foreign || !activated)return null;
         }
         return Reflect.apply(originalOpen,this,[url,...args]);
       };
@@ -305,6 +339,20 @@ mod tests{
         assert!(!block_popup(&p,"https://example.com/","https://example.com/next"));
         p.allow_sites.push("example.com".into());
         assert!(!block_popup(&p,"https://example.com/","https://ads.other.com/"));
+    }
+    #[test]
+    fn click_driven_popunders_and_blank_windows_are_denied(){
+        let p=ShieldConfig::default();
+        assert!(block_popup(&p,
+            "https://ww8.123moviesfree.net/movie/example",
+            "https://unrelated-ad-network.example/landing"));
+        assert!(block_blank_popup(&p,
+            "https://ww8.123moviesfree.net/movie/example"));
+        assert!(!block_blank_popup(&p,"https://www.example.org/login"));
+        assert!(!block_popup(&p,"https://www.example.org/","https://example.org/help"));
+        p.allow_sites.push("123moviesfree.net".into());
+        assert!(!block_blank_popup(&p,
+            "https://ww8.123moviesfree.net/movie/example"));
     }
     #[test]
     fn domains_are_exact_or_subdomains(){
