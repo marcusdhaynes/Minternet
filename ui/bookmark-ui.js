@@ -1054,6 +1054,9 @@
   });
   $('settings').addEventListener('click', openSettings);
   $('bookmarkBackdrop').addEventListener('click', closeOverlay);
+  // The website is a separate native WebView2: leaving browser chrome must
+  // dismiss an open Settings/bookmark window just like clicking the backdrop.
+  window.addEventListener('blur',()=>{if(mode)closeOverlay();});
   $('bookmarkSettingsClose').addEventListener('click', closeOverlay);
   $('bookmarkManageClose').addEventListener('click', closeOverlay);
   $('bookmarkFolderClose').addEventListener('click', closeOverlay);
