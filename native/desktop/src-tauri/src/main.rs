@@ -1936,13 +1936,15 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
         // non-loading popup URL is a narrowly scoped Ctrl+F signal that
         // the native new-window handler consumes without navigating.
         .initialization_script(r#"(() => {
+          const nativeOpen=window.open;
           window.addEventListener('keydown',event => {
             if((event.ctrlKey||event.metaKey)&&
                !event.altKey&&!event.shiftKey&&
                event.key.toLowerCase()==='f'){
               event.preventDefault();
               event.stopImmediatePropagation();
-              window.open('https://minternet-find.invalid/__open','_blank');
+              Reflect.apply(nativeOpen,window,
+                ['https://minternet-find.invalid/__open','_blank']);
             }
           },true);
         })();"#)
