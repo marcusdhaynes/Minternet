@@ -983,6 +983,25 @@ fn snapshot(app: &tauri::AppHandle) -> Result<Snapshot, String> {
     Ok(b.snapshot())
 }
 
+struct SessionSaveQueued(AtomicBool);
+fn schedule_session_save(app:&tauri::AppHandle){
+    // Saving session URLs queries native WebView controllers. Doing it inside
+    // every tab-state notification/COM callback causes redundant main-thread
+    // work and can destabilize WebView2 during rapid navigation.
+    let gate=app.state::<SessionSaveQueued>();
+    if gate.0.swap(true,Ordering::AcqRel){return;}
+    let handle=app.clone();
+    std::thread::spawn(move||{
+        std::thread::sleep(Duration::from_millis(650));
+        let callback_handle=handle.clone();
+        if handle.run_on_main_thread(move||{
+            let _=save_session(&callback_handle);
+            callback_handle.state::<SessionSaveQueued>().0.store(false,Ordering::Release);
+        }).is_err(){
+            handle.state::<SessionSaveQueued>().0.store(false,Ordering::Release);
+        }
+    });
+}
 fn notify(app: &tauri::AppHandle) {
     let state = {
         let storage = app.state::<Mutex<Browser>>();
@@ -993,7 +1012,7 @@ fn notify(app: &tauri::AppHandle) {
         state
     };
     let _ = app.emit_to("chrome", "minternet:state", state);
-    let _ = save_session(app);
+    schedule_session_save(app);
 }
 
 fn title_for(url: &str) -> String {
@@ -1696,6 +1715,21 @@ fn refresh_layout(app: &tauri::AppHandle) {
 // the native window, switching tabs, or finishing a large SPA navigation.
 // Reapply the *visible* view bounds and visibility without resetting its URL,
 // cookies, scroll position or application state.
+struct SurfaceRestoreQueued(AtomicBool);
+fn schedule_surface_restore(app:&tauri::AppHandle){
+    if app.state::<SurfaceRestoreQueued>().0.swap(true,Ordering::AcqRel){return;}
+    let handle=app.clone();
+    std::thread::spawn(move||{
+        std::thread::sleep(Duration::from_millis(32));
+        let task=handle.clone();
+        if handle.run_on_main_thread(move||{
+            restore_visible_surfaces(&task);
+            task.state::<SurfaceRestoreQueued>().0.store(false,Ordering::Release);
+        }).is_err(){
+            handle.state::<SurfaceRestoreQueued>().0.store(false,Ordering::Release);
+        }
+    });
+}
 fn restore_visible_surfaces(app:&tauri::AppHandle){
     invalidate_layout(app);
     refresh_layout(app);
@@ -2027,13 +2061,24 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                     // WebView2 surface. Restore its bounds without reloading.
                     let is_active=for_load.state::<Mutex<Browser>>().lock().ok()
                         .is_some_and(|browser|browser.active_id==id);
-                    if is_active {restore_visible_surfaces(&for_load);}
+                    // Layout/shows from inside a WebView2 load callback can
+                    // re-enter its COM controller. Queue a repaint instead.
+                    if is_active {schedule_surface_restore(&for_load);}
                     record_page_history(&for_load,id,event.url().as_str(),None);
                     // Automatically fill one enabled, encrypted saved login
                     // after the exact HTTPS page has loaded. Locked vaults,
                     // private/secret tabs and ambiguous accounts are skipped.
                     if is_active && event.url().scheme()=="https" {
-                        let _=fill_saved_credential(&for_load,id,false,None);
+                        // Never evaluate more JS synchronously while WebView2
+                        // is emitting navigation completion callbacks.
+                        let handle=for_load.clone();
+                        std::thread::spawn(move||{
+                            std::thread::sleep(Duration::from_millis(180));
+                            let task=handle.clone();
+                            let _=handle.run_on_main_thread(move||{
+                                let _=fill_saved_credential(&task,id,false,None);
+                            });
+                        });
                     }
                     // ChatGPT can occasionally finish a WebView2 navigation
                     // while leaving an empty document surface. Retry the same
@@ -2062,7 +2107,6 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                     if is_real_page_url(event.url().as_str()) {
                         apply_volume_to_site(&for_load,id,view.label(),true);
                     }
-                    let _=fill_saved_credential(&for_load,id,false,None);
                     // CI only: open about:blank exactly as OAuth popup libraries
                     // do, then assert a same-origin opener can write to it.
                     // No Google account or sign-in secrets are used.
@@ -2909,8 +2953,18 @@ fn check_idle_tabs(app:&tauri::AppHandle, minutes:u64) -> Result<(),String>{
                 result
             };
             if let Some(label)=released {
-                if let Some(view)=handle.get_webview(&label){let _=view.close();}
-                notify(&handle);
+                // Never close the very WebView2 controller from inside its
+                // ExecuteScript completion callback: defer teardown to a
+                // later UI-loop turn to avoid COM reentrancy/use-after-close.
+                let closer=handle.clone();
+                std::thread::spawn(move||{
+                    std::thread::sleep(Duration::from_millis(40));
+                    let task=closer.clone();
+                    let _=closer.run_on_main_thread(move||{
+                        if let Some(view)=task.get_webview(&label){let _=view.close();}
+                        notify(&task);
+                    });
+                });
             }
         });
         if evaluation.is_err(){
@@ -4913,6 +4967,8 @@ fn main() {
         .manage(AuthorizedSecrets::default())
         .manage(Mutex::new(google_account::restore()))
         .manage(Mutex::new(LayoutCache::default()))
+        .manage(SessionSaveQueued(AtomicBool::new(false)))
+        .manage(SurfaceRestoreQueued(AtomicBool::new(false)))
         .manage(privacy_shield::ShieldState(Mutex::new(privacy_shield::ShieldConfig::default())))
         .invoke_handler(tauri::generate_handler![browser_action, browser_snapshot])
         .setup(|app| {
@@ -5337,7 +5393,7 @@ fn main() {
                     tauri::WindowEvent::Focused(true) => {
                         // Force a compositor refresh on restore/focus even when
                         // the physical dimensions match the cached dimensions.
-                        restore_visible_surfaces(&handle);
+                        schedule_surface_restore(&handle);
                     },
                     _=>{}
                 }
