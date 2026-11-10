@@ -1940,3 +1940,16 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { di
 .manager-search:focus{border-color:#938ccf;}
 /* Lists can be large. Let the compositor skip below-the-fold row paint. */
 .bookmark-tree-line,.vault-entry{content-visibility:auto;contain-intrinsic-size:auto 24px;}
+
+/* Tiny dashboard command-hub shortcut beside the New Tab button. */
+.tab-row > .dashboard-tab-button{
+  order:3;align-self:flex-end;display:grid;place-items:center;
+  flex:0 0 21px;width:21px;min-width:21px;height:20px;
+  margin:0 1px 1px 0;padding:0;color:#adb9df;
+  background:transparent;border:0;border-radius:4px;
+  -webkit-app-region:no-drag;
+}
+.tab-row > .dashboard-tab-button:hover{background:#5e5c8a55;color:#fff;}
+.tab-row > .dashboard-tab-button svg{display:block;pointer-events:none;}
+.tab-row > .new-private-tab{order:4;}
+.tab-row > .window-actions{order:5;}
