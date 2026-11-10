@@ -171,6 +171,47 @@ const SCRIPT:&str=r###"
       };
     }catch{}
   }
+  // Prevent common third-party ad/tracking requests initiated by page JS.
+  // This is page-level interception, not a substitute for WebView2's native
+  // WebResourceRequested API or a complete ABP/uBlock filter-list engine.
+  if(typeof window.fetch==='function'){
+    const nativeFetch=window.fetch;
+    try{
+      window.fetch=function(input,init){
+        const address=typeof input==='string'||input instanceof URL?String(input):input?.url;
+        if(enabled()&&blockedHost(address))
+          return Promise.reject(new DOMException('Blocked by Minternet Privacy Shield','AbortError'));
+        return Reflect.apply(nativeFetch,this,[input,init]);
+      };
+    }catch{}
+  }
+  if(typeof window.XMLHttpRequest==='function'){
+    const originalOpen=XMLHttpRequest.prototype.open;
+    const originalSend=XMLHttpRequest.prototype.send;
+    try{
+      XMLHttpRequest.prototype.open=function(method,address,...rest){
+        this.__minternetShieldBlocked=enabled()&&blockedHost(address);
+        if(this.__minternetShieldBlocked)return;
+        return Reflect.apply(originalOpen,this,[method,address,...rest]);
+      };
+      XMLHttpRequest.prototype.send=function(...args){
+        if(this.__minternetShieldBlocked){
+          try{this.abort();}catch{}
+          return;
+        }
+        return Reflect.apply(originalSend,this,args);
+      };
+    }catch{}
+  }
+  if(typeof navigator.sendBeacon==='function'){
+    const beacon=navigator.sendBeacon.bind(navigator);
+    try{
+      navigator.sendBeacon=function(address,data){
+        if(enabled()&&blockedHost(address))return true;
+        return beacon(address,data);
+      };
+    }catch{}
+  }
   const styleId='minternet-shield-cosmetics';
   const cssFor=()=>{
     if(!enabled())return '';
