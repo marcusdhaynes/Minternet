@@ -1874,3 +1874,13 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { di
 .shield-settings-foot button{color:#fff;background:#5d5387;border:1px solid #9587b8;
  border-radius:5px;font-size:10px;padding:6px 9px;cursor:pointer;}
 .shield-settings-foot span{font-size:9px;color:#aeb9d7;}
+
+/* Keep the search glyph optically and geometrically centered. */
+.downloads-actions .downloads-reveal{
+  box-sizing:border-box;display:grid;place-items:center;
+  width:23px;min-width:23px;padding:0!important;line-height:1;
+}
+.downloads-actions .downloads-reveal svg{
+  display:block;width:16px;height:16px;margin:auto;
+  flex:none;pointer-events:none;
+}
