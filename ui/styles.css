@@ -1884,3 +1884,59 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { di
   display:block;width:16px;height:16px;margin:auto;
   flex:none;pointer-events:none;
 }
+
+/* Dashboard: one static, GPU-cheap dotted background. No canvas animations,
+   widgets, timers or website processes until the user adds components. */
+.home-screen.dashboard-canvas {
+  inset:var(--chrome-height) 0 0;
+  display:block;
+  border:0;
+  background:#0b1120;
+  box-shadow:none;
+  padding:0;
+}
+.home-screen.dashboard-canvas[hidden]{display:none!important;}
+.dashboard-grid {
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  background-color:#0b1120;
+  background-image:radial-gradient(circle,#8091bf66 1px,transparent 1.15px);
+  background-size:var(--dashboard-grid-spacing,24px) var(--dashboard-grid-spacing,24px);
+  background-position:center center;
+}
+.dashboard-settings{display:flex;flex-direction:column;gap:7px;padding:8px 6px;
+  border-top:1px solid #ffffff18;font-size:10px;}
+.dashboard-settings>strong{font-size:11px;}
+.dashboard-settings>small{color:#aab7d4;line-height:1.4;font-size:9px;}
+.dashboard-setting-row{display:flex;justify-content:space-between;align-items:center;
+  gap:8px;min-height:28px;}
+.dashboard-setting-row span{flex:1;}
+.dashboard-setting-row select,.dashboard-setting-row input[type="number"]{
+  min-height:24px;max-width:153px;background:#1a253b;color:#e9edff;
+  border:1px solid #4b5b7a;border-radius:4px;padding:3px 5px;font-size:10px;}
+.dashboard-setting-row input[type="number"]{max-width:62px;}
+.dashboard-setting-row input[type="checkbox"]{accent-color:#999de8;}
+#dashboardStatus{min-height:10px;color:#bfcbed;font-size:9px;}
+/* Find always occupies an exact 31px row below the optional Bookmark Bar.
+   The Tauri native bounds are updated atomically before the webpage resizes. */
+:root.find-open{--chrome-height:83px;}
+:root.has-bookmarks.find-open{--chrome-height:105px;}
+.find-bar{display:flex;align-items:center;justify-content:flex-end;gap:5px;
+  height:31px;min-height:31px;width:100%;padding:2px 8px;
+  border-top:1px solid #343f5a;background:#19243a;overflow:hidden;}
+.find-bar[hidden]{display:none!important;}
+.find-bar-label{font-size:9px;color:#a2b2d2;white-space:nowrap;}
+.find-bar input{height:23px;width:min(220px,34vw);min-width:72px;
+  border:1px solid #4b5981;border-radius:4px;
+  background:#0b1324;color:#f5f6ff;font-size:11px;padding:2px 7px;}
+.find-bar output{font-size:9px;color:#aeb7da;min-width:62px;text-align:center;}
+.find-bar button{width:22px;height:22px;flex:0 0 22px;background:transparent;
+  color:#b7c5e7;border:0;border-radius:4px;cursor:pointer;padding:0;font-size:14px;}
+.find-bar button:hover{background:#485779;color:#fff;}
+.manager-search{display:block;width:calc(100% - 12px);margin:5px 6px 6px;
+  height:27px;padding:4px 8px;color:#f2f5ff;background:#111b2d;
+  border:1px solid #4f5b78;border-radius:5px;font-size:10px;outline-offset:0;}
+.manager-search:focus{border-color:#938ccf;}
+/* Lists can be large. Let the compositor skip below-the-fold row paint. */
+.bookmark-tree-line,.vault-entry{content-visibility:auto;contain-intrinsic-size:auto 24px;}
