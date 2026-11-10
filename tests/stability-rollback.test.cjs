@@ -19,10 +19,13 @@ test('Every successful native platform build is saved under a distinct permanent
   assert.match(workflow,/gh release create "\$TAG"/);
   assert.match(workflow,/SHA256SUMS\.txt/);
   assert.match(workflow,/--target "\$SHA"/);
-  assert.match(workflow,/gh release view "\$TAG"/);
+  assert.match(workflow,/gh api "repos\/\$GITHUB_REPOSITORY\/releases\/tags\/\$TAG"/);
   assert.doesNotMatch(workflow,/--clobber/);
-  // The only allowed edit is publishing a fully uploaded draft; previous
-  // binary assets and completed releases must never be overwritten.
+  // Legacy draft recovery is allowed, but completed releases and their
+  // existing executable assets must never be overwritten.
+  assert.match(workflow,/matching_draft=.*draft==true/);
+  assert.match(workflow,/releases\/\$draft_id" -F draft=false/);
+  assert.doesNotMatch(workflow,/--draft --prerelease/);
   assert.match(workflow,/gh release edit "\$TAG" --draft=false/);
   assert.doesNotMatch(workflow,/LATEST=.*gh run list/);
 });
