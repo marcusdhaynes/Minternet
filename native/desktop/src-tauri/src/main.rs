@@ -28,6 +28,9 @@ const DEFAULT_HOMEPAGE: &str = "https://www.google.com/";
 #[serde(rename_all="camelCase")]
 struct BrowserPreferences {
     homepage:String,
+    // Default to a chrome-only dashboard with zero website WebViews.
+    #[serde(default="default_new_tab_mode")]
+    new_tab_mode:String,
     #[serde(default)]
     tab_limit:usize,
     #[serde(default)]
@@ -35,9 +38,11 @@ struct BrowserPreferences {
     #[serde(default)]
     previous_download_folders:Vec<String>,
 }
+fn default_new_tab_mode()->String{"dashboard".into()}
+fn valid_new_tab_mode(value:&str)->bool{matches!(value,"dashboard"|"website")}
 impl Default for BrowserPreferences{
     fn default()->Self{
-        Self{homepage:DEFAULT_HOMEPAGE.into(),tab_limit:0,
+        Self{homepage:DEFAULT_HOMEPAGE.into(),new_tab_mode:default_new_tab_mode(),tab_limit:0,
             download_folder:None,previous_download_folders:Vec::new()}
     }
 }
@@ -96,6 +101,9 @@ fn load_preferences(app:&tauri::AppHandle)->BrowserPreferences{
         else{return BrowserPreferences::default()};
     saved.homepage=validate_homepage(&saved.homepage)
         .unwrap_or_else(|_|DEFAULT_HOMEPAGE.into());
+    if !valid_new_tab_mode(&saved.new_tab_mode){
+        saved.new_tab_mode=default_new_tab_mode();
+    }
     saved.previous_download_folders.truncate(8);
     saved.tab_limit=saved.tab_limit.min(1_000_000);
     saved
@@ -114,6 +122,10 @@ fn persist_preferences(app:&tauri::AppHandle,
     }
     Ok(())
 }
+fn new_tab_is_dashboard(app:&tauri::AppHandle)->bool{
+    app.state::<BrowserPreferenceState>().0.lock()
+        .map(|p|p.new_tab_mode!="website").unwrap_or(true)
+}
 fn homepage(app:&tauri::AppHandle)->tauri::Url{
     let saved=app.state::<BrowserPreferenceState>().0.lock()
         .ok().map(|p|p.homepage.clone()).unwrap_or_else(||DEFAULT_HOMEPAGE.into());
@@ -126,6 +138,9 @@ mod home_and_download_tests{
     #[test]
     fn home_is_google_until_user_changes_it(){
         assert_eq!(BrowserPreferences::default().homepage,DEFAULT_HOMEPAGE);
+        assert_eq!(BrowserPreferences::default().new_tab_mode,"dashboard");
+        assert_eq!(serde_json::from_str::<BrowserPreferences>(r#"{"homepage":"https://example.org/"}"#)
+            .unwrap().new_tab_mode,"dashboard");
         assert_eq!(validate_homepage("https://example.org/start").unwrap(),
             "https://example.org/start");
         assert!(validate_homepage("javascript:alert(1)").is_err());
@@ -3714,12 +3729,14 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             let state=app.state::<BrowserPreferenceState>();
             let prefs=state.0.lock().map_err(|e|e.to_string())?;
             let selected=prefs.homepage.clone();
+            let new_tab_mode=prefs.new_tab_mode.clone();
             let tab_limit=prefs.tab_limit;
             let system=prefs.download_folder.is_none();
             drop(prefs);
             let destination=configured_download_folder(&app)?;
             return Ok(json!({
                 "homepage":selected,
+                "newTabMode":new_tab_mode,
                 "tabLimit":tab_limit,
                 "downloadFolder":destination.to_string_lossy(),
                 "usingSystemDownloads":system
@@ -3738,6 +3755,17 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             drop(prefs);
             app.state::<Mutex<Browser>>().lock().map_err(|e|e.to_string())?.tab_limit=selected;
             return Ok(json!({"ok":true,"tabLimit":selected}));
+        }
+        "browser-new-tab-mode-set" => {
+            let mode=value.as_str().ok_or("Select Dashboard or Website")?;
+            if !valid_new_tab_mode(mode){return Err("Unknown New Tab mode".into());}
+            let state=app.state::<BrowserPreferenceState>();
+            let mut settings=state.0.lock().map_err(|e|e.to_string())?;
+            let mut updated=settings.clone();
+            updated.new_tab_mode=mode.into();
+            persist_preferences(&app,&updated)?;
+            *settings=updated;
+            return Ok(json!({"ok":true,"newTabMode":mode}));
         }
         "browser-homepage-set" => {
             let submitted=value.as_str().ok_or("Enter a homepage URL")?.trim();
@@ -4572,8 +4600,13 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             if let Some(url)=address {
                 navigate_tab(&app,id,Some(url),true)?;
             } else if name=="new" || name=="new-private" {
-                // A new tab is a real homepage, never the hidden warmup page.
-                navigate_tab(&app,id,Some(homepage(&app)),true)?;
+                if new_tab_is_dashboard(&app) {
+                    // Chrome-only dashboard: no empty WebView2 controller,
+                    // network request, renderer process or idle polling.
+                    display_active(&app);
+                }else{
+                    navigate_tab(&app,id,Some(homepage(&app)),true)?;
+                }
             } else { display_active(&app); }
             if !background && matches!(name.as_str(),"new"|"new-private") {
                 focus_address_bar(&app);
@@ -4640,7 +4673,9 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         }
         "navigate" | "home" => {
             let mut pending:Option<PendingChatPrompt>=None;
-            let url = if name=="home" { Some(homepage(&app)) } else {
+            let url = if name=="home" {
+                if new_tab_is_dashboard(&app){None}else{Some(homepage(&app))}
+            } else {
                 let address=value.as_str()
                     .or_else(||value.get("address").and_then(Value::as_str))
                     .ok_or("Missing address")?;
@@ -4704,7 +4739,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                     else{true}
                 });
                 if !b.tabs.iter().any(|t|t.id==b.active_id){
-                    b.active_id=b.tabs.iter().find(|t|t.pinned).or_else(||b.tabs.first()).map(|t|t.id).unwrap_or(0);
+                    b.active_id=0; // Keep loaded/suspended remaining tabs untouched.
                 }
                 labels
             };
@@ -4726,10 +4761,10 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 let closed_view=tab.view.take();
                 scrub_secret_tab(&mut tab);
                 if b.active_id==id {
-                    // Prefer an existing pinned page; never synthesize a new tab.
-                    b.active_id = b.tabs.iter().find(|t|t.pinned).map(|t|t.id)
-                        .or_else(||b.tabs.get(ix.min(b.tabs.len().saturating_sub(1))).map(|t|t.id))
-                        .unwrap_or(0);
+                    // Never wake an old suspended tab just because the current
+                    // one closed. The zero-cost tabless dashboard is a stable
+                    // fallback until the user selects a specific website.
+                    b.active_id=0;
                 }
                 closed_view
             };
@@ -5092,8 +5127,10 @@ fn main() {
                 let target=homepage(app.handle()).to_string();
                 if let Ok(mut browser)=app.state::<Mutex<Browser>>().lock(){
                     if browser.tabs.is_empty(){let _=browser.add(false);}
-                    // Legacy sessions saved internal blank/warmup tabs. Convert
-                    // only ordinary blank tabs; never expose a Secret Tab URL.
+                    // The dashboard is the legitimate HOME sentinel; never
+                    // replace it with Google or create a native website view
+                    // unless Website is the selected New Tab preference.
+                    if !new_tab_is_dashboard(app.handle()){
                     for tab in &mut browser.tabs {
                         if tab.url==HOME&&tab.secret_id.is_none(){
                             tab.url=target.clone();
@@ -5101,6 +5138,7 @@ fn main() {
                             tab.history=vec![target.clone()];
                             tab.at=0;
                         }
+                    }
                     }
                 }
             }
