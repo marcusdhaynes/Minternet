@@ -39,7 +39,7 @@ test('Native WebView2 blocker honors authentication popup and configurable rules
   const shield=source('native/desktop/src-tauri/src/privacy_shield.rs');
   assert.match(main,/mod privacy_shield;/);
   assert.match(main,/\.initialization_script\(privacy_shield::script/);
-  assert.match(main,/if is_auth_popup_url\(&url\)/);
+  assert.match(main,/if auth_target \{/);
   assert.match(main,/privacy_shield::block_popup/);
   assert.match(main,/restore_visible_surfaces/);
   assert.match(shield,/pub fn block_popup/);
