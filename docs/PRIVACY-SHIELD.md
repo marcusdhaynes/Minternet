@@ -5,7 +5,7 @@
 - A toolbar shield menu with three profiles: Off, Balanced and Strict.
 - A global enabled switch plus a per-website exception, persisted in Minternet's own native app-data directory.
 - Browser-native popup denials for configured domains and known ad-popunder hosts.
-- Balanced: blocks unsolicited cross-site popup tabs even when a click initiates them, as well as known ad-network windows. Strict additionally blocks blank popup windows that can be navigated to third-party ads. Validated OAuth popup windows and per-site exceptions remain available.
+- Balanced: blocks unsolicited cross-site popup tabs even when a click initiates them, as well as known ad-network windows. Both profiles block blank popunders that could redirect to third-party ads. Validated OAuth popup windows and per-site exceptions remain available.
 - Document-start defenses against selected advertising/tracking \`fetch\`, XHR and \`sendBeacon\` requests, plus a limited list of named ad/tracking hosts.
 - Cosmetic hiding of identifiable advertisement slots, tracking frames, newsletter annoyances and (if explicitly enabled) subscription overlays.
 - Experimental YouTube Skip Ad button detection and ad-slot hiding.
@@ -45,6 +45,6 @@ On `ww8.123moviesfree.net`, clicking the player can launch ad pages as user-acti
 
 The early popup blocker replaced `window.open` in the page's JavaScript and returned `null` for filtered popups. Some video player scripts treat the missing return value as a fatal error and never start playback. We removed this page-level override: the native WebView2 `NewWindowRequested` handler now owns popup blocking so rejected popups get the native dummy `WindowProxy` behavior without loading a separate ad window.
 
-The default Balanced profile continues to block built-in ad-network popup hosts and configured user block rules, but it no longer rejects arbitrary third-party popup URLs merely because they cross origins. Some legitimate third-party video players need those windows. Strict still blocks third-party popup windows. Blank popups from designated high-risk sources may remain blocked natively, preserving the safe proxy behavior. If video playback still fails on a specific provider, collect the popup URL and whether its player must open a separate window before changing site-wide policy.
+Balanced and Strict now reject unsolicited cross-origin popup windows and about:blank popunders by default, including those launched after clicking Play. Trusted OAuth providers and deliberate Ctrl-click tab requests are handled separately. Some legitimate cross-origin popup-based players or login flows may require a site exception, but inline playback is unaffected. If video playback still fails on a specific provider, collect the popup URL and whether its player must open a separate window before changing site-wide policy.
 
 Native and JavaScript policies must not each deny the same popup separately. Test with an in-page video player and a native popup advertisement on Windows WebView2.

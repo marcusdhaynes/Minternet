@@ -741,7 +741,7 @@ fn intentional_new_tab_shortcut()->bool{
     use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState,VK_CONTROL};
     // Preserve explicit Ctrl+click new-tab actions even when the destination
     // is cross-site. Ordinary video Play clicks never qualify.
-    unsafe{GetAsyncKeyState(VK_CONTROL.0 as i32)}<0
+    (unsafe {GetAsyncKeyState(VK_CONTROL.0 as i32)}) < 0
 }
 #[cfg(not(windows))]
 fn intentional_new_tab_shortcut()->bool{false}
