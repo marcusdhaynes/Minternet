@@ -45,8 +45,10 @@ jobs:
               --branch main --limit 100 --json databaseId,conclusion \
               | jq -r '[.[] | select(.conclusion=="success") | .databaseId] | .[]')
             for run_id in "${runs[@]}"; do
-              if gh release view "minternet-build-$run_id" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-                published=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/minternet-build-$run_id")
+              # Drafts are intentionally absent from the tag endpoint. A
+              # missing/unfinished release must be queued for recovery, not
+              # terminate the hourly reconciliation with a 404.
+              if published=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/minternet-build-$run_id" 2>/dev/null); then
                 complete=$(jq -r '(.draft==false) and ([.assets[].name] | index("SHA256SUMS.txt") != null) and ([.assets[].name] | length >= 2)' <<<"$published")
                 if [ "$complete" = true ]; then continue; fi
               fi
@@ -103,7 +105,7 @@ jobs:
           echo "WORKFLOW_NAME=$NAME" >> "$GITHUB_ENV"
           mkdir -p release/assets
           # Always reconstruct expected files from the original successful
-          # workflow. Partial draft releases are resumed without clobbering.
+          # workflow. Incomplete releases are resumed without clobbering.
           mapfile -t ARTIFACTS < <(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts?per_page=100" --jq '.artifacts[].name')
           count=0
           for artifact in "${ARTIFACTS[@]}"; do

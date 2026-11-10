@@ -26,6 +26,7 @@ test('Every successful native platform build is saved under a distinct permanent
   assert.match(workflow,/matching_draft=.*draft==true/);
   assert.match(workflow,/releases\/\$draft_id" -F draft=false/);
   assert.doesNotMatch(workflow,/--draft --prerelease/);
+  assert.ok(workflow.includes('if published=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/minternet-build-$run_id" 2>/dev/null); then'));
   assert.match(workflow,/gh release edit "\$TAG" --draft=false/);
   assert.doesNotMatch(workflow,/LATEST=.*gh run list/);
 });
