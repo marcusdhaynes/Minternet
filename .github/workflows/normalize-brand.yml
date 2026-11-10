@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/normalize-brand.yml'
       - 'native/desktop/scripts/generate_icons.py'
+      - 'ui/minternet-coin-source.webp.b64'
   workflow_dispatch:
 permissions:
   contents: write
@@ -38,14 +39,17 @@ jobs:
               assert asset.getpixel((0,0))[3] == 0, f"Nontransparent icon: {filename}"
           print("Verified RGBA transparent corners across shared icons.")
           PY
-      - name: Commit corrected canonical PNG if source changed
+      - name: Commit generated icons for all supported platforms
         run: |
           git add ui/minternet-brand.png
+          git add native/desktop/src-tauri/icons/
+          git add native/android/app/src/main/res/
+          git add native/ios/Assets.xcassets/
           if git diff --cached --quiet; then
             echo "Source artwork already had transparent corners."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "Normalize transparent Minternet jade rabbit source PNG"
+          git commit -m "Propagate transparent jade rabbit coin across Minternet app icons"
           git push origin HEAD:main
