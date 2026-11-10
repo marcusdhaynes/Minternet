@@ -1671,6 +1671,31 @@ fn refresh_layout(app: &tauri::AppHandle) {
         }
     };
 }
+// WebView2 can occasionally retain a blank compositor surface after restoring
+// the native window, switching tabs, or finishing a large SPA navigation.
+// Reapply the *visible* view bounds and visibility without resetting its URL,
+// cookies, scroll position or application state.
+fn restore_visible_surfaces(app:&tauri::AppHandle){
+    invalidate_layout(app);
+    refresh_layout(app);
+    let labels={
+        let split=visible_split(app);
+        let store=app.state::<Mutex<Browser>>();
+        let Ok(browser)=store.lock() else{return};
+        if split.len()>1 {
+            split.iter().filter_map(|id|browser.tabs.iter().find(|t|t.id==*id)
+                .and_then(|tab|tab.view.clone())).collect::<Vec<_>>()
+        }else{
+            browser.active().and_then(|tab|tab.view.clone()).into_iter().collect::<Vec<_>>()
+        }
+    };
+    for label in labels {
+        if let Some(view)=app.get_webview(&label){
+            let _=view.show();
+        }
+    }
+}
+
 fn display_active(app: &tauri::AppHandle) {
     let mut targets=HashSet::new();
     {
@@ -1955,6 +1980,11 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                 }
                 update_from_site(&for_load, id, event.url().as_str());
                 if matches!(event.event(), PageLoadEvent::Finished) {
+                    // A completed navigation can still display an unrepainted
+                    // WebView2 surface. Restore its bounds without reloading.
+                    let is_active=for_load.state::<Mutex<Browser>>().lock().ok()
+                        .is_some_and(|browser|browser.active_id==id);
+                    if is_active {restore_visible_surfaces(&for_load);}
                     record_page_history(&for_load,id,event.url().as_str(),None);
                     if is_real_page_url(event.url().as_str()) {
                         apply_volume_to_site(&for_load,id,view.label(),true);
@@ -5157,8 +5187,7 @@ fn main() {
                     tauri::WindowEvent::Focused(true) => {
                         // Force a compositor refresh on restore/focus even when
                         // the physical dimensions match the cached dimensions.
-                        invalidate_layout(&handle);
-                        refresh_layout(&handle);
+                        restore_visible_surfaces(&handle);
                     },
                     _=>{}
                 }
