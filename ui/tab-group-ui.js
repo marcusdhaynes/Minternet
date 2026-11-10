@@ -11,6 +11,7 @@
   // Keyed DOM reuse: changing one active tab must not recreate and rebind
   // listeners for every other tab on each title/audio/loading notification.
   const reusedTabs=new Map();
+  const reusedChips=new Map(),reusedEndCaps=new Map();
   let draggingTabId=null;
   let gesture=null, ghost=null, splitPreview=null, dragOverlay=false, suppressedClick=null;
   const ungroupTarget=$('tabUngroupDrop');
@@ -240,6 +241,29 @@
     return node;
   }
   function renderTabs(data,host,buildTab) {
+    const takeChip=(group,members)=>{
+      const signature=JSON.stringify([group.name,group.color,group.visible,
+        group.collapsed,members.length]);
+      let cache=reusedChips.get(group.id);
+      if(!cache||cache.signature!==signature){
+        cache={signature,node:buildChip(group,members)};
+        reusedChips.set(group.id,cache);
+      }
+      return cache.node;
+    };
+    const takeEndCap=group=>{
+      const color=groupColor(group);
+      let cache=reusedEndCaps.get(group.id);
+      if(!cache||cache.color!==color){
+        const node=document.createElement('span');
+        node.className='group-end-cap';
+        node.style.setProperty('--group-accent',color);
+        node.setAttribute('aria-hidden','true');
+        cache={color,node};
+        reusedEndCaps.set(group.id,cache);
+      }
+      return cache.node;
+    };
     const takeTab=(tab,active)=>{
       const signature=JSON.stringify([
         tab.title,tab.url,tab.private,tab.pinned,tab.suspended,
@@ -319,7 +343,7 @@
     for(const g of state.groups){
       if(!g.visible)continue;
       const members=model.tabsIn(state,g.id,data.tabs).filter(t=>!t.pinned);
-      items.push(buildChip(g,members));
+      items.push(takeChip(g,members));
       if(!g.collapsed){
         for(const tab of members){
           const item=takeTab(tab,tab.id===data.activeId);
@@ -330,11 +354,7 @@
         // A visible end-cap continues the group's tinted background beyond
         // its final tab. It is decorative only and never affects tab actions.
         if(members.length){
-          const end=document.createElement('span');
-          end.className='group-end-cap';
-          end.style.setProperty('--group-accent',groupColor(g));
-          end.setAttribute('aria-hidden','true');
-          items.push(end);
+          items.push(takeEndCap(g));
         }
       }
     }
@@ -342,9 +362,20 @@
       if(tab.pinned||model.findTab(state,tab.id))continue;
       items.push(takeTab(tab,tab.id===data.activeId));
     }
-    host.replaceChildren(...items);
+    // Minimal keyed reconciliation: do not detach and recreate every tab
+    // when just one page changes title or the active selection changes.
+    // insertBefore moves only nodes whose order actually differs.
+    for(let index=0;index<items.length;index++){
+      const next=items[index];
+      if(host.children[index]!==next)
+        host.insertBefore(next,host.children[index]||null);
+    }
+    while(host.children.length>items.length)host.lastElementChild.remove();
     const surviving=new Set(data.tabs.map(tab=>tab.id));
     for(const id of reusedTabs.keys())if(!surviving.has(id))reusedTabs.delete(id);
+    const groups=new Set(state.groups.map(group=>group.id));
+    for(const id of reusedChips.keys())if(!groups.has(id))reusedChips.delete(id);
+    for(const id of reusedEndCaps.keys())if(!groups.has(id))reusedEndCaps.delete(id);
     // Native tab restoration/closing may prune stale group memberships;
     // synchronize the baseline without recording a phantom user action.
     lastGroupUndoJson=groupUndoJson();
