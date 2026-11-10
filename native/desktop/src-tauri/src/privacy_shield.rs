@@ -282,8 +282,11 @@ fn session_proof()->&'static str {
     static PROOF:OnceLock<String>=OnceLock::new();
     PROOF.get_or_init(||{
         let mut bytes=[0u8;32];
-        rand::rngs::OsRng.fill_bytes(&mut bytes);
-        bytes.iter().map(|byte|format!("{byte:02x}")).collect()
+        let mut rng=rand::rngs::OsRng;
+        rng.fill_bytes(&mut bytes);
+        let mut value=String::with_capacity(64);
+        for byte in bytes {value.push_str(&format!("{byte:02x}"));}
+        value
     })
 }
 pub fn script(config:&ShieldConfig)->String {
