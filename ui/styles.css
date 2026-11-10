@@ -1918,21 +1918,20 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { di
 .dashboard-setting-row input[type="number"]{max-width:62px;}
 .dashboard-setting-row input[type="checkbox"]{accent-color:#999de8;}
 #dashboardStatus{min-height:10px;color:#bfcbed;font-size:9px;}
-/* Find always occupies an exact 31px row below the optional Bookmark Bar.
-   The Tauri native bounds are updated atomically before the webpage resizes. */
-:root.find-open{--chrome-height:83px;}
-:root.has-bookmarks.find-open{--chrome-height:105px;}
-.find-bar{display:flex;align-items:center;justify-content:flex-end;gap:5px;
-  height:31px;min-height:31px;width:100%;padding:2px 8px;
+/* Find is the same height as Bookmarks (22px), with controls right-aligned. */
+:root.find-open{--chrome-height:74px;}
+:root.has-bookmarks.find-open{--chrome-height:96px;}
+.find-bar{display:flex;align-items:center;justify-content:flex-end;gap:2px;
+  height:22px;min-height:22px;width:100%;padding:0 3px;
   border-top:1px solid #343f5a;background:#19243a;overflow:hidden;}
 .find-bar[hidden]{display:none!important;}
-.find-bar-label{font-size:9px;color:#a2b2d2;white-space:nowrap;}
-.find-bar input{height:23px;width:min(220px,34vw);min-width:72px;
+.find-bar input{box-sizing:border-box;height:18px;width:min(155px,30vw);min-width:60px;
   border:1px solid #4b5981;border-radius:4px;
-  background:#0b1324;color:#f5f6ff;font-size:11px;padding:2px 7px;}
-.find-bar output{font-size:9px;color:#aeb7da;min-width:62px;text-align:center;}
-.find-bar button{width:22px;height:22px;flex:0 0 22px;background:transparent;
-  color:#b7c5e7;border:0;border-radius:4px;cursor:pointer;padding:0;font-size:14px;}
+  background:#0b1324;color:#f5f6ff;font-size:10px;padding:0 5px;}
+.find-bar output{font-size:9px;color:#aeb7da;min-width:43px;text-align:center;}
+.find-bar button{width:19px;height:19px;flex:0 0 19px;display:grid;place-items:center;
+  background:transparent;color:#b7c5e7;border:0;border-radius:4px;
+  cursor:pointer;padding:0;font-size:13px;line-height:1;}
 .find-bar button:hover{background:#485779;color:#fff;}
 .manager-search{display:block;width:calc(100% - 12px);margin:5px 6px 6px;
   height:27px;padding:4px 8px;color:#f2f5ff;background:#111b2d;
@@ -1953,3 +1952,29 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { di
 .tab-row > .dashboard-tab-button svg{display:block;pointer-events:none;}
 .tab-row > .new-private-tab{order:4;}
 .tab-row > .window-actions{order:5;}
+
+/* Aligned right edges and equal inter-control rhythm preserve address width. */
+.toolbar{padding-left:3px!important;padding-right:3px!important;gap:2px!important;}
+.history-controls,.toolbar-actions{gap:0!important;}
+.toolbar-actions{margin-right:0!important;}
+.toolbar-actions #tor{margin-left:2px!important;margin-right:2px!important;}
+.toolbar-actions .settings-btn{box-sizing:border-box;flex:0 0 22px!important;
+  width:22px!important;min-width:22px;margin:0!important;border-radius:4px;
+  border-left:1px solid #566482;}
+.bookmark-bar #bookmarkBarManage{box-sizing:border-box;flex:0 0 22px!important;
+  width:22px!important;min-width:22px;margin:0!important;}
+.address-wrap{flex:1 1 auto!important;min-width:65px;}
+.tab-row > .new-private-tab{order:3;}
+.tab-row > .dashboard-tab-button{order:4;}
+.tab-row > .window-actions{order:5;}
+.tabs .tab .tab-symbol .minternet-new-tab-icon{
+  display:block;width:16px;height:16px;object-fit:contain;
+}
+.extension-settings{display:flex;flex-direction:column;gap:6px;padding:8px 6px;
+  border-top:1px solid #ffffff18;}
+.extension-settings>strong{font-size:11px;}
+.extension-settings>small{font-size:9px;line-height:1.4;color:#acbad3;}
+.extension-stores{display:flex;gap:5px;}
+.extension-stores button{flex:1;min-width:0;min-height:23px;border-radius:4px;
+  background:#273551;border:1px solid #546280;color:#e5ebfd;font-size:10px;cursor:pointer;}
+.extension-stores button:hover{background:#364665;}

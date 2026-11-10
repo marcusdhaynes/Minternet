@@ -80,7 +80,9 @@ pub fn block_blank_popup(config:&ShieldConfig,source:&str)->bool{
         .and_then(|u|u.host_str().map(str::to_ascii_lowercase))
         .unwrap_or_default();
     if is_allowed(config,&source_host){return false;}
-    config.mode=="strict" || high_risk_popup_source(&source_host)
+    // An about:blank popunder can redirect to an arbitrary advertising host
+    // after WebView2 has already accepted its creation.
+    true
 }
 pub fn block_popup(config:&ShieldConfig,source:&str,target:&str)->bool{
     if !config.enabled||config.mode=="off"{return false;}
@@ -92,10 +94,10 @@ pub fn block_popup(config:&ShieldConfig,source:&str,target:&str)->bool{
     if is_allowed(config,&source_host)||is_allowed(config,&target_host){return false;}
     if config.blocked_domains.iter().any(|s|host_matches(&target_host,s)) {return true;}
     if config.block_ads && built_in_popup(&target_host){return true;}
-    // Balanced must not mistake a cross-origin playback window for an ad.
-    // Only known advertising hosts and explicit user block rules are
-    // denied in Balanced. Strict keeps its stronger cross-site policy.
-    config.mode=="strict" && !source_host.is_empty() &&
+    // Blocking only known ad domains missed rotating ad domains opened
+    // on video-play clicks. Cross-site popups are denied by default in both
+    // Balanced and Strict; same-site links and explicit site exceptions work.
+    !source_host.is_empty() &&
         !host_matches(&target_host,&source_host) && !host_matches(&source_host,&target_host)
 }
 pub fn block_navigation(config:&ShieldConfig,target:&tauri::Url)->bool{
@@ -310,7 +312,7 @@ mod tests{
     fn click_driven_popunders_and_blank_windows_are_denied(){
         let mut p=ShieldConfig::default();
         // An arbitrary third-party player is not proof of advertising.
-        assert!(!block_popup(&p,
+        assert!(block_popup(&p,
             "https://ww8.123moviesfree.net/movie/example",
             "https://cdn-streaming-player.example/embed"));
         assert!(block_popup(&p,
@@ -323,7 +325,7 @@ mod tests{
         p.mode="balanced".into();
         assert!(block_blank_popup(&p,
             "https://ww8.123moviesfree.net/movie/example"));
-        assert!(!block_blank_popup(&p,"https://www.example.org/login"));
+        assert!(block_blank_popup(&p,"https://www.example.org/login"));
         assert!(!block_popup(&p,"https://www.example.org/","https://example.org/help"));
         p.allow_sites.push("123moviesfree.net".into());
         assert!(!block_blank_popup(&p,

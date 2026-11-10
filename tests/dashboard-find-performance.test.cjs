@@ -67,7 +67,7 @@ test('Find bar is below Bookmarks without occupying full-page overlay',()=>{
   assert.ok(html.indexOf('id="findBar"')>html.indexOf('id="bookmarkBar"'));
   for(const id of ['findBar','findQuery','findResult','findNext','findPrevious','findClose'])
     assert.match(html,new RegExp('id="'+id+'"'));
-  assert.match(native,/FIND_BAR: f64 = 31\.0/);
+  assert.match(native,/FIND_BAR: f64 = 22\.0/);
   assert.match(native,/find_visible\(app\)/);
   assert.match(native,/window\.find\(/);
   assert.match(native,/minternet:find-open/);
@@ -120,4 +120,35 @@ test('Keyed tab UI refreshes loading and secret status without quadratic slot sc
   assert.match(groups,/const positions=new Map\(normal\.map/);
   assert.match(groups,/Object\.assign\(stored,savedTabSlots\(data\.tabs\)\)/);
   assert.doesNotMatch(groups,/state\.order\.map\(id=>data\.tabs\.filter/);
+});
+
+test('compact Find, toolbar order, and branded new tabs',()=>{
+  const html=read('ui/index.html'),css=read('ui/styles.css'),app=read('ui/app.js');
+  assert.doesNotMatch(html,/<span class="find-bar-label">/);
+  assert.match(css,/:root\.find-open\{--chrome-height:74px;/);
+  assert.match(css,/\.find-bar\{[^}]*height:22px/);
+  assert.match(css,/\.tab-row > \.new-private-tab\{order:3;/);
+  assert.match(css,/\.tab-row > \.dashboard-tab-button\{order:4;/);
+  assert.match(app,/image\.src='\.\/minternet-brand\.png'/);
+  assert.match(css,/\.address-wrap\{flex:1 1 auto!important/);
+});
+
+test('reject site downloads until explicit trusted Windows approval and block popunders',()=>{
+  const native=read('native/desktop/src-tauri/src/main.rs');
+  const shield=read('native/desktop/src-tauri/src/privacy_shield.rs');
+  assert.match(native,/if !explicit_download_approval\(id,&url,&path\)/);
+  assert.match(native,/MB_YESNO\|MB_ICONWARNING\|MB_DEFBUTTON2/);
+  assert.match(native,/fn is_disguised_executable/);
+  assert.match(native,/if is_disguised_executable\(std::path::Path::new\(&entry\.path\)\)/);
+  assert.match(native,/DownloadEvent::Requested\{\.\.\}=>false/);
+  assert.match(shield,/An about:blank popunder can redirect/);
+  assert.match(shield,/Cross-site popups are denied by default/);
+});
+
+test('official extension catalogs are browsable without misleading install claims',()=>{
+  const html=read('ui/index.html'),prefs=read('ui/browser-settings.js');
+  assert.match(html,/id="chromeExtensionStore"/);
+  assert.match(html,/id="firefoxExtensionStore"/);
+  assert.match(prefs,/https:\/\/chromewebstore\.google\.com\//);
+  assert.match(prefs,/https:\/\/addons\.mozilla\.org\/en-US\/firefox\//);
 });

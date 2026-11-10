@@ -125,7 +125,6 @@
       <button class="bookmark-mini" id="bookmarkBarManage" title="Manage Bookmarks" aria-label="Manage Bookmarks">⋯</button>
     </div>
     <section id="findBar" class="find-bar" hidden aria-label="Find in Page">
-      <span class="find-bar-label">Find in Page</span>
       <input id="findQuery" type="search" maxlength="256" placeholder="Find in this page…" aria-label="Find Text in Current Page" autocomplete="off" spellcheck="false">
       <output id="findResult" for="findQuery" aria-live="polite"></output>
       <button type="button" id="findPrevious" title="Previous match" aria-label="Previous Match">↑</button>
@@ -200,6 +199,16 @@
           <button id="homePageSave" type="button">Save</button>
         </div>
       </section>
+
+      <section class="extension-settings" aria-label="Browser Extensions">
+        <strong>Extensions</strong>
+        <small>Browse the official catalogs below. Chrome Web Store and Firefox Add-ons install buttons are not supported by WebView2; they cannot install extensions directly into Minternet. Firefox XPI extensions are not WebView2 compatible.</small>
+        <div class="extension-stores">
+          <button id="chromeExtensionStore" type="button">Chrome Web Store</button>
+          <button id="firefoxExtensionStore" type="button">Firefox Add-ons</button>
+        </div>
+        <small>Minternet does not currently install third-party extensions. Enabling untrusted extensions without isolating them from browser chrome and credentials would be unsafe.</small>
+      </section>
       <section class="dashboard-settings" id="dashboardSettings" aria-label="Dashboard and New Tab Settings">
         <strong>Dashboard &amp; New Tab</strong>
         <label class="dashboard-setting-row" for="newTabMode"><span>New Tab Page</span>
@@ -216,7 +225,7 @@
         <span id="dashboardStatus" aria-live="polite"></span>
       </section>
       <section class="browser-path-setting" aria-label="Downloads Folder">
-        <label for="downloadFolderPath"><strong>Downloads Folder</strong><small>Files download automatically here. Executables aren't run unless you open them.</small></label>
+        <label for="downloadFolderPath"><strong>Downloads Folder</strong><small>Every website download requires your explicit approval on Windows. Unrequested files are blocked, including executables.</small></label>
         <div class="browser-path-actions">
           <input id="downloadFolderPath" type="text" autocomplete="off" spellcheck="false" placeholder="System Downloads folder" aria-label="Folder path for downloads">
           <button id="downloadFolderSave" type="button">Save</button>

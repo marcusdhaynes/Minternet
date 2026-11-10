@@ -196,7 +196,16 @@ function renderSiteIcon(tab,slot){
   slot.classList.remove('private-eye');
   slot.removeAttribute('data-site-host');
   if(!tab.url||!/^https?:\/\//i.test(tab.url)){
-    slot.append(iconFallback('',tab.private));
+    if(!tab.url||tab.url==='about:blank'){
+      const image=document.createElement('img');
+      image.className='minternet-new-tab-icon';
+      image.src='./minternet-brand.png';
+      image.alt='';
+      image.decoding='async';
+      slot.append(image);
+    }else{
+      slot.append(iconFallback('',tab.private));
+    }
     return;
   }
   let host;

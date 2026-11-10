@@ -21,7 +21,7 @@ use tauri::{
 
 const CHROME: f64 = 52.0;
 const BOOKMARK_BAR: f64 = 22.0;
-const FIND_BAR: f64 = 31.0;
+const FIND_BAR: f64 = 22.0;
 struct FindBarState(Mutex<bool>);
 fn find_visible(app:&tauri::AppHandle)->bool{
     app.state::<FindBarState>().0.lock().map(|v|*v).unwrap_or(false)
@@ -515,6 +515,59 @@ mod download_format_tests {
         let _=std::fs::remove_file(&path);
     }
 }
+
+#[cfg(windows)]
+fn explicit_download_approval(tab_id:u32,url:&tauri::Url,path:&std::path::Path)->bool {
+    use windows::core::PCWSTR;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        MessageBoxW, MB_YESNO, MB_ICONWARNING, MB_DEFBUTTON2, MB_SETFOREGROUND, IDYES
+    };
+    // Suppress download prompt storms from hostile ad scripts. This is
+    // intentionally a per-tab gate; a denied download is never written.
+    static LAST_PROMPT:std::sync::OnceLock<Mutex<HashMap<u32,Instant>>> =
+        std::sync::OnceLock::new();
+    let lock=LAST_PROMPT.get_or_init(||Mutex::new(HashMap::new()));
+    if let Ok(mut recent)=lock.lock(){
+        let now=Instant::now();
+        if recent.get(&tab_id).is_some_and(|t|now.duration_since(*t)<Duration::from_secs(2)){
+            return false;
+        }
+        recent.insert(tab_id,now);
+    }else{return false;}
+    let name=path.file_name().and_then(|s|s.to_str()).unwrap_or("download")
+        .chars().filter(|c|!c.is_control()).take(110).collect::<String>();
+    let host=url.host_str().unwrap_or("generated browser content");
+    let dangerous=matches!(path.extension().and_then(|s|s.to_str())
+        .unwrap_or("").to_ascii_lowercase().as_str(),
+        "exe"|"msi"|"msix"|"appx"|"bat"|"cmd"|"com"|"scr"|"ps1"|
+        "vbs"|"js"|"jar"|"reg"|"lnk"|"dll");
+    let warning=if dangerous {
+        "WARNING: This file could execute code on your computer.\\n\\n"
+    }else{""};
+    let message=format!(
+        "{warning}Allow this website download?\\n\\nFile: {name}\\nWebsite: {host}\\n\\nOnly choose Yes if YOU requested this exact file. Clicking Play on a video does not authorize a download.\\n\\nThe default answer is NO."
+    );
+    let wide=message.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
+    let title="Minternet — Verify Download".encode_utf16()
+        .chain(std::iter::once(0)).collect::<Vec<_>>();
+    let permitted=unsafe {
+        MessageBoxW(None,PCWSTR(wide.as_ptr()),PCWSTR(title.as_ptr()),
+            MB_YESNO|MB_ICONWARNING|MB_DEFBUTTON2|MB_SETFOREGROUND)==IDYES
+    };
+    if let Ok(mut recent)=lock.lock(){recent.insert(tab_id,Instant::now());}
+    permitted
+}
+// Fail closed on non-Windows until an equivalent trusted OS confirmation
+// dialog is implemented; the website itself cannot grant permission.
+#[cfg(not(windows))]
+fn explicit_download_approval(_tab_id:u32,_url:&tauri::Url,_path:&std::path::Path)->bool{
+    false
+}
+fn is_disguised_executable(path:&std::path::Path)->bool{
+    download_signature(path)==Some("exe") &&
+        !path.extension().and_then(|x|x.to_str())
+            .is_some_and(|x|x.eq_ignore_ascii_case("exe"))
+}
 fn download_update(app:&tauri::AppHandle,url:&tauri::Url,path:Option<&std::path::Path>,
                    private:bool,success:Option<bool>){
     let state=app.state::<DownloadsState>();
@@ -527,13 +580,21 @@ fn download_update(app:&tauri::AppHandle,url:&tauri::Url,path:Option<&std::path:
             d.source==source&&d.status=="downloading"&&d.private==private
             &&path.map(|p|p.to_string_lossy()==d.path).unwrap_or(true)){
             if done && std::path::Path::new(&entry.path).is_file() {
-                let corrected=repair_download_extension(std::path::Path::new(&entry.path));
-                let is_exe=corrected.extension().and_then(|x|x.to_str())
-                    .map(|x|x.eq_ignore_ascii_case("exe")).unwrap_or(false);
-                let valid_binary=!is_exe || download_signature(&corrected)==Some("exe");
-                entry.path=corrected.to_string_lossy().to_string();
-                entry.name=corrected.file_name().and_then(|x|x.to_str()).unwrap_or("Download").to_string();
-                entry.status=if valid_binary{"completed"}else{"invalid"}.into();
+                // A .txt/.dat file containing a PE executable is rejected,
+                // deleted and never reclassified into a runnable .exe.
+                if is_disguised_executable(std::path::Path::new(&entry.path)){
+                    let _=std::fs::remove_file(&entry.path);
+                    entry.status="blocked".into();
+                }else{
+                    let corrected=repair_download_extension(std::path::Path::new(&entry.path));
+                    let is_exe=corrected.extension().and_then(|x|x.to_str())
+                        .map(|x|x.eq_ignore_ascii_case("exe")).unwrap_or(false);
+                    let valid_binary=!is_exe || download_signature(&corrected)==Some("exe");
+                    if !valid_binary {let _=std::fs::remove_file(&corrected);}
+                    entry.path=corrected.to_string_lossy().to_string();
+                    entry.name=corrected.file_name().and_then(|x|x.to_str()).unwrap_or("Download").to_string();
+                    entry.status=if valid_binary{"completed"}else{"blocked"}.into();
+                }
             }else{entry.status="failed".into();}
         }
     }else if let Some(file)=path{
@@ -1988,6 +2049,11 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                     if !download_source_allowed(&for_download,id,&url){return false;}
                     match download_path(&for_download,&url,destination.as_path()){
                         Ok(path)=>{
+                            if !explicit_download_approval(id,&url,&path){
+                                let _=for_download.emit_to("chrome","minternet:download-blocked",
+                                    json!({"kind":"unapproved-download"}));
+                                return false;
+                            }
                             *destination=path.clone();
                             download_update(&for_download,&url,Some(&path),private,None);
                             true
@@ -2024,6 +2090,9 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                         privacy_shield::block_popup(&settings,&opener,url.as_str())
                     }
                 }).unwrap_or(false);
+            let deny=deny && !(url.as_str()=="about:blank" &&
+                std::env::args().any(|a|a=="--minternet-auth-popup-smoke") &&
+                opener.starts_with("https://example.com/"));
             if deny {
                 let _=for_popup.emit_to("chrome","minternet:shield-blocked",json!({"kind":"popup"}));
                 return NewWindowResponse::Deny;
@@ -2045,6 +2114,11 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                             tauri::Url::parse("about:blank").expect("valid blank URL")))
                     .window_features(features)
                     .title("Sign in — Minternet")
+                    // Related login windows must never save automatic files.
+                    .on_download(|_webview,event|match event{
+                        DownloadEvent::Requested{..}=>false,
+                        _=>true
+                    })
                     .inner_size(540.0,680.0)
                     .resizable(true)
                     .on_navigation(|destination| {
@@ -5051,7 +5125,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             return Ok(json!({"message": format!("{n} inactive tab(s) released; unsaved page content may be lost.")}));
         }
         "extensions" | "extension-install" => {
-            return Ok(json!({"message": "Native system webviews do not support the full Chrome or Firefox extension ecosystems."}));
+            return Ok(json!({"message": "Chrome and Firefox stores are browse-only in Minternet. WebView2 cannot run their one-click installers or Firefox XPI files. Do not install unknown extension packages."}));
         }
         "tor" => {
             return Ok(json!({"message": "Tor is not integrated. Do not treat this native-webview prototype as Tor Browser."}));

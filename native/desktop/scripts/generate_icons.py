@@ -119,7 +119,14 @@ def png(target, size, opaque=False):
 DESKTOP.mkdir(parents=True, exist_ok=True)
 png(DESKTOP / "icon.png", 1024)
 # All Windows shell sizes retain genuine transparency, including 16 / 24 px.
-icon(512).save(
+# Enlarge the actual Windows shortcut symbol by 10% inside its ICO canvas.
+# The transparent outside stays transparent; macOS/Android/iOS are unaffected.
+windows_symbol = icon(512)
+enlarged_side = round(512 * 1.10)
+windows_symbol = windows_symbol.resize((enlarged_side, enlarged_side), resample)
+offset = (enlarged_side - 512) // 2
+windows_symbol = windows_symbol.crop((offset, offset, offset + 512, offset + 512))
+windows_symbol.save(
     DESKTOP / "icon.ico",
     format="ICO",
     sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64),

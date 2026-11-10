@@ -79,7 +79,7 @@
       folder.value=result.usingSystemDownloads?'':result.downloadFolder;
       folder.placeholder=result.usingSystemDownloads
         ?result.downloadFolder:'Enter absolute folder path';
-      report('Downloads will save automatically to '+result.downloadFolder);
+      report('Approved downloads will save to '+result.downloadFolder);
     }catch(e){report('Downloads folder was not changed: '+String(e.message||e));}
     finally{setBusy(false);}
   }
@@ -97,6 +97,15 @@
       report(n===0?'Tab Limit saved: Unlimited.':'Tab Limit saved: '+n+'.');
     }catch(e){report('Tab Limit was not changed: '+String(e.message||e));}
     finally{setBusy(false);}
+  }
+  for(const [id,url] of [
+    ['chromeExtensionStore','https://chromewebstore.google.com/'],
+    ['firefoxExtensionStore','https://addons.mozilla.org/en-US/firefox/']
+  ]){
+    $(id)?.addEventListener('click',async()=>{
+      const result=await api.command('new-url',url);
+      if(result?.message)report(result.message);
+    });
   }
   saveTabLimit.addEventListener('click',()=>void updateTabLimit());
   tabLimit.addEventListener('keydown',event=>{
