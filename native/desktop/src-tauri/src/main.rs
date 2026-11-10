@@ -3735,9 +3735,14 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 return Ok(json!({"ok":true}));
             }
             #[cfg(windows)]
-            std::process::Command::new("explorer.exe")
-                .arg(format!("/select,{}",path.to_string_lossy()))
-                .spawn().map_err(|e|e.to_string())?;
+            {
+                // Uses Shell32 SHOpenFolderAndSelectItems (PIDL selection),
+                // so Explorer highlights the exact completed file. Simple
+                // explorer.exe /select arguments can silently open only the folder,
+                // especially for extended-length paths or an existing Explorer.
+                showfile::show_path_in_file_manager(&path)
+                    .map_err(|e|format!("Could not select the downloaded file: {e}"))?;
+            }
             #[cfg(target_os="macos")]
             std::process::Command::new("open").arg("-R").arg(&path)
                 .spawn().map_err(|e|e.to_string())?;
