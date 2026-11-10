@@ -331,6 +331,28 @@ jobs:
             if(!$p.HasExited){Stop-Process -Id $p.Id -Force}
             Remove-Item $restored,$tabless,$first,$saved -Force -ErrorAction SilentlyContinue
           }
+      - name: Stress-test native WebView2 tab creation, rapid switching and teardown
+        shell: pwsh
+        run: |
+          $exe = "$env:RUNNER_TEMP\minternet-portable\Minternet-Portable-x64.exe"
+          $p = Start-Process -FilePath $exe -ArgumentList "--minternet-stability-smoke" -PassThru
+          $pass = Join-Path $env:TEMP "minternet-stability-$($p.Id).ok"
+          $fail = Join-Path $env:TEMP "minternet-stability-$($p.Id).failed"
+          try {
+            $passed = $false
+            for ($i=0; $i -lt 65; $i++) {
+              Start-Sleep -Seconds 2
+              $p.Refresh()
+              if ($p.HasExited) { throw "Minternet crashed during repeated tab create/activate/close" }
+              if (Test-Path $fail) { throw "Native stability smoke failed: $(Get-Content $fail -Raw)" }
+              if (Test-Path $pass) { $passed = $true; break }
+            }
+            if (!$passed) { throw "Native tab-stress proof not received" }
+            "PASS: Rapid creation/switching/closing of native website WebViews completed without process exit." >> $env:GITHUB_STEP_SUMMARY
+          } finally {
+            if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
+            Remove-Item $pass,$fail -Force -ErrorAction SilentlyContinue
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: Minternet-Portable-Windows-x64
