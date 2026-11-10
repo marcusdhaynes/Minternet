@@ -35,9 +35,16 @@
       home.value=defaultHome;
       folder.placeholder='System Downloads folder (native app only)';
       try {
-        const result=await invoke('tab-limit-get');
+        const result=await invoke('browser-preferences');
+        home.value=result?.homepage||defaultHome;
+        if(newTabMode)newTabMode.value=result?.newTabMode==='website'?'website':'dashboard';
         tabLimit.value=String(result?.tabLimit??0);
-      } catch { tabLimit.value='0'; }
+      } catch {
+        try {
+          const result=await invoke('tab-limit-get');
+          tabLimit.value=String(result?.tabLimit??0);
+        } catch { tabLimit.value='0'; }
+      }
       return;
     }
     try{
