@@ -1922,6 +1922,20 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     let builder = WebviewBuilder::new(label.clone(), url)
         .incognito(private)
         .initialization_script(privacy_shield::script(&shield_preferences))
+        // A remote page never receives native commands. This reserved
+        // non-loading popup URL is a narrowly scoped Ctrl+F signal that
+        // the native new-window handler consumes without navigating.
+        .initialization_script(r#"(() => {
+          window.addEventListener('keydown',event => {
+            if((event.ctrlKey||event.metaKey)&&
+               !event.altKey&&!event.shiftKey&&
+               event.key.toLowerCase()==='f'){
+              event.preventDefault();
+              event.stopImmediatePropagation();
+              window.open('https://minternet-find.invalid/__open','_blank');
+            }
+          },true);
+        })();"#)
         // Honor Ctrl/Cmd + plus/minus and Ctrl + mouse-wheel when focus is
         // inside the actual website WebView, not just the browser toolbar.
         .zoom_hotkeys_enabled(true)
@@ -1977,6 +1991,10 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
             }
         })
         .on_new_window(move |url, features| {
+            if url.as_str()=="https://minternet-find.invalid/__open" {
+                let _=for_popup.emit_to("chrome","minternet:find-open",json!({}));
+                return NewWindowResponse::Deny;
+            }
             let opener=for_popup.state::<Mutex<Browser>>().lock().ok()
                 .and_then(|b|b.tabs.iter().find(|t|t.id==id).map(|t|t.url.clone()))
                 .unwrap_or_default();
