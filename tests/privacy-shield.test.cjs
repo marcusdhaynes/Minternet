@@ -57,7 +57,7 @@ test('Click-triggered third-party popunders are denied before OAuth popup creati
   assert.match(policy,/high_risk_popup_source/);
   assert.match(policy,/123moviesfree\.net/);
   assert.match(policy,/built_in_popup/);
-  assert.match(policy,/config\.mode=="strict"/);
+  assert.match(policy,/Cross-site popups are denied by default in both/);
   // A native denied popup supplies a dummy WindowProxy; the page must never
   // receive null from our own window.open override and abort video playback.
   assert.doesNotMatch(policy,/window\.open\s*=\s*function/);
@@ -101,11 +101,12 @@ test('Injected popup and login scripts compile before they are sent to WebView2'
   new vm.Script(loginScript[1],{filename:'login_form_autofill.js'});
 });
 
-test('Balanced video compatibility leaves third-party player windows intact',()=>{
+test('Balanced prioritizes blocking cross-site ad windows on video clicks',()=>{
   const policy=source('native/desktop/src-tauri/src/privacy_shield.rs');
-  assert.match(policy,/Balanced must not mistake a cross-origin playback window/);
+  assert.match(policy,/Cross-site popups are denied by default in both/);
   assert.match(policy,/cdn-streaming-player\.example\/embed/);
   assert.match(policy,/popads\.net\/landing/);
   assert.match(policy,/p\.mode="strict"\.into\(\)/);
   assert.match(policy,/p\.mode="balanced"\.into\(\)/);
+  assert.match(policy,/assert!\(block_blank_popup\(&p,"https:\/\/www\.example\.org\/login"\)\)/);
 });
