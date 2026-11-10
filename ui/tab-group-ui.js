@@ -46,6 +46,16 @@
   const palette={
     red:'#ea5967',orange:'#f39b52',yellow:'#f1ce59',green:'#65c98a',blue:'#6b9ff0',purple:'#ad8df6',pink:'#e889c9',white:'#f2f0f8',black:'#202235',violet:'#ad9cf9',teal:'#69d4c9',amber:'#e8c16d',slate:'#a1adbf'
   };
+  // Save group membership in a single pass. The previous implementation
+  // scanned every native tab again for each ordered tab (quadratic work).
+  function savedTabSlots(tabs) {
+    const normal=tabs.filter(tab=>!tab.private);
+    const positions=new Map(normal.map((tab,index)=>[tab.id,index]));
+    return {
+      slots:normal.map(tab=>state.assignments[String(tab.id)]||null),
+      visualOrder:state.order.map(id=>positions.get(id)).filter(index=>index!==undefined)
+    };
+  }
   function persist(skipUndo=false) {
     const current=groupUndoJson();
     if(!skipUndo&&current!==lastGroupUndoJson&&(!colorUndoActive||!colorUndoRecorded)){
@@ -53,7 +63,7 @@
       if(colorUndoActive)colorUndoRecorded=true;
     }
     lastGroupUndoJson=current;
-    try {const stored=JSON.parse(model.serialize(state));stored.slots=latest.tabs.filter(t=>!t.private).map(t=>state.assignments[String(t.id)]||null);stored.visualOrder=state.order.map(id=>latest.tabs.filter(t=>!t.private).findIndex(t=>t.id===id)).filter(i=>i>=0);localStorage.setItem(KEY,JSON.stringify(stored));}
+    try {const stored=JSON.parse(model.serialize(state));Object.assign(stored,savedTabSlots(latest.tabs));localStorage.setItem(KEY,JSON.stringify(stored));}
     catch { window.minternetToast?.('Cannot save tab groups locally.');}
     repaint();
     if(!skipUndo)window.dispatchEvent(new CustomEvent('minternet:local-change',{detail:{kind:'group'}}));
@@ -266,7 +276,7 @@
     };
     const takeTab=(tab,active)=>{
       const signature=JSON.stringify([
-        tab.title,tab.url,tab.private,tab.pinned,tab.suspended,
+        tab.title,tab.url,tab.private,tab.pinned,tab.suspended,tab.loading,
         tab.audioPlaying,tab.audioMuted,tab.secretTab,tab.secretPending,
         tab.syncId,active,
         tab.secretTab?window.minternetSecretTabNames?.get(tab.id):''
@@ -325,7 +335,8 @@
     eligibleFallback();
     const signature=JSON.stringify([
       data.activeId,
-      data.tabs.map(t=>[t.id,t.title,t.url,t.private,t.pinned,t.loading,t.suspended,t.audioPlaying,t.audioMuted]),
+      data.tabs.map(t=>[t.id,t.title,t.url,t.private,t.pinned,t.loading,t.suspended,t.audioPlaying,t.audioMuted,t.secretTab,t.secretPending,t.syncId,
+        t.secretTab?window.minternetSecretTabNames?.get(t.id):'']),
       state.order,
       state.groups.map(g=>[g.id,g.name,g.color,g.visible,g.collapsed]),
       Object.entries(state.assignments).sort()
@@ -333,7 +344,7 @@
     if(lastRenderKey===signature)return;
     lastRenderKey=signature;
     // Save the current slot order so group membership survives native restarts.
-    try {const stored=JSON.parse(model.serialize(state));stored.slots=data.tabs.filter(t=>!t.private).map(t=>state.assignments[String(t.id)]||null);stored.visualOrder=state.order.map(id=>data.tabs.filter(t=>!t.private).findIndex(t=>t.id===id)).filter(i=>i>=0);const updated=JSON.stringify(stored);if(updated!==lastStoredGroupJson){localStorage.setItem(KEY,updated);lastStoredGroupJson=updated;}}catch{}
+    try {const stored=JSON.parse(model.serialize(state));Object.assign(stored,savedTabSlots(data.tabs));const updated=JSON.stringify(stored);if(updated!==lastStoredGroupJson){localStorage.setItem(KEY,updated);lastStoredGroupJson=updated;}}catch{}
     const items=[];
     // Chrome/Firefox-style pinned tabs precede groups and show no close X.
     for(const tab of model.sortedTabs(state,data.tabs).filter(t=>t.pinned)){

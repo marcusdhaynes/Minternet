@@ -160,29 +160,52 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # A new release starts as a draft, avoiding visible partial uploads.
-          # If the release already exists, we validate each asset's length and
-          # add only missing files. No old executable is replaced.
-          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            created=false
-            for attempt in 1 2 3 4 5; do
-              if gh release create "$TAG" \
-                --target "$SHA" --draft --prerelease \
-                --title "Minternet $PLATFORM — build $RUN_ID" \
-                --notes-file release/notes.md \
-                --repo "$GITHUB_REPOSITORY"; then
-                created=true
+          # GitHub's release-by-tag endpoint returns 404 for unpublished
+          # drafts. Earlier workflow versions created draft releases, then
+          # immediately failed to find them. Recover those exact drafts by
+          # release ID; new archives are discoverable prereleases instead.
+          # Every asset is staged and checksummed before attempting upload.
+          if ! gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" >/dev/null 2>&1; then
+            recovered=false
+            for page in 1 2 3 4 5; do
+              release_page=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100&page=$page")
+              matching_draft=$(jq -c --arg tag "$TAG" '[.[] | select(.tag_name==$tag and .draft==true)] | first // empty' <<<"$release_page")
+              if [ -n "$matching_draft" ]; then
+                draft_id=$(jq -r '.id' <<<"$matching_draft")
+                draft_sha=$(jq -r '.target_commitish' <<<"$matching_draft")
+                test "$draft_sha" = "$SHA" || {
+                  echo "Existing draft targets a different commit; not publishing it."
+                  exit 1
+                }
+                # Publish the matching legacy draft so tag lookup and uploads
+                # work. This never changes existing binary assets.
+                gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$draft_id" -F draft=false >/dev/null
+                recovered=true
                 break
               fi
-              # The API can return an error after completing the create. Check
-              # before retrying to avoid a second attempt to create the tag.
-              if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-                created=true
-                break
-              fi
-              sleep $((attempt * 4))
+              test "$(jq 'length' <<<"$release_page")" -eq 100 || break
             done
-            test "$created" = true || { echo "Could not create build release"; exit 1; }
+            if [ "$recovered" = false ]; then
+              created=false
+              for attempt in 1 2 3 4 5; do
+                if gh release create "$TAG" \
+                  --target "$SHA" --prerelease \
+                  --title "Minternet $PLATFORM — build $RUN_ID" \
+                  --notes-file release/notes.md \
+                  --repo "$GITHUB_REPOSITORY"; then
+                  created=true
+                  break
+                fi
+                # GitHub may finish creation despite reporting a transient
+                # upload/API error. Check before retrying the same release.
+                if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" >/dev/null 2>&1; then
+                  created=true
+                  break
+                fi
+                sleep $((attempt * 4))
+              done
+              test "$created" = true || { echo "Could not create build release"; exit 1; }
+            fi
           fi
           release_json=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG")
           published_sha=$(jq -r '.target_commitish' <<<"$release_json")

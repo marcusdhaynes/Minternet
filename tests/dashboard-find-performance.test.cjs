@@ -102,3 +102,22 @@ test('Tab DOM is keyed, not rebuilt for every small state change',()=>{
   assert.match(groups,/items\.push\(takeTab\(tab,tab\.id===data\.activeId\)\)/);
   assert.match(groups,/if\(!surviving\.has\(id\)\)reusedTabs\.delete\(id\)/);
 });
+
+test('Release archives recover legacy drafts without depending on draft tag lookup',()=>{
+  const workflow=read('.github/workflows/publish-current-portable.yml');
+  assert.match(workflow,/matching_draft=.*draft==true/);
+  assert.match(workflow,/releases\/\$draft_id" -F draft=false/);
+  assert.match(workflow,/gh release create "\$TAG"/);
+  assert.doesNotMatch(workflow,/--draft --prerelease/);
+  assert.match(workflow,/test "\$published_sha" = "\$SHA"/);
+  assert.match(workflow,/test "\$remote_size" = "\$\(stat -c%s "\$file"\)"/);
+});
+
+test('Keyed tab UI refreshes loading and secret status without quadratic slot scans',()=>{
+  const groups=read('ui/tab-group-ui.js');
+  assert.match(groups,/tab\.suspended,tab\.loading/);
+  assert.match(groups,/t\.secretTab,t\.secretPending,t\.syncId/);
+  assert.match(groups,/const positions=new Map\(normal\.map/);
+  assert.match(groups,/Object\.assign\(stored,savedTabSlots\(data\.tabs\)\)/);
+  assert.doesNotMatch(groups,/state\.order\.map\(id=>data\.tabs\.filter/);
+});
