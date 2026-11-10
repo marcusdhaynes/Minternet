@@ -4601,9 +4601,10 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                       }}catch{{return false;}}
                     }})()"#);
                     let handle=app.clone();
+                    let needle=query.to_owned();
                     view.eval_with_callback(&script,move|result|{
                         let _=handle.emit_to("chrome","minternet:find-result",
-                            json!({"found":result.trim()=="true","query":query}));
+                            json!({"found":result.trim()=="true","query":needle}));
                     }).map_err(|e|e.to_string())?;
                 }
             }
