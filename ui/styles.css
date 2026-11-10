@@ -1901,9 +1901,9 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { di
   inset:0;
   pointer-events:none;
   background-color:#0b1120;
-  background-image:radial-gradient(circle,#8091bf66 1px,transparent 1.15px);
+  background-image:radial-gradient(circle at 0 0,#8091bf66 1px,transparent 1.15px);
   background-size:var(--dashboard-grid-spacing,24px) var(--dashboard-grid-spacing,24px);
-  background-position:center center;
+  background-position:0 0;
 }
 .dashboard-settings{display:flex;flex-direction:column;gap:7px;padding:8px 6px;
   border-top:1px solid #ffffff18;font-size:10px;}
