@@ -9,14 +9,14 @@
   let visible=false,searchTimer=0;
   async function open(){
     if(visible){input.focus();input.select();return;}
-    visible=true;bar.hidden=false;
+    visible=true;bar.hidden=false;document.documentElement.classList.add('find-open');
     try{await call('find-bar-set',true);}catch{}
     input.focus({preventScroll:true});input.select();
     if(input.value)search();
   }
   async function close(){
     if(!visible)return;
-    visible=false;bar.hidden=true;
+    visible=false;bar.hidden=true;document.documentElement.classList.remove('find-open');
     clearTimeout(searchTimer);output.value='';
     try{await call('find-bar-set',false);}catch{}
   }
