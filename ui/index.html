@@ -20,6 +20,8 @@
   <script src="./tab-group-ui.js" defer></script>
   <script src="./chrome-native-menu.js" defer></script>
   <script src="./password-ui.js" defer></script>
+  <script src="./dashboard.js" defer></script>
+  <script src="./find-page.js" defer></script>
   <script src="./chrome-tools.js" defer></script>
   <script src="./browser-settings.js" defer></script>
   <script src="./volume-ui.js" defer></script>
@@ -114,6 +116,14 @@
       <div class="bookmark-items" id="bookmarkItems"></div>
       <button class="bookmark-mini" id="bookmarkBarManage" title="Manage Bookmarks" aria-label="Manage Bookmarks">⋯</button>
     </div>
+    <section id="findBar" class="find-bar" hidden aria-label="Find in Page">
+      <span class="find-bar-label">Find in Page</span>
+      <input id="findQuery" type="search" maxlength="256" placeholder="Find in this page…" aria-label="Find Text in Current Page" autocomplete="off" spellcheck="false">
+      <output id="findResult" for="findQuery" aria-live="polite"></output>
+      <button type="button" id="findPrevious" title="Previous match" aria-label="Previous Match">↑</button>
+      <button type="button" id="findNext" title="Next match" aria-label="Next Match">↓</button>
+      <button type="button" id="findClose" title="Close find" aria-label="Close Find in Page">×</button>
+    </section>
   </header>
   <section id="bookmarkOverlay" class="bookmark-overlay" hidden aria-label="Bookmarks and settings">
     <div class="bookmark-backdrop" id="bookmarkBackdrop"></div>
@@ -176,11 +186,26 @@
         <div class="shield-settings-foot"><button id="shieldSave" type="button">Save Shield Settings</button><span id="shieldStatus" aria-live="polite"></span></div>
       </section>
       <section class="browser-path-setting" aria-label="New Tab Home Page">
-        <label for="homePageUrl"><strong>Home Page / New Tab</strong><small>Google by default. Changes apply to new tabs immediately.</small></label>
+        <label for="homePageUrl"><strong>Website Home Page</strong><small>Used when New Tab is set to Website.</small></label>
         <div class="browser-path-actions">
           <input id="homePageUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://www.google.com/">
           <button id="homePageSave" type="button">Save</button>
         </div>
+      </section>
+      <section class="dashboard-settings" id="dashboardSettings" aria-label="Dashboard and New Tab Settings">
+        <strong>Dashboard &amp; New Tab</strong>
+        <label class="dashboard-setting-row" for="newTabMode"><span>New Tab Page</span>
+          <select id="newTabMode"><option value="dashboard">Dashboard (Default)</option><option value="website">Website</option></select>
+        </label>
+        <small>Dashboard has no website renderer, network activity or loaded tab. It also appears when no tab is selected.</small>
+        <label class="dashboard-setting-row" for="dashboardGridSpacing"><span>Dot Grid Spacing</span>
+          <input type="number" id="dashboardGridSpacing" min="12" max="96" step="2" value="24" inputmode="numeric" aria-label="Dashboard Grid Spacing in Pixels">
+        </label>
+        <label class="dashboard-setting-row" for="dashboardSnap"><span>Snap Future Dashboard Items to Grid</span>
+          <input type="checkbox" id="dashboardSnap" checked>
+        </label>
+        <small>Dashboard is an empty command-hub canvas for now. Its grid and snapping preferences are stored separately from browser settings.</small>
+        <span id="dashboardStatus" aria-live="polite"></span>
       </section>
       <section class="browser-path-setting" aria-label="Downloads Folder">
         <label for="downloadFolderPath"><strong>Downloads Folder</strong><small>Files download automatically here. Executables aren't run unless you open them.</small></label>
@@ -251,6 +276,7 @@
     <aside id="bookmarkManager" class="bookmark-panel bookmark-manager" hidden aria-label="Bookmark Manager">
       <div class="bookmark-panel-head"><strong>Bookmarks</strong><button id="bookmarkSelectionCount" class="bookmark-selection-count" title="Clear selected bookmarks" hidden>0 selected ×</button><button id="bookmarkImportFile" class="bookmark-mini" type="button" title="Import bookmarks and folders from another browser">⇩</button><input id="bookmarkImportInput" type="file" accept=".html,.htm,.json,.url,.txt,text/html,application/json" multiple hidden><button id="bookmarkManageNewFolder" title="New Folder" class="bookmark-mini">📁＋</button><button id="bookmarkManageNewLink" title="New Bookmark" class="bookmark-mini">☆＋</button><button id="bookmarkManageClose" class="bookmark-close" aria-label="Close Bookmarks">×</button></div>
       <button id="secretBookmarksManager" class="bookmark-tree-line secret-root-manager" type="button" data-secret-target="root" aria-label="Open Secret Bookmarks">◈　Secret Bookmarks <span>›</span></button>
+      <input id="bookmarkManagerSearch" class="manager-search" type="search" placeholder="Search bookmarks and websites…" aria-label="Search Bookmarks and Websites" autocomplete="off" spellcheck="false">
       <div id="bookmarkTree" class="bookmark-tree"></div>
       <div class="bookmark-panel-foot bookmark-hint">Click folders to expand · Hold a bookmark to multi-select · Drag to reorder or move · ⇩ to import</div>
     </aside>
@@ -401,10 +427,10 @@
       <div class="group-editor-actions"><button type="button" id="groupEditorCancel">Cancel</button><button type="submit" class="group-editor-save">Save Group</button></div>
     </form>
   </section>
-  <section id="passwordVaultScreen" class="vault-screen" hidden aria-label="Encrypted Password Manager">
+  <section id="passwordVaultScreen" class="vault-screen" hidden aria-label="Encrypted Logins Manager">
     <div class="vault-backdrop" id="vaultBackdrop"></div>
     <aside class="vault-panel">
-      <div class="vault-head"><strong>Passwords</strong><button type="button" id="vaultLock" title="Lock vault">Lock</button><button type="button" id="vaultClose" aria-label="Close password manager">×</button></div>
+      <div class="vault-head"><strong>Logins</strong><button type="button" id="vaultLock" title="Lock vault">Lock</button><button type="button" id="vaultClose" aria-label="Close password manager">×</button></div>
       <p class="vault-info">Encrypted on this device. Your master password is required after restarting Minternet. Never enter it on a website.</p>
       <form id="vaultAuthForm" class="vault-auth" autocomplete="off">
         <label>Master Password<input id="vaultMaster" type="password" autocomplete="off" minlength="12" required></label>
@@ -419,27 +445,14 @@
           <button type="submit">Save Credential</button>
         </form>
         <div class="vault-list-head">Saved Logins</div>
+        <input id="vaultSearch" class="manager-search" type="search" placeholder="Search logins, websites, or usernames…" aria-label="Search Logins" autocomplete="off" spellcheck="false">
         <div id="vaultEntries" class="vault-entries"></div>
       </div>
       <p id="vaultMessage" class="vault-message" role="status"></p>
     </aside>
   </section>
-  <main id="homeScreen" class="home-screen">
-    <div class="background-shape shape-one"></div>
-    <div class="background-shape shape-two"></div>
-    <div class="hero">
-      <div class="hero-logo"><img src="./minternet-brand.png" alt="Minternet"></div>
-      <p class="eyebrow">A MORE CONSIDERED WAY TO BROWSE</p>
-      <h1>The internet,<br><em>simplified.</em></h1>
-      <p class="subtitle">Less chrome. More room to explore.</p>
-      <form id="homeSearchForm" class="search-box">
-        <span>⌕</span>
-        <input id="homeSearch" type="search" placeholder="Where shall we go?" aria-label="Search the web" autocomplete="off">
-        <button aria-label="Search" title="Search">↗</button>
-      </form>
-      <div class="shortcut-hints"><span>HTTPS first</span><i></i><span>Private by design</span><i></i><span>Quiet interface</span></div>
-    </div>
-    <div class="edition">MINTERNET <span>•</span> EDITION 001</div>
+  <main id="homeScreen" class="home-screen dashboard-canvas" aria-label="Minternet Dashboard">
+    <div id="dashboardGrid" class="dashboard-grid" aria-label="Empty Snap Grid"></div>
   </main>
   <div id="toast" role="status" aria-live="polite"></div>
 </body>
