@@ -21,9 +21,9 @@ permissions:
   actions: write
   contents: write
 concurrency:
-  # Only one release mutation at a time: concurrent GH release creation can
-  # trigger secondary rate limits and leave a partial draft.
-  group: archive-minternet-release-writes
+  # GitHub concurrency only retains ONE pending run per group. Separate
+  # successful build IDs must never cancel one another, even under load.
+  group: archive-minternet-build-${{ github.event.workflow_run.id || inputs.run_id || github.run_id }}
   cancel-in-progress: false
 jobs:
   backfill-available-binaries:
@@ -57,6 +57,9 @@ jobs:
                 echo "Backfilling $workflow run $run_id"
                 gh workflow run publish-current-portable.yml --ref main \
                   --repo "$GITHUB_REPOSITORY" -f run_id="$run_id"
+                # Space backfill jobs so GitHub Release API calls do not hit
+                # secondary creation throttles. The archive job also retries.
+                sleep 12
               fi
             done
           done
