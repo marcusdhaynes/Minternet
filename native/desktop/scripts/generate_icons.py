@@ -8,6 +8,8 @@ Only edge-connected near-black pixels are removed; dark colors within the
 rabbit and its universe are preserved. Native sizes are always regenerated.
 """
 import json
+import base64
+import io
 from collections import deque
 import sys
 from pathlib import Path
@@ -19,12 +21,24 @@ DESKTOP = PROJECT / "native" / "desktop" / "src-tauri" / "icons"
 ANDROID_RES = PROJECT / "native" / "android" / "app" / "src" / "main" / "res"
 IOS_ASSETS = PROJECT / "native" / "ios" / "Assets.xcassets"
 
-if not SOURCE.is_file():
-    raise SystemExit(f"Missing Minternet brand artwork: {SOURCE}")
-with Image.open(SOURCE) as source:
-    artwork = source.convert("RGBA")
-if artwork.width != artwork.height or artwork.width < 512:
-    raise SystemExit("Brand artwork must be square and at least 512 pixels.")
+# User-provided jade rabbit artwork is embedded as text to keep a reproducible,
+# GitHub-API-compatible source across all native build pipelines.
+EMBEDDED = PROJECT / "ui" / "minternet-coin-source.webp.b64"
+if EMBEDDED.is_file():
+    encoded = "".join(EMBEDDED.read_text(encoding="ascii").split())
+    if len(encoded) > 500_000:
+        raise SystemExit("Unexpectedly large embedded Minternet icon")
+    raw = base64.b64decode(encoded, validate=True)
+    with Image.open(io.BytesIO(raw)) as source:
+        artwork = source.convert("RGBA")
+else:
+    if not SOURCE.is_file():
+        raise SystemExit(f"Missing Minternet brand artwork: {SOURCE}")
+    with Image.open(SOURCE) as source:
+        artwork = source.convert("RGBA")
+if artwork.width != artwork.height or artwork.width < 128:
+    raise SystemExit("Brand artwork must be square and at least 128 pixels.")
+
 
 def remove_outer_black_matte(source):
     """Remove background BLACK attached to the canvas edge, never internal dark art."""
