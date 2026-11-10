@@ -32,6 +32,8 @@
     body.append(el);
   }
   const general=section('General',sections,true);
+  const dashboard=section('Dashboard',sections);
+  move(dashboard,'dashboardSettings');
   move(general,'homePageUrl','.browser-path-setting');
   move(general,'defaultSearchEngine','.search-setting-field');
   move(general,'bookmarkBarToggle','.bookmark-toggle');
