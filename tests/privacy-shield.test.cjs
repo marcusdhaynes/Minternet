@@ -72,13 +72,14 @@ test('Favicons are restored from validated persistent bytes, never persisted for
   assert.match(ui,/cachedIconPattern\.test\(src\)/);
   assert.match(ui,/!t\.private&&!t\.secretTab/);
   assert.match(ui,/bookmark-icon-data/);
-  assert.match(ui,/img\.decoding='sync'/);
+  assert.match(ui,/img\.decoding='async'/);
 });
 
 test('Password autofill uses unlocked unique HTTPS-origin logins and does not overwrite typed inputs',()=>{
   const main=source('native/desktop/src-tauri/src/main.rs');
   const vault=source('native/desktop/src-tauri/src/password_vault.rs');
-  assert.match(main,/fill_saved_credential\(&for_load,id,false,None\)/);
+  assert.match(main,/fill_saved_credential\(&task,id,false,None\)/);
+  assert.match(main,/run_on_main_thread\(move\|\|\{/);
   assert.match(main,/fill_saved_credential\(&app,active,false,None\)/);
   assert.match(main,/if actual_origin!=tab_origin\{return Ok\(false\);\}/);
   assert.match(main,/tab\.private\|\|tab\.secret_id\.is_some\(\)/);
