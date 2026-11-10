@@ -4138,6 +4138,24 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             let id=app.state::<Mutex<Browser>>().lock().map_err(|e|e.to_string())?.active_id;
             return Ok(json!({"filled":fill_saved_credential(&app,id,true,Some(username))?}));
         }
+        "stability-smoke-proof" | "stability-smoke-failure" => {
+            if !std::env::args().any(|a|a=="--minternet-stability-smoke"){
+                return Err("Stability smoke is not enabled".into());
+            }
+            let suffix=if name=="stability-smoke-proof"{"ok"}else{"failed"};
+            let path=std::env::temp_dir().join(format!(
+                "minternet-stability-{}.{suffix}",std::process::id()));
+            let report=if suffix=="ok"{
+                let created=value.get("created").and_then(Value::as_u64).unwrap_or(0);
+                let switched=value.get("switched").and_then(Value::as_u64).unwrap_or(0);
+                if created<6||switched<18{return Err("Incomplete stress checks".into());}
+                "Repeated native WebView2 tab creation, switching and closure succeeded".to_owned()
+            }else{
+                value.as_str().unwrap_or("Unspecified error").chars().take(400).collect()
+            };
+            std::fs::write(path,report).map_err(|e|e.to_string())?;
+            return Ok(json!({"ok":true}));
+        }
         "pin-smoke-proof" => {
             if !std::env::args().any(|a|a=="--minternet-pin-smoke"||
                                         a=="--minternet-pin-reopen-smoke") {
@@ -5066,6 +5084,7 @@ fn main() {
             let search_smoke = std::env::args().any(|a| a == "--minternet-search-smoke");
             let pointer_smoke = std::env::args().any(|a| a == "--minternet-pointer-smoke");
             let rapid_smoke = std::env::args().any(|a| a == "--minternet-rapid-ui-smoke");
+            let stability_smoke = std::env::args().any(|a| a == "--minternet-stability-smoke");
             let pin_smoke = std::env::args().any(|a| a == "--minternet-pin-smoke");
             let pin_reopen_smoke = std::env::args().any(|a| a == "--minternet-pin-reopen-smoke");
             if !std::env::args().any(|a|a.starts_with("--minternet-") &&
@@ -5098,7 +5117,47 @@ fn main() {
                                 let _=view.eval(r#"setTimeout(() =>
                                     window.minternetToast?.('Previous session ended unexpectedly. All saved tabs were preserved. Select a tab to reopen it.'),400)"#);
                             }
-                            if smoke || auth_popup_smoke {
+                            if stability_smoke {
+                                // Exercise the real trusted-chrome IPC, native
+                                // WebView2 creation, SPA URL capture and tab
+                                // controller teardown under rapid alternation.
+                                let _ = view.eval(r#"
+                                  setTimeout(async () => {
+                                    const command=window.minternet?.command;
+                                    const pause=ms=>new Promise(ok=>setTimeout(ok,ms));
+                                    const check=async(name,value)=>{
+                                      const output=await command(name,value);
+                                      if(output?.message)throw Error(output.message);
+                                      return output;
+                                    };
+                                    try {
+                                      for(let i=0;i<7;i++){
+                                        await check('new');
+                                        await check('navigate','https://example.com/?minternet-stability='+i);
+                                        await pause(180);
+                                      }
+                                      const state=await window.__TAURI__.core.invoke('browser_snapshot');
+                                      const ids=state.tabs.map(tab=>tab.id);
+                                      if(ids.length<7)throw Error('Native tabs were not created');
+                                      let switched=0;
+                                      for(let pass=0;pass<3;pass++){
+                                        for(const id of ids){
+                                          await check('activate',id);
+                                          switched++;
+                                        }
+                                      }
+                                      await check('session-refresh-urls');
+                                      for(const id of ids.slice(1)){
+                                        await check('close',id);
+                                      }
+                                      await pause(1250);
+                                      await check('stability-smoke-proof',{created:ids.length,switched});
+                                    } catch(error) {
+                                      await command('stability-smoke-failure',String(error));
+                                    }
+                                  },800);
+                                "#);
+                            } else if smoke || auth_popup_smoke {
                                 let _ = view.eval(
                                     "setTimeout(() => window.minternet?.command('navigate', 'https://example.com'), 200)"
                                 );
