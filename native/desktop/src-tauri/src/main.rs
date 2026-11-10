@@ -3741,8 +3741,12 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 // so Explorer highlights the exact completed file. Simple
                 // explorer.exe /select arguments can silently open only the folder,
                 // especially for extended-length paths or an existing Explorer.
-                showfile::show_path_in_file_manager(&path)
-                    .map_err(|e|format!("Could not select the downloaded file: {e}"))?;
+                // showfile dispatches the native SHOpenFolderAndSelectItems API.
+                // It returns (), and can block while Explorer starts; run on a
+                // COM-compatible worker rather than the browser UI thread.
+                tauri::async_runtime::spawn_blocking(move||{
+                    showfile::show_path_in_file_manager(&path);
+                }).await.map_err(|e|format!("Could not open Explorer: {e}"))?;
             }
             #[cfg(target_os="macos")]
             std::process::Command::new("open").arg("-R").arg(&path)
