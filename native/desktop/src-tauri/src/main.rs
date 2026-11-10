@@ -1817,6 +1817,15 @@ fn refresh_session_urls(app:&tauri::AppHandle)->usize{
         let address=actual.as_str();
         if address!=previous && is_real_page_url(address){
             update_from_site(app,id,address);
+            // SPAs change routes with history.pushState and never generate a
+            // new PageLoadEvent. Check the new active login route as well.
+            let login_route=actual.path().to_ascii_lowercase();
+            if ["login","sign-in","signin","authentication"].iter()
+                .any(|part|login_route.contains(part)) {
+                let active=app.state::<Mutex<Browser>>().lock()
+                    .map(|browser|browser.active_id==id).unwrap_or(false);
+                if active {let _=fill_saved_credential(app,id,false,None);}
+            }
             changed+=1;
         }
     }
@@ -2023,7 +2032,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                     // Automatically fill one enabled, encrypted saved login
                     // after the exact HTTPS page has loaded. Locked vaults,
                     // private/secret tabs and ambiguous accounts are skipped.
-                    if event.url().scheme()=="https" {
+                    if is_active && event.url().scheme()=="https" {
                         let _=fill_saved_credential(&for_load,id,false,None);
                     }
                     // ChatGPT can occasionally finish a WebView2 navigation
@@ -4553,6 +4562,9 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 b.active_id = id;
             }
             activated(&app)?;
+            // A tab may have loaded in the background while the vault was
+            // locked, or the user may have just switched to a login form.
+            let _=fill_saved_credential(&app,id,false,None);
         }
         "navigate" | "home" => {
             let mut pending:Option<PendingChatPrompt>=None;
