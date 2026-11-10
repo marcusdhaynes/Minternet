@@ -66,7 +66,7 @@
     backdrop.hidden=false;panel.hidden=false;
     panel.replaceChildren();
     const head=create('div','form-suggestion-head');
-    head.append(create('strong','',ctx.kind==='login'?'Passwords':
+    head.append(create('strong','',ctx.kind==='login'?'Logins':
       ctx.kind==='payment'?'Payment Methods':'Identities'));
     head.append(action('×',()=>hide(true),'form-suggestion-x'));
     panel.append(head);
@@ -89,7 +89,7 @@
       },'form-suggestion-option'));
       if(!items.length&&!ctx.saveReady)panel.append(
         create('small','form-suggestion-note','No saved login for this website.'));
-      panel.append(action('✎ Edit Passwords',()=>openManager('login'),'form-suggestion-option'));
+      panel.append(action('✎ Edit Logins',()=>openManager('login'),'form-suggestion-option'));
     }else if(ctx.kind==='payment'){
       const cards=await cmd('vault-card-list')||[];
       for(const card of cards.slice(0,7)){
