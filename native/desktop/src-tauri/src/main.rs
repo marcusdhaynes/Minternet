@@ -21,6 +21,11 @@ use tauri::{
 
 const CHROME: f64 = 52.0;
 const BOOKMARK_BAR: f64 = 22.0;
+const FIND_BAR: f64 = 31.0;
+struct FindBarState(Mutex<bool>);
+fn find_visible(app:&tauri::AppHandle)->bool{
+    app.state::<FindBarState>().0.lock().map(|v|*v).unwrap_or(false)
+}
 const HOME: &str = "about:blank"; // Internal tab sentinel, never a homepage.
 const DEFAULT_HOMEPAGE: &str = "https://www.google.com/";
 
@@ -1661,7 +1666,8 @@ fn refresh_layout(app: &tauri::AppHandle) {
         let Ok(state) = cache.lock() else { return };
         (state.bookmark_bar_visible, state.overlay_open)
     };
-    let top = CHROME + if bar_visible { BOOKMARK_BAR } else { 0.0 };
+    let top = CHROME + if bar_visible { BOOKMARK_BAR } else { 0.0 }
+        + if find_visible(app) {FIND_BAR} else {0.0};
     if height <= top + 1.0 { return; }
     // Include active tab identity: a previously hidden WebView must get its
     // current viewport before being shown, even when window size is unchanged.
@@ -4571,6 +4577,38 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         }
         "prepare-tab" => { prepare_active(&app)?; }
         "focus-address" => {focus_address_bar(&app);return Ok(json!({"ok":true}));}
+        "find-bar-set" => {
+            let visible=value.as_bool().ok_or("Expected true/false")?;
+            *app.state::<FindBarState>().0.lock().map_err(|e|e.to_string())?=visible;
+            invalidate_layout(&app);
+            refresh_layout(&app);
+            return Ok(json!({"ok":true,"visible":visible}));
+        }
+        "find-page" => {
+            let query=value.get("query").and_then(Value::as_str)
+                .ok_or("Missing find text")?.trim();
+            if query.len()>256 {return Err("Find query is too long".into());}
+            let backward=value.get("backward").and_then(Value::as_bool)==Some(true);
+            let label=app.state::<Mutex<Browser>>().lock().map_err(|e|e.to_string())?
+                .active().and_then(|t|t.view.clone());
+            if let Some(label)=label {
+                if let Some(view)=app.get_webview(&label) {
+                    let term=serde_json::to_string(query).map_err(|e|e.to_string())?;
+                    let script=format!(r#"(function(){{
+                      try{{
+                        if(typeof window.find!=='function')return false;
+                        return Boolean(window.find({term},false,{backward},true,false,false,false));
+                      }}catch{{return false;}}
+                    }})()"#);
+                    let handle=app.clone();
+                    view.eval_with_callback(&script,move|result|{
+                        let _=handle.emit_to("chrome","minternet:find-result",
+                            json!({"found":result.trim()=="true","query":query}));
+                    }).map_err(|e|e.to_string())?;
+                }
+            }
+            return Ok(json!({"ok":true}));
+        }
         "new" | "new-private" | "new-url" | "new-background-url" | "new-private-background-url" => {
             let private = name == "new-private" || name == "new-private-background-url";
             let background = name == "new-background-url" || name == "new-private-background-url";
@@ -5056,6 +5094,7 @@ fn main() {
         .manage(Mutex::new(LayoutCache::default()))
         .manage(SessionSaveQueued(AtomicBool::new(false)))
         .manage(SurfaceRestoreQueued(AtomicBool::new(false)))
+        .manage(FindBarState(Mutex::new(false)))
         .manage(privacy_shield::ShieldState(Mutex::new(privacy_shield::ShieldConfig::default())))
         .invoke_handler(tauri::generate_handler![browser_action, browser_snapshot])
         .setup(|app| {
