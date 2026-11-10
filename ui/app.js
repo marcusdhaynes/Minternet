@@ -15,6 +15,7 @@ function focusNewTabAddress(){
   if(target===focusTargetTabId&&!focusCancelled)return;
   focusTargetTabId=target;
   addressEditedSinceNew=false;
+  byId('address')?.removeAttribute('data-minternet-typed');
   const lease=++focusLease;
   focusCancelled=false;
   const field=byId('address');
@@ -282,7 +283,10 @@ function prepareBlankTab() {
     if (active?.url === 'about:blank') void api.command('prepare-tab').catch(() => {});
   }, 75);
 }
-byId('address').addEventListener('input',()=>{addressEditedSinceNew=true;});
+byId('address').addEventListener('input',event=>{
+  addressEditedSinceNew=true;
+  event.currentTarget.dataset.minternetTyped='true';
+});
 byId('address').addEventListener('focus', event => {
   addressFocused = true;
   event.target.select();
