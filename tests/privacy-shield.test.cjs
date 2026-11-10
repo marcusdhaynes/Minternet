@@ -83,3 +83,15 @@ test('Password autofill uses unlocked unique HTTPS-origin logins and does not ov
   assert.match(main,/observer\.disconnect\(\),9000/);
   assert.match(vault,/if matches\.next\(\)\.is_some\(\)\{return None;\}/);
 });
+
+test('Injected popup and login scripts compile before they are sent to WebView2',()=>{
+  const vm=require('node:vm');
+  const shield=source('native/desktop/src-tauri/src/privacy_shield.rs');
+  const main=source('native/desktop/src-tauri/src/main.rs');
+  const popupScript=shield.match(/const SCRIPT:&str=r###"([\\s\\S]*?)"###;/);
+  const loginScript=main.match(/const LOGIN_FILL_JS:&str=r###"([\\s\\S]*?)"###;/);
+  assert.ok(popupScript,'Missing injected popup script');
+  assert.ok(loginScript,'Missing injected autofill script');
+  new vm.Script(popupScript[1],{filename:'privacy_shield.document_start.js'});
+  new vm.Script(loginScript[1],{filename:'login_form_autofill.js'});
+});
