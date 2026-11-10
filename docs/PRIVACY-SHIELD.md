@@ -5,7 +5,7 @@
 - A toolbar shield menu with three profiles: Off, Balanced and Strict.
 - A global enabled switch plus a per-website exception, persisted in Minternet's own native app-data directory.
 - Browser-native popup denials for configured domains and known ad-popunder hosts.
-- Balanced: rejects non-user-activated JavaScript popups, while allowing ordinary click-through tabs and established authentication popup windows. Strict also blocks third-party popup windows unless allowed.
+- Balanced: blocks unsolicited cross-site popup tabs even when a click initiates them, as well as known ad-network windows. Strict additionally blocks blank popup windows that can be navigated to third-party ads. Validated OAuth popup windows and per-site exceptions remain available.
 - Document-start defenses against selected advertising/tracking \`fetch\`, XHR and \`sendBeacon\` requests, plus a limited list of named ad/tracking hosts.
 - Cosmetic hiding of identifiable advertisement slots, tracking frames, newsletter annoyances and (if explicitly enabled) subscription overlays.
 - Experimental YouTube Skip Ad button detection and ad-slot hiding.
@@ -36,3 +36,7 @@ The layout refresh reasserts visible WebView2 bounds after a completed page load
 - [Brave blocking policy](https://github.com/brave/brave-browser/wiki/Blocking-goals-and-policy)
 - [WebView2 request interception](https://learn.microsoft.com/microsoft-edge/webview2/how-to/webresourcerequested)
 - [Tauri WebviewBuilder](https://docs.rs/tauri/latest/tauri/webview/struct.WebviewBuilder.html)
+
+## Example popup regression (November 2026)
+
+On `ww8.123moviesfree.net`, clicking the player can launch ad pages as user-activated `window.open` calls or start with `about:blank` and redirect. The WebView2 `NewWindowRequested` path must apply filtering **before** auth popup construction and before forwarding new-tab events; page JavaScript interception alone is insufficient. This rule uses host-based suspicion for blank-window requests and an origin policy for unrelated cross-site windows in Balanced mode. It intentionally does not intercept ordinary in-tab video playback. Some legitimate third-party windows may require adding the site to the allowlist.
