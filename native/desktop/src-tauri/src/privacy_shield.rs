@@ -342,7 +342,7 @@ mod tests{
     }
     #[test]
     fn click_driven_popunders_and_blank_windows_are_denied(){
-        let p=ShieldConfig::default();
+        let mut p=ShieldConfig::default();
         assert!(block_popup(&p,
             "https://ww8.123moviesfree.net/movie/example",
             "https://unrelated-ad-network.example/landing"));
