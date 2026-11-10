@@ -1,7 +1,8 @@
 //! Minternet's opt-in content controls. Never exposes the browser's native
 //! command bridge, browsing history, passwords or profile data to a webpage.
 use serde::{Deserialize,Serialize};
-use std::{path::PathBuf,collections::HashSet,sync::Mutex};
+use std::{path::PathBuf,collections::HashSet,sync::{Mutex,OnceLock}};
+use rand::RngCore;
 use tauri::Manager;
 
 #[derive(Clone,Debug,Serialize,Deserialize)]
@@ -123,12 +124,13 @@ const SCRIPT:&str=r###"
 (() => {
   'use strict';
   const options=__MINTERNET_SHIELD_CONFIG__;
+  const trustedProof=__MINTERNET_SHIELD_TOKEN__;
   const hostname=location.hostname.toLowerCase();
   const domainMatches=(value,rule)=>value===rule||value.endsWith('.'+rule);
   const bypass=options.allowSites.some(rule=>domainMatches(hostname,rule));
   let active=!!(options.enabled&&options.mode!=='off'&&!bypass);
   if(window.__minternetShieldVersion===1){
-    window.__minternetShieldUpdate?.(options);
+    window.__minternetShieldUpdate?.(options,trustedProof);
     return;
   }
   window.__minternetShieldVersion=1;
@@ -210,11 +212,16 @@ const SCRIPT:&str=r###"
     last=now;
     updateStyle();examine();
   };
-  window.__minternetShieldUpdate=config=>{
+  window.__minternetShieldUpdate=(config,proof)=>{
+    // A webpage cannot disable its own protection by calling this hook.
+    if(proof!==trustedProof)return;
     configuration=config;
     updateStyle();
     examine();
   };
+  Object.defineProperty(window,'__minternetShieldUpdate',{
+    configurable:false,writable:false
+  });
   if(document.documentElement){
     updateStyle();
     new MutationObserver(settle).observe(document.documentElement,
@@ -230,9 +237,19 @@ const SCRIPT:&str=r###"
   setInterval(()=>{if(document.visibilityState==='visible')examine();},3000);
 })()
 "###;
+fn session_proof()->&'static str {
+    static PROOF:OnceLock<String>=OnceLock::new();
+    PROOF.get_or_init(||{
+        let mut bytes=[0u8;32];
+        rand::rngs::OsRng.fill_bytes(&mut bytes);
+        bytes.iter().map(|byte|format!("{byte:02x}")).collect()
+    })
+}
 pub fn script(config:&ShieldConfig)->String {
     let json=serde_json::to_string(config).unwrap_or_else(|_|"{}".into());
+    let proof=serde_json::to_string(session_proof()).unwrap_or_default();
     SCRIPT.replace("__MINTERNET_SHIELD_CONFIG__",&json)
+        .replace("__MINTERNET_SHIELD_TOKEN__",&proof)
 }
 #[cfg(test)]
 mod tests{
