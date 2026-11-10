@@ -4,19 +4,38 @@ const api = window.minternet;
 let snapshot = { tabs: [], activeId: null, extensionsCount: 0 };
 let lastUrl = 'about:blank';
 let addressFocused = false;
+// Native site WebViews can steal focus when their homepage begins rendering.
+// A fresh tab has a short, cancellable address-focus lease.
+let focusLease=0;
+let focusCancelled=false;
+function focusNewTabAddress(){
+  const lease=++focusLease;
+  focusCancelled=false;
+  const field=byId('address');
+  const tryFocus=()=>{
+    if(lease!==focusLease||focusCancelled)return;
+    if(document.activeElement===field)return;
+    if(window.__TAURI__)void api.command('focus-address').catch(()=>{});
+    field?.focus({preventScroll:true});
+    field?.select();
+  };
+  tryFocus();
+  // WebView2 hands focus to its site as navigation starts and ends.
+  // Reclaim only while this is the newest tab, never after a user click.
+  for(const delay of [80,220,480,850,1350])setTimeout(tryFocus,delay);
+}
+document.addEventListener('pointerdown',event=>{
+  if(!event.target.closest('#newTab,#newPrivate,#addressForm,#tabs')) {
+    focusCancelled=true;
+  }
+},true);
 const PRIVATE_EYE='<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 12s3.7-5.7 9.5-5.7 9.5 5.7 9.5 5.7-3.7 5.7-9.5 5.7S2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.7"/></svg>';
 
 const command = async (name, value) => {
   try {
     const result = await api.command(name, value);
     if (result?.message) toast(result.message);
-    // A new tab should be immediately ready for typing, no second click.
-    if(name==='new'||name==='new-private'){
-      requestAnimationFrame(()=>{
-        const field=byId('address');
-        if(field){field.focus({preventScroll:true});field.select();}
-      });
-    }
+    if(name==='new'||name==='new-private')focusNewTabAddress();
   } catch {
     toast('The action could not be completed.');
   }
@@ -174,8 +193,9 @@ window.minternetRenderTabs = () => {
 };
 function render(data) {
   const previouslyKnown=new Set(snapshot.tabs.map(tab=>tab.id));
-  const isNewTab=data.activeId && !previouslyKnown.has(data.activeId) &&
-    data.tabs.some(tab=>tab.id===data.activeId&&tab.url==='about:blank'&&!tab.secretTab);
+  const isNewTab=Boolean(render.hasSnapshot && data.activeId && !previouslyKnown.has(data.activeId) &&
+    data.tabs.some(tab=>tab.id===data.activeId&&!tab.secretTab));
+  render.hasSnapshot=true;
   snapshot = data;
   const tabs = byId('tabs');
   const active = data.tabs.find(t => t.id === data.activeId);
@@ -206,7 +226,9 @@ function render(data) {
   if(isNewTab){
     requestAnimationFrame(()=>{
       const address=byId('address');
-      if(address){ address.value=''; address?.focus(); address?.select(); }
+      address?.focus();
+      address?.select();
+      focusNewTabAddress();
     });
   }
     byId('back').disabled = !active?.canBack;
