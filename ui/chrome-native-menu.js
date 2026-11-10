@@ -112,8 +112,7 @@
       ]),
       sep(),
       item('⇣  Unload All Other Tabs',()=>window.minternet?.command('unload-others',tabId)),
-      sub('×  Close…',[
-        item('Close Tab',()=>window.minternet?.command('close',tabId)),
+      sub('×  Close Other Tabs…',[
         item('All To Left',()=>closeRelative(tabId,'left')),
         item('All To Right',()=>closeRelative(tabId,'right')),
         item('All Others',()=>closeRelative(tabId,'others'))
@@ -192,6 +191,9 @@
   }
   function outside(e){if(fallback&&!fallback.contains(e.target))closeFallback();}
   function esc(e){if(e.key==='Escape'){e.preventDefault();closeFallback();}}
+  // Clicking away from a custom context menu (including into a website
+  // rendered by a separate WebView2 child) dismisses the transient menu.
+  window.addEventListener('blur',closeFallback);
   function domMenu(items){
     const list=document.createElement('div');list.className='system-popup-list';
     for(const spec of items){
@@ -241,7 +243,22 @@
     if(options.custom){
       const header=document.createElement('div');
       header.className='minternet-context-heading';
-      header.textContent=options.heading||'MINTERNET';
+      if(options.tabId!=null){
+        const label=document.createElement('span');
+        label.textContent=options.heading||'TAB';
+        const closeTab=document.createElement('button');
+        closeTab.type='button';
+        closeTab.className='tab-context-close';
+        closeTab.textContent='×';
+        closeTab.title='Close This Tab';
+        closeTab.setAttribute('aria-label','Close This Tab');
+        closeTab.addEventListener('click',()=>{
+          closeFallback();
+          void window.minternet?.command('close',options.tabId);
+        });
+        header.classList.add('tab-context-heading');
+        header.append(label,closeTab);
+      }else header.textContent=options.heading||'MINTERNET';
       host.append(header);
       customOpen=true;
       if(window.__TAURI__)void window.minternet?.command('chrome-overlay',true);
@@ -443,7 +460,7 @@
       const chosen=id;
       if(!groups()?.getLatest().tabs.some(tab=>tab.id===chosen))
         return popup([disabled('Tab no longer exists')],point,{custom:true,compactTab:true,heading:'TAB'});
-      return popup(tabMenu(chosen),point,{custom:true,compactTab:true,heading:'TAB',quickActions:tabQuickActions(chosen)});
+      return popup(tabMenu(chosen),point,{custom:true,compactTab:true,heading:'TAB',tabId:chosen,quickActions:tabQuickActions(chosen)});
     },
     inspectTab:id=>tabMenu(id),
     inspectEmptyTabBar:emptyTabBarMenu,
