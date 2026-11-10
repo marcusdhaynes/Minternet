@@ -4,6 +4,9 @@ const api = window.minternet;
 let snapshot = { tabs: [], activeId: null, extensionsCount: 0 };
 let lastUrl = 'about:blank';
 let addressFocused = false;
+// Navigation has to commit before old-homepage load callbacks may replace
+// what the user typed. Preserve their submitted address until new URL arrives.
+let pendingNavigation=null;
 // Native site WebViews can steal focus when their homepage begins rendering.
 // A fresh tab has a short, cancellable address-focus lease.
 let focusLease=0;
@@ -41,8 +44,12 @@ const PRIVATE_EYE='<svg viewBox="0 0 24 24" width="12" height="12" fill="none" s
 const command = async (name, value) => {
   try {
     const result = await api.command(name, value);
-    if (result?.message) toast(result.message);
+    if (result?.message) {
+      if(name==='navigate')pendingNavigation=null;
+      toast(result.message);
+    }
     if(name==='new'||name==='new-private')focusNewTabAddress();
+    return result;
   } catch {
     toast('The action could not be completed.');
   }
@@ -269,6 +276,13 @@ function render(data) {
   snapshot = data;
   const tabs = byId('tabs');
   const active = data.tabs.find(t => t.id === data.activeId);
+  if(pendingNavigation){
+    const sameTab=active && active.id===pendingNavigation.id;
+    if(!sameTab || Date.now()-pendingNavigation.started>14000 ||
+       (active.url!==pendingNavigation.priorUrl && active.url!=='about:blank')){
+      pendingNavigation=null;
+    }
+  }
   const signature = data.tabs.map(t => [t.id,t.title,t.url,t.private,t.pinned,t.suspended,t.loading,t.audioPlaying,t.audioMuted,t.secretTab,t.secretPending]).join(';');
   if (window.minternetGroups?.renderTabs) {
     window.minternetGroups.renderTabs(data,tabs,buildTab);
@@ -307,7 +321,8 @@ function render(data) {
   const isBlank = !active || (active.url === 'about:blank'&&!active.secretTab);
   byId('homeScreen').hidden = !isBlank;
   byId('address').setAttribute('aria-label', active?.url?.startsWith('http://') ? 'Insecure HTTP address' : 'Search or enter address');
-  if (!addressFocused) byId('address').value = isBlank||active?.secretTab ? '' : active.url;
+  if (!addressFocused) byId('address').value = pendingNavigation?.text ||
+    (isBlank||active?.secretTab ? '' : active.url);
   byId('address').placeholder=active?.secretTab?'Secret Tab · URL Concealed':'Search privately or enter a secure address';
   if (lastUrl !== active?.url) {
     lastUrl = active?.url;
@@ -324,13 +339,22 @@ for (const [id, name] of [
 ]) bind(id,name);
 byId('addressForm').addEventListener('submit', event => {
   event.preventDefault();
-  command('navigate', byId('address').value);
-  byId('address').blur();
+  const field=byId('address');
+  const typed=field.value.trim();
+  if(!typed)return;
+  const active=snapshot.tabs.find(t=>t.id===snapshot.activeId);
+  pendingNavigation={text:typed,id:active?.id??null,
+    priorUrl:active?.url||'about:blank',started:Date.now()};
+  // This is an optimistic address commit, not a website navigation. Native
+  // decides the actual address. Never revert to the new tab's old homepage.
+  field.value=typed;
+  void command('navigate',typed);
+  field.blur();
 });
-byId('homeSearchForm').addEventListener('submit', event => {
+byId('homeSearchForm')?.addEventListener('submit', event => {
   event.preventDefault();
-  const q = byId('homeSearch').value;
-  if (q.trim()) command('navigate', q);
+  const q = byId('homeSearch')?.value||'';
+  if (q.trim()) void command('navigate', q);
 });
 // Warm the native renderer while the user begins typing. Nothing is fetched
 // until Enter; no speculative website requests, DNS prefetch, or privacy leak.
@@ -352,11 +376,12 @@ byId('address').addEventListener('focus', event => {
   event.target.select();
   prepareBlankTab();
 });
-byId('homeSearch').addEventListener('focus', prepareBlankTab);
+byId('homeSearch')?.addEventListener('focus', prepareBlankTab);
 byId('address').addEventListener('blur', () => {
   addressFocused = false;
   const active = snapshot.tabs.find(t => t.id === snapshot.activeId);
-  byId('address').value = active && active.url !== 'about:blank' ? active.url : '';
+  byId('address').value = pendingNavigation?.text ||
+    (active && active.url !== 'about:blank' ? active.url : '');
 });
 window.addEventListener('keydown', event => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'l') {
