@@ -1,5 +1,9 @@
 name: Archive every successful Minternet build to GitHub Releases
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-current-portable.yml'
   workflow_run:
     workflows:
       - "Minternet Windows portable single EXE (under 50 MB)"
@@ -14,12 +18,44 @@ on:
         required: true
         type: string
 permissions:
-  actions: read
+  actions: write
   contents: write
 concurrency:
   group: archive-minternet-build-${{ github.event.workflow_run.id || inputs.run_id }}
   cancel-in-progress: false
 jobs:
+  backfill-available-binaries:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Archive available recent successful builds as rollback checkpoints
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # One-time catch-up after the immutable archival workflow is edited.
+          # Workflow_dispatch is explicitly permitted to trigger another workflow
+          # with the repository GITHUB_TOKEN; ordinary push events are not.
+          for entry in "native-windows.yml:10" "native-unix.yml:4" "native-android.yml:3" "native-ios.yml:3"; do
+            workflow="${entry%:*}"
+            limit="${entry#*:}"
+            mapfile -t runs < <(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$workflow" \
+              --branch main --limit 60 --json databaseId,conclusion \
+              | jq -r '[.[] | select(.conclusion=="success") | .databaseId] | .[:'"$limit"'][]')
+            for run_id in "${runs[@]}"; do
+              if gh release view "minternet-build-$run_id" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+                continue
+              fi
+              usable=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100" \
+                --jq '[.artifacts[] | select(.expired==false)] | length')
+              if [ "$usable" -gt 0 ]; then
+                echo "Backfilling $workflow run $run_id"
+                gh workflow run publish-current-portable.yml --ref main \
+                  --repo "$GITHUB_REPOSITORY" -f run_id="$run_id"
+              fi
+            done
+          done
   archive:
     if: >-
       github.event_name == 'workflow_dispatch' ||
