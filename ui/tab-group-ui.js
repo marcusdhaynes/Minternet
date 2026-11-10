@@ -346,6 +346,12 @@
         suppressedClick=null;
       }
     },true);
+    // Keep Close hidden until the pointer approaches the tab or its right edge.
+    element.addEventListener('pointermove',event=>{
+      const rect=element.getBoundingClientRect();
+      element.classList.toggle('tab-close-near',event.clientX>=rect.right-20);
+    });
+    element.addEventListener('pointerleave',()=>element.classList.remove('tab-close-near'));
     element.addEventListener('contextmenu',event=>{
       event.preventDefault();
       window.minternetMenus?.tab(tabId,{x:event.clientX,y:event.clientY});
@@ -357,7 +363,8 @@
     const tab=event.target.closest('.tab[data-tab-id]');
     const id=Number(tab?.dataset.tabId);
     if(!tab||!Number.isSafeInteger(id)||!latest.tabs.some(t=>t.id===id))return;
-    gesture={id,pointerId:event.pointerId,x:event.clientX,y:event.clientY,active:false};
+    gesture={id,pointerId:event.pointerId,x:event.clientX,y:event.clientY,
+      started:performance.now(),active:false};
   }
   function createGhost(tabId){
     const tab=latest.tabs.find(t=>t.id===tabId);
@@ -396,7 +403,10 @@
   function movePointer(event){
     if(!gesture||event.pointerId!==gesture.pointerId)return;
     if(!gesture.active){
-      if(Math.hypot(event.clientX-gesture.x,event.clientY-gesture.y)<5)return;
+      const distance=Math.hypot(event.clientX-gesture.x,event.clientY-gesture.y);
+      // Prevent accidental reorder while moving to open a tab's context menu.
+      // A deliberate >20px drag still begins immediately.
+      if(distance<12||(distance<20&&performance.now()-gesture.started<125))return;
       gesture.active=true;
       draggingTabId=gesture.id;
       createGhost(gesture.id);
