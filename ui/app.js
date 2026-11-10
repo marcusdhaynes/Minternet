@@ -83,6 +83,20 @@ function restoreFaviconCache(){
   }catch{}
 }
 restoreFaviconCache();
+// Reuse the already-cached 24px bookmark favicon thumbnails as an
+// instantaneous fallback for previously bookmarked websites. These images
+// were stored by trusted chrome, never taken from a private tab.
+try {
+  const thumbnails=JSON.parse(localStorage.getItem('minternet.bookmark-icon-thumbnails.v1')||'{}');
+  for(const [address,png] of Object.entries(thumbnails||{}).slice(-180)){
+    if(typeof png!=='string'||png.length>10000||
+       !/^data:image\/png;base64,[a-z0-9+/=]+$/i.test(png))continue;
+    const u=new URL(address);
+    const host=u.hostname.toLowerCase();
+    if(u.protocol==='https:'&&!faviconCache.has(host)&&/^[a-z0-9.-]{1,253}$/.test(host))
+      faviconCache.set(host,{src:png,loading:false,persisted:true});
+  }
+} catch {}
 function rememberFavicon(host,source){
   if(!window.__TAURI__||!source||!source.startsWith('https://'))return;
   const state=faviconCache.get(host);
