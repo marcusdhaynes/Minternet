@@ -142,7 +142,7 @@ function refreshHostIcons(host){
     const state=faviconCache.get(host);
     if(!state?.src)return;
     const img=document.createElement('img');
-    img.alt='';img.decoding='sync';img.loading='eager';img.referrerPolicy='no-referrer';
+    img.alt='';img.decoding='async';img.loading='eager';img.referrerPolicy='no-referrer';
     img.src=state.src;
     slot.replaceChildren(img);
   });
@@ -200,7 +200,7 @@ function renderSiteIcon(tab,slot){
   const cached=faviconCache.get(host);
   if(cached?.src){
     const img=document.createElement('img');
-    img.alt='';img.decoding='sync';img.loading='eager';img.referrerPolicy='no-referrer';
+    img.alt='';img.decoding='async';img.loading='eager';img.referrerPolicy='no-referrer';
     img.src=cached.src;slot.append(img);
     if(!tab.private&&!cached.persisted)rememberFavicon(host,cached.src);
   }else{
@@ -407,7 +407,13 @@ if(window.__TAURI__){
 // on the next launch, including /c/<chat-id> style conversation routes.
 // Private and secret tabs are excluded by the native command.
 if(window.__TAURI__){
-  setInterval(()=>{void api.command('session-refresh-urls').catch(()=>{});},2000);
+  let sessionRefreshPending=false;
+  setInterval(()=>{
+    if(sessionRefreshPending || document.visibilityState==='hidden')return;
+    sessionRefreshPending=true;
+    void api.command('session-refresh-urls')
+      .catch(()=>{}).finally(()=>{sessionRefreshPending=false;});
+  },6000);
 }
 
 // Auto-unload requests run in native code, which independently verifies each
@@ -415,12 +421,19 @@ if(window.__TAURI__){
 const AUTO_UNLOAD_KEY='minternet.autoUnloadMinutes.v1';
 function autoUnloadMinutes(){
   const raw=localStorage.getItem(AUTO_UNLOAD_KEY);
-  const n=raw===null?1:Number(raw);
-  return Number.isInteger(n)&&n>=0&&n<=120?n:1;
+  // One-minute default caused frequent WebView2 controller destruction
+  // and recreation as users switched between tabs. Choose a calmer default;
+  // existing explicitly stored user settings are unchanged.
+  const n=raw===null?10:Number(raw);
+  return Number.isInteger(n)&&n>=0&&n<=120?n:10;
 }
 if(window.__TAURI__){
+  let unloadPending=false;
   setInterval(()=>{
     const minutes=autoUnloadMinutes();
-    if(minutes>0)void api.command('auto-unload-check',minutes).catch(()=>{});
-  },10000);
+    if(minutes===0||unloadPending||document.visibilityState==='hidden')return;
+    unloadPending=true;
+    void api.command('auto-unload-check',minutes)
+      .catch(()=>{}).finally(()=>{unloadPending=false;});
+  },30000);
 }
