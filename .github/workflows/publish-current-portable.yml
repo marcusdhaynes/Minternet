@@ -21,7 +21,9 @@ permissions:
   actions: write
   contents: write
 concurrency:
-  group: archive-minternet-build-${{ github.event.workflow_run.id || inputs.run_id }}
+  # Only one release mutation at a time: concurrent GH release creation can
+  # trigger secondary rate limits and leave a partial draft.
+  group: archive-minternet-release-writes
   cancel-in-progress: false
 jobs:
   backfill-available-binaries:
@@ -45,7 +47,9 @@ jobs:
               | jq -r '[.[] | select(.conclusion=="success") | .databaseId] | .[:'"$limit"'][]')
             for run_id in "${runs[@]}"; do
               if gh release view "minternet-build-$run_id" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-                continue
+                remote=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/minternet-build-$run_id")
+                complete=$(jq -r '(.draft==false) and ([.assets[].name] | index("SHA256SUMS.txt") != null) and ([.assets[].name] | length >= 2)' <<<"$remote")
+                if [ "$complete" = "true" ]; then continue; fi
               fi
               usable=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100" \
                 --jq '[.artifacts[] | select(.expired==false)] | length')
@@ -97,10 +101,8 @@ jobs:
           echo "PLATFORM=$PLATFORM" >> "$GITHUB_ENV"
           echo "WORKFLOW_NAME=$NAME" >> "$GITHUB_ENV"
           mkdir -p release/assets
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Build $RUN_ID has already been archived in $TAG; never overwrite or delete previous binaries." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
+          # Always reconstruct expected files from the original successful
+          # workflow. Partial draft releases are resumed without clobbering.
           mapfile -t ARTIFACTS < <(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts?per_page=100" --jq '.artifacts[].name')
           count=0
           for artifact in "${ARTIFACTS[@]}"; do
@@ -157,14 +159,68 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Already archived: $TAG" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+          # A new release starts as a draft, avoiding visible partial uploads.
+          # If the release already exists, we validate each asset's length and
+          # add only missing files. No old executable is replaced.
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            created=false
+            for attempt in 1 2 3 4 5; do
+              if gh release create "$TAG" \
+                --target "$SHA" --draft --prerelease \
+                --title "Minternet $PLATFORM — build $RUN_ID" \
+                --notes-file release/notes.md \
+                --repo "$GITHUB_REPOSITORY"; then
+                created=true
+                break
+              fi
+              # The API can return an error after completing the create. Check
+              # before retrying to avoid a second attempt to create the tag.
+              if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+                created=true
+                break
+              fi
+              sleep $((attempt * 4))
+            done
+            test "$created" = true || { echo "Could not create build release"; exit 1; }
           fi
-          gh release create "$TAG" release/assets/* \
-            --target "$SHA" \
-            --title "Minternet $PLATFORM — build $RUN_ID" \
-            --notes-file release/notes.md --prerelease \
-            --repo "$GITHUB_REPOSITORY"
+          release_json=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG")
+          published_sha=$(jq -r '.target_commitish' <<<"$release_json")
+          test "$published_sha" = "$SHA" || {
+            echo "The existing release tag belongs to a different commit; refusing to change it."
+            exit 1
+          }
+          for file in release/assets/*; do
+            name=$(basename "$file")
+            size=$(stat -c%s "$file")
+            uploaded=false
+            for attempt in 1 2 3 4 5; do
+              release_json=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG")
+              remote_size=$(jq -r --arg name "$name" '.assets[] | select(.name==$name) | .size' <<<"$release_json" | head -n 1)
+              if [ -n "$remote_size" ]; then
+                if [ "$remote_size" != "$size" ]; then
+                  echo "Conflicting remote asset $name. Refusing to overwrite a rollback binary."
+                  exit 1
+                fi
+                uploaded=true
+                break
+              fi
+              if gh release upload "$TAG" "$file" --repo "$GITHUB_REPOSITORY"; then
+                uploaded=true
+                break
+              fi
+              sleep $((attempt * 4))
+            done
+            test "$uploaded" = true || { echo "Could not upload $name"; exit 1; }
+          done
+          # Publish only after verifying every expected asset is present.
+          release_json=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG")
+          for file in release/assets/*; do
+            name=$(basename "$file")
+            remote_size=$(jq -r --arg name "$name" '.assets[] | select(.name==$name) | .size' <<<"$release_json" | head -n 1)
+            test "$remote_size" = "$(stat -c%s "$file")" || exit 1
+          done
+          if [ "$(jq -r '.draft' <<<"$release_json")" = true ]; then
+            gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
+          fi
           echo "Archived permanent rollback: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
           echo "Source SHA: $SHA" >> "$GITHUB_STEP_SUMMARY"
