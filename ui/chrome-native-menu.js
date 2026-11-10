@@ -193,7 +193,7 @@
   function esc(e){if(e.key==='Escape'){e.preventDefault();closeFallback();}}
   // Clicking away from a custom context menu (including into a website
   // rendered by a separate WebView2 child) dismisses the transient menu.
-  window.addEventListener('blur',closeFallback);
+  window.addEventListener?.('blur',closeFallback);
   function domMenu(items){
     const list=document.createElement('div');list.className='system-popup-list';
     for(const spec of items){
