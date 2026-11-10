@@ -60,9 +60,53 @@ function tabTooltip(tab) {
   const title=tab.title || (tab.url?.startsWith('https://') ? new URL(tab.url).hostname : 'New Tab');
   return (tab.suspended ? 'Unloaded · ' : tab.loading ? 'Loading · ' : '') + title;
 }
-// Icons appear immediately, even on sites that omit /favicon.ico or block
-// third-party favicon requests. Fetch each host at most once per session.
+// Render previously visited site icons directly from compact, persistent
+// verified image bytes. The first visit to a new host still needs a network
+// fetch, but later tab creation/restoration never waits for its favicon.
+const FAVICON_STORE='minternet.tab-favicons.v2';
 const faviconCache=new Map();
+const cachedIconPattern=/^data:image\/(?:png|jpeg|webp|x-icon);base64,[a-z0-9+/=]+$/i;
+function restoreFaviconCache(){
+  try{
+    const entries=JSON.parse(localStorage.getItem(FAVICON_STORE)||'[]');
+    if(!Array.isArray(entries))return;
+    let used=0;
+    for(const item of entries.slice(-120)){
+      if(!Array.isArray(item)||item.length!==2)continue;
+      const [host,src]=item;
+      if(typeof host!=='string'||!/^[a-z0-9.-]{1,253}$/.test(host)||
+        typeof src!=='string'||src.length>70000||!cachedIconPattern.test(src))continue;
+      used+=src.length;
+      if(used>1400000)break;
+      faviconCache.set(host,{src,loading:false,persisted:true});
+    }
+  }catch{}
+}
+restoreFaviconCache();
+function rememberFavicon(host,source){
+  if(!window.__TAURI__||!source||!source.startsWith('https://'))return;
+  const state=faviconCache.get(host);
+  if(!state||state.persisted||state.persisting)return;
+  if(!snapshot.tabs.some(t=>!t.private&&!t.secretTab&&
+    (()=>{try{return new URL(t.url).hostname.toLowerCase()===host;}catch{return false;}})()))return;
+  state.persisting=true;
+  void api.command('bookmark-icon-data',source).then(image=>{
+    state.persisting=false;
+    if(typeof image!=='string'||image.length>70000||!cachedIconPattern.test(image))return;
+    state.src=image;
+    state.persisted=true;
+    // MRU eviction. Avoid storage failures blocking browser rendering.
+    try{
+      const stored=JSON.parse(localStorage.getItem(FAVICON_STORE)||'[]');
+      const map=new Map(Array.isArray(stored)?stored.filter(e=>Array.isArray(e)&&e.length===2):[]);
+      map.delete(host);map.set(host,image);
+      let entries=[...map.entries()].slice(-100);
+      while(entries.length&&JSON.stringify(entries).length>1400000)entries.shift();
+      localStorage.setItem(FAVICON_STORE,JSON.stringify(entries));
+    }catch{}
+    refreshHostIcons(host);
+  }).catch(()=>{state.persisting=false;});
+}
 function iconCandidates(host){
   const root='https://'+host;
   return [root+'/favicon.ico',root+'/favicon.svg',root+'/favicon-32x32.png',
@@ -84,7 +128,7 @@ function refreshHostIcons(host){
     const state=faviconCache.get(host);
     if(!state?.src)return;
     const img=document.createElement('img');
-    img.alt='';img.decoding='async';img.referrerPolicy='no-referrer';
+    img.alt='';img.decoding='sync';img.loading='eager';img.referrerPolicy='no-referrer';
     img.src=state.src;
     slot.replaceChildren(img);
   });
@@ -112,6 +156,7 @@ function discoverSiteIcon(host,page){
     probe.onload=()=>{
       if(probe.naturalWidth===0||probe.naturalHeight===0){tryIcon(index+1);return;}
       state.src=candidates[index];state.loading=false;refreshHostIcons(host);
+      rememberFavicon(host,candidates[index]);
     };
     probe.onerror=()=>tryIcon(index+1);
     probe.src=candidates[index];
@@ -141,8 +186,9 @@ function renderSiteIcon(tab,slot){
   const cached=faviconCache.get(host);
   if(cached?.src){
     const img=document.createElement('img');
-    img.alt='';img.decoding='async';img.referrerPolicy='no-referrer';
+    img.alt='';img.decoding='sync';img.loading='eager';img.referrerPolicy='no-referrer';
     img.src=cached.src;slot.append(img);
+    if(!tab.private&&!cached.persisted)rememberFavicon(host,cached.src);
   }else{
     slot.append(iconFallback(host));
     discoverSiteIcon(host,tab.url);
