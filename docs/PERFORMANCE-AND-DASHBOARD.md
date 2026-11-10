@@ -33,3 +33,5 @@ Current limitation: Find uses WebView2 page JavaScript window.find as a first pa
 - Windows website downloads require a native Yes/No confirmation with No as the default. Unapproved downloads are canceled before saving. Potentially executable formats are explicitly flagged; PE executables disguised as non-EXE files are removed on completion.
 - Native login popups cannot download files. Non-Windows site-initiated downloads fail closed until trusted OS consent UI is implemented.
 - Chrome Web Store and Firefox Add-ons can be browsed, but their browser-specific install buttons are not working Minternet installers. Supporting full Chrome/Firefox ecosystems requires a distinct browser engine or additional safe extension hosting architecture.
+
+Windows users can still intentionally open cross-origin links using Ctrl+click. Popup URLs that merely resemble OAuth endpoints on unknown domains no longer bypass the privacy shield; common recognized identity providers and same-origin OAuth handlers retain their related-window support.

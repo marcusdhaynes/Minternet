@@ -698,6 +698,15 @@ mod auth_popup_tests {
         }
     }
     #[test]
+    fn fake_oauth_endpoints_must_not_bypass_popup_shield(){
+        assert!(!trusted_auth_destination(&tauri::Url::parse(
+            "https://ads.example/oauth/authorize?client_id=anything").unwrap()));
+        assert!(trusted_auth_destination(&tauri::Url::parse(
+            "https://accounts.google.com/o/oauth2/v2/auth?client_id=test").unwrap()));
+        assert!(trusted_auth_destination(&tauri::Url::parse(
+            "https://test.firebaseapp.com/__/auth/handler?authType=signInViaPopup").unwrap()));
+    }
+    #[test]
     fn normal_links_still_open_as_minternet_tabs() {
         for url in [
             "https://example.com",
@@ -710,6 +719,32 @@ mod auth_popup_tests {
         }
     }
 }
+
+// Firefox and Chrome's store buttons cannot be installed through WebView2
+// by a webpage masquerading as an identity provider. Only known provider
+// origins or self-hosted same-origin OAuth endpoints get opener privileges.
+fn trusted_auth_destination(url:&tauri::Url)->bool{
+    if url.scheme()!="https"{return false;}
+    let host=url.host_str().unwrap_or("").to_ascii_lowercase();
+    let path=url.path().to_ascii_lowercase();
+    if matches!(host.as_str(),
+        "accounts.google.com"|"login.microsoftonline.com"|"login.live.com"|
+        "appleid.apple.com"|"id.apple.com"|"github.com"|
+        "login.yahoo.com"|"www.facebook.com"){
+        return is_auth_popup_url(url);
+    }
+    path.starts_with("/__/auth/") &&
+        (host.ends_with(".firebaseapp.com")||host.ends_with(".web.app"))
+}
+#[cfg(windows)]
+fn intentional_new_tab_shortcut()->bool{
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState,VK_CONTROL};
+    // Preserve explicit Ctrl+click new-tab actions even when the destination
+    // is cross-site. Ordinary video Play clicks never qualify.
+    unsafe{GetAsyncKeyState(VK_CONTROL.0 as i32)}<0
+}
+#[cfg(not(windows))]
+fn intentional_new_tab_shortcut()->bool{false}
 
 struct PopupDeduper(Mutex<HashMap<(u32,String),Instant>>);
 struct ZoomState(Mutex<f64>);
@@ -2076,7 +2111,18 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
             let opener=for_popup.state::<Mutex<Browser>>().lock().ok()
                 .and_then(|b|b.tabs.iter().find(|t|t.id==id).map(|t|t.url.clone()))
                 .unwrap_or_default();
-            let auth_target=is_auth_popup_url(&url);
+            let same_origin_auth=tauri::Url::parse(&opener).ok()
+                .and_then(|source|source.host_str().map(|host|
+                    url.host_str()==Some(host) && url.scheme()=="https"))
+                .unwrap_or(false);
+            let smoke_blank=url.as_str()=="about:blank" &&
+                std::env::args().any(|a|a=="--minternet-auth-popup-smoke") &&
+                opener.starts_with("https://example.com/");
+            let auth_target=smoke_blank ||
+                (is_auth_popup_url(&url) &&
+                 (trusted_auth_destination(&url)||same_origin_auth));
+            let explicit_user_tab=intentional_new_tab_shortcut() &&
+                matches!(url.scheme(),"http"|"https") && url.host_str().is_some();
             // Check before the auth-popup exception: ad scripts routinely
             // open about:blank on a Play click and redirect it to an ad.
             // Keep legitimate OAuth popups and same-site clicks functional.
@@ -2084,15 +2130,13 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                 .map(|settings|{
                     if url.as_str()=="about:blank"{
                         privacy_shield::block_blank_popup(&settings,&opener)
-                    } else if auth_target {
+                    } else if auth_target || explicit_user_tab {
                         false
                     } else {
                         privacy_shield::block_popup(&settings,&opener,url.as_str())
                     }
                 }).unwrap_or(false);
-            let deny=deny && !(url.as_str()=="about:blank" &&
-                std::env::args().any(|a|a=="--minternet-auth-popup-smoke") &&
-                opener.starts_with("https://example.com/"));
+            let deny=deny && !smoke_blank;
             if deny {
                 let _=for_popup.emit_to("chrome","minternet:shield-blocked",json!({"kind":"popup"}));
                 return NewWindowResponse::Deny;

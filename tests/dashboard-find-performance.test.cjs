@@ -152,3 +152,11 @@ test('official extension catalogs are browsable without misleading install claim
   assert.match(prefs,/https:\/\/chromewebstore\.google\.com\//);
   assert.match(prefs,/https:\/\/addons\.mozilla\.org\/en-US\/firefox\//);
 });
+
+test('unknown OAuth-looking popup URLs cannot bypass cross-site blocker',()=>{
+ const native=read('native/desktop/src-tauri/src/main.rs');
+ assert.match(native,/fn trusted_auth_destination/);
+ assert.match(native,/ads\.example\/oauth\/authorize/);
+ assert.match(native,/intentional_new_tab_shortcut/);
+ assert.match(native,/trusted_auth_destination\(&url\)\|\|same_origin_auth/);
+});
