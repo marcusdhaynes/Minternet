@@ -12,6 +12,7 @@
   const tabLimit=$('tabLimit'),saveTabLimit=$('tabLimitSave');
   if(!home||!saveHome||!folder||!saveFolder||!reset||!status||!tabLimit||!saveTabLimit)return;
   const defaultHome='https://www.google.com/';
+  const newTabMode=$('newTabMode');
   const report=message=>{
     status.hidden=!message;status.textContent=String(message||'');
     if(message?.length)window.minternetToast?.(message);
@@ -42,6 +43,7 @@
     try{
       const settings=await invoke('browser-preferences');
       home.value=settings.homepage||defaultHome;
+      if(newTabMode)newTabMode.value=settings.newTabMode==='website'?'website':'dashboard';
       tabLimit.value=String(settings.tabLimit??0);
       folder.value=settings.usingSystemDownloads?'':settings.downloadFolder||'';
       folder.placeholder=settings.usingSystemDownloads
@@ -92,6 +94,19 @@
   saveTabLimit.addEventListener('click',()=>void updateTabLimit());
   tabLimit.addEventListener('keydown',event=>{
     if(event.key==='Enter'){event.preventDefault();void updateTabLimit();}
+  });
+  newTabMode?.addEventListener('change',async()=>{
+    newTabMode.disabled=true;
+    try{
+      const result=await invoke('browser-new-tab-mode-set',newTabMode.value);
+      if(!result?.ok)throw Error('Could not update New Tab Page');
+      report(newTabMode.value==='dashboard'
+        ?'New tabs now open the zero-renderer Dashboard.'
+        :'New tabs now open your configured website.');
+    }catch(error){
+      report('New Tab mode not saved: '+String(error.message||error));
+      await refresh();
+    }finally{newTabMode.disabled=false;}
   });
   saveHome.addEventListener('click',()=>void updateHome());
   home.addEventListener('keydown',event=>{
