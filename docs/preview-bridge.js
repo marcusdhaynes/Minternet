@@ -3,6 +3,12 @@
 if (!window.minternet) {
   const tabs=[];
   let tabLimit=0; // 0 = Unlimited.
+  let newTabMode='dashboard',websiteHome='https://www.google.com/';
+  try{
+    if(localStorage.getItem('minternet.preview.newTabMode.v1')==='website')newTabMode='website';
+    const saved=localStorage.getItem('minternet.preview.homepage.v1');
+    if(saved&&/^https:\/\//.test(saved))websiteHome=saved;
+  }catch{}
   try{const n=Number(localStorage.getItem('minternet.preview.tabLimit.v1'));if(Number.isSafeInteger(n)&&n>=0&&n<=1000000)tabLimit=n;}catch{}
   let activeId=0,nextId=0,renderedUrl='',listeners=[];
   const $=id=>document.getElementById(id);
@@ -75,13 +81,33 @@ if (!window.minternet) {
     onFocusAddress(){return()=>{}},
     async command(name,value){
       switch(name){
+        case 'browser-preferences':
+          return {homepage:websiteHome,newTabMode,tabLimit,usingSystemDownloads:true};
+        case 'browser-new-tab-mode-set':{
+          if(!['website','dashboard'].includes(value))return {message:'Unknown New Tab mode'};
+          newTabMode=value;
+          try{localStorage.setItem('minternet.preview.newTabMode.v1',value);}catch{}
+          return {ok:true,newTabMode};
+        }
+        case 'browser-homepage-set':{
+          try{
+            const normalized=new URL(value);
+            if(normalized.protocol!=='https:')throw Error('HTTPS required');
+            websiteHome=normalized.href;
+            localStorage.setItem('minternet.preview.homepage.v1',websiteHome);
+            return {ok:true,homepage:websiteHome};
+          }catch{return {message:'Invalid website homepage'};}
+        }
         case 'tab-limit-get':return {ok:true,tabLimit};
         case 'tab-limit-set':{
           if(!Number.isSafeInteger(value)||value<0||value>1000000)return {message:'Tab Limit must be from 0 to 1000000'};
           try{localStorage.setItem('minternet.preview.tabLimit.v1',String(value));}catch{return {message:'Unable to save Tab Limit'};}
           tabLimit=value;return {ok:true,tabLimit};
         }
-        case 'new':if(!addTab())return {message:'Tab limit reached. Set Tab Limit to 0 for unlimited.'};break;
+        case 'new':
+          if(!addTab())return {message:'Tab limit reached. Set Tab Limit to 0 for unlimited.'};
+          if(newTabMode==='website')go(websiteHome);
+          break;
         case 'activate':if(tabs.some(t=>t.id===value)){activeId=value;const t=current();if(t?.suspended){t.suspended=false;renderedUrl='';}}break;
         case 'deselect':activeId=0;break;
         case 'pin':case 'unpin':case 'toggle-pin':{
@@ -103,10 +129,7 @@ if (!window.minternet) {
           const i=tabs.findIndex(t=>t.id===value);
           if(i<0)break;
           tabs.splice(i,1);
-          if(activeId===value){
-            activeId=tabs.find(t=>t.pinned)?.id ??
-              tabs[Math.min(i,tabs.length-1)]?.id ?? 0;
-          }
+          if(activeId===value){activeId=0;}
           break;
         }
         case 'navigate':{
@@ -121,7 +144,7 @@ if (!window.minternet) {
           }
           break;
         }
-        case 'home':if(current())go('about:blank');break;
+        case 'home':if(current())go(newTabMode==='dashboard'?'about:blank':websiteHome);break;
         case 'back':case 'forward':{
           const t=current();
           if(!t)break;
@@ -139,7 +162,7 @@ if (!window.minternet) {
           const t=tabs.find(x=>x.id===value);
           if(t){
             t.suspended=true;
-            if(activeId===t.id){activeId=tabs.find(x=>x.id!==t.id)?.id||0;renderedUrl='';}
+            if(activeId===t.id){activeId=0;renderedUrl='';}
           }
           break;
         }
