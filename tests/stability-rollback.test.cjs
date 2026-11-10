@@ -35,8 +35,8 @@ test('No WebView2 controller destruction or password JS injection occurs directl
   assert.match(main,/schedule_session_save\(app\)/);
   assert.match(main,/SessionSaveQueued\(AtomicBool\)/);
   // Only one fill is scheduled per load (extra direct call was a regression).
-  const load=main.slice(main.indexOf('.on_page_load(move |view, event| {',main.indexOf('fn create_webview(')),
-    main.indexOf('.on_document_title_changed(',main.indexOf('fn create_webview(')));
+  const loadStart=main.indexOf('.on_page_load(move |view, event| {',main.indexOf('fn create_webview('));
+  const load=main.slice(loadStart,main.indexOf('.on_document_title_changed(',loadStart));
   assert.equal((load.match(/fill_saved_credential\(/g)||[]).length,1);
 });
 
