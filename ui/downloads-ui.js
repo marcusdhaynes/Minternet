@@ -153,7 +153,10 @@
   }
   async function open(){
     if(panel){close();return;}
-    seenDownloads=true;updateBadge();
+    seenDownloads=true;
+    badge.hidden=true;
+    badge.textContent='';
+    updateBadge();
     if(window.__TAURI__)await command('chrome-overlay',true);
     const host=document.createElement('section');
     host.className='system-popup-root minternet-context-menu downloads-popup';
