@@ -1,118 +1,134 @@
-name: Publish current Minternet Portable Windows download
+name: Archive every successful Minternet build to GitHub Releases
 on:
   workflow_run:
-    workflows: ["Minternet Windows portable single EXE (under 50 MB)"]
+    workflows:
+      - "Minternet Windows portable single EXE (under 50 MB)"
+      - "Native Minternet macOS and Linux (under 50 MB)"
+      - "Native Minternet Android APK (< 50 MB)"
+      - "Native Minternet iOS simulator build (under 50 MB)"
     types: [completed]
   workflow_dispatch:
     inputs:
       run_id:
-        description: Successful native Windows build run ID
+        description: Successful first-party native build run ID to archive
         required: true
         type: string
 permissions:
   actions: read
   contents: write
+concurrency:
+  group: archive-minternet-build-${{ github.event.workflow_run.id || inputs.run_id }}
+  cancel-in-progress: false
 jobs:
-  release:
+  archive:
     if: >-
-      (github.event_name == 'workflow_dispatch') ||
+      github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == 'main' &&
        github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     steps:
-      - name: Fetch only a successful first-party Windows portable artifact
+      - name: Validate successful first-party run and extract all native build assets
         env:
           GH_TOKEN: ${{ github.token }}
           INPUT_RUN_ID: ${{ inputs.run_id }}
           TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
           set -euo pipefail
-          RUN_ID="$INPUT_RUN_ID"
-          if [ -z "$RUN_ID" ]; then RUN_ID="$TRIGGER_RUN_ID"; fi
-          test -n "$RUN_ID"
+          RUN_ID="${INPUT_RUN_ID:-${TRIGGER_RUN_ID:-}}"
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]] || { echo "Invalid run ID"; exit 1; }
           DETAILS=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID")
-          NAME=$(echo "$DETAILS" | jq -r .name)
-          RESULT=$(echo "$DETAILS" | jq -r .conclusion)
-          BRANCH=$(echo "$DETAILS" | jq -r .head_branch)
-          SRC=$(echo "$DETAILS" | jq -r .head_repository.full_name)
-          SHA=$(echo "$DETAILS" | jq -r .head_sha)
-          test "$NAME" = 'Minternet Windows portable single EXE (under 50 MB)'
-          test "$RESULT" = success
-          test "$BRANCH" = main
+          NAME=$(jq -r '.name' <<<"$DETAILS")
+          RESULT=$(jq -r '.conclusion' <<<"$DETAILS")
+          BRANCH=$(jq -r '.head_branch' <<<"$DETAILS")
+          SRC=$(jq -r '.head_repository.full_name' <<<"$DETAILS")
+          SHA=$(jq -r '.head_sha' <<<"$DETAILS")
+          test "$RESULT" = "success"
+          test "$BRANCH" = "main"
           test "$SRC" = "$GITHUB_REPOSITORY"
+          case "$NAME" in
+            "Minternet Windows portable single EXE (under 50 MB)") PLATFORM=Windows ;;
+            "Native Minternet macOS and Linux (under 50 MB)") PLATFORM=Unix ;;
+            "Native Minternet Android APK (< 50 MB)") PLATFORM=Android ;;
+            "Native Minternet iOS simulator build (under 50 MB)") PLATFORM=iOS-Simulator ;;
+            *) echo "Unrecognized native build workflow: $NAME"; exit 1 ;;
+          esac
+          TAG="minternet-build-$RUN_ID"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
           echo "SHA=$SHA" >> "$GITHUB_ENV"
-          echo "SOURCE_RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
-          mkdir -p release
-          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
-            --name Minternet-Portable-Windows-x64 --dir release
-          test -f release/Minternet-Portable-x64.exe
-          BYTES=$(stat -c%s release/Minternet-Portable-x64.exe)
-          test "$BYTES" -gt 1000000
-          test "$BYTES" -lt 50000000
-          (cd release && sha256sum Minternet-Portable-x64.exe > Minternet-Portable-x64.exe.sha256)
-          echo "Verified test-passing Windows binary: $BYTES bytes" >> "$GITHUB_STEP_SUMMARY"
-      - name: Publish permanent GitHub Release
+          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+          echo "PLATFORM=$PLATFORM" >> "$GITHUB_ENV"
+          echo "WORKFLOW_NAME=$NAME" >> "$GITHUB_ENV"
+          mkdir -p release/assets
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Build $RUN_ID has already been archived in $TAG; never overwrite or delete previous binaries." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          mapfile -t ARTIFACTS < <(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts?per_page=100" --jq '.artifacts[].name')
+          count=0
+          for artifact in "${ARTIFACTS[@]}"; do
+            case "$PLATFORM:$artifact" in
+              Windows:Minternet-Portable-Windows-x64|Unix:minternet-native-*|Android:minternet-android-debug-apk|iOS-Simulator:minternet-ios-simulator) ;;
+              *) continue ;;
+            esac
+            echo "Retrieving: $artifact"
+            dir="release/downloaded/$artifact"
+            mkdir -p "$dir"
+            gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$artifact" --dir "$dir"
+            while IFS= read -r -d '' candidate; do
+              case "$candidate" in
+                *.exe|*.dmg|*.deb|*.apk|*.zip|*.AppImage) ;;
+                *) continue ;;
+              esac
+              base=$(basename "$candidate")
+              if [ "$PLATFORM" = "Windows" ]; then
+                filename="Minternet-Portable-x64.exe"
+              else
+                filename="Minternet-${artifact}-${base}"
+              fi
+              test ! -f "release/assets/$filename"
+              cp "$candidate" "release/assets/$filename"
+              size=$(stat -c%s "release/assets/$filename")
+              test "$size" -gt 100000
+              count=$((count+1))
+            done < <(find "$dir" -type f -print0)
+          done
+          test "$count" -gt 0 || { echo "No compiled binary assets found"; exit 1; }
+          (cd release/assets && sha256sum -- * > SHA256SUMS.txt)
+          cat > release/notes.md <<EOF
+          ## Minternet — Permanent $PLATFORM build archive
+
+          - Source commit: \`$SHA\`
+          - Source branch: \`$BRANCH\`
+          - Workflow: \`$NAME\`
+          - Successful run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$RUN_ID
+          - Files: $count
+          - Status: unsigned development preview, not independently security audited
+
+          Every successful build is archived under its own immutable-by-policy tag.
+          This workflow never clobbers or overwrites an earlier EXE, APK, DMG,
+          DEB or simulator package. GitHub Actions' temporary artifacts may expire,
+          but release assets remain available unless explicitly deleted.
+          Checksums are supplied in SHA256SUMS.txt.
+
+          Rollback: visit GitHub Releases, choose a prior \`minternet-build-<run-id>\`
+          entry and download its assets. Local browser profile data is separate
+          from the EXE; back up your profile before downgrading across schema changes.
+          EOF
+      - name: Publish new per-build release without replacing earlier builds
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # Multiple Windows jobs may finish out of order. Never publish an
-          # older successful build over a newer one from the same main branch.
-          LATEST=$(gh run list --repo "$GITHUB_REPOSITORY" \
-            --workflow native-windows.yml --branch main \
-            --limit 40 --json databaseId,conclusion \
-            | jq -r '[.[] | select(.conclusion == "success")][0].databaseId')
-          if [ "$SOURCE_RUN_ID" != "$LATEST" ]; then
-            echo "Skipping older Windows run $SOURCE_RUN_ID (latest pass: $LATEST)" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          CURRENT=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
-          if [ "$SHA" != "$CURRENT" ]; then
-            echo "Skipping stale Windows binary $SHA; main is $CURRENT" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          TAG=v0.7.0-pinned-tabs-menus
-          cat > notes.md <<'NOTES'
-          ## Minternet Portable — Pinned Tabs and Glass Menus
-
-          Single-file Windows x64 EXE under 50 MB; uses Windows WebView2 and
-          saves application/browser profile data separately. No installer.
-
-          - Manage Bookmarks now docks to the far right, even with many bookmarks.
-          - Symmetric spacing above and below the address field and centered Tor icon.
-          - Real pinned tabs: compact icon-only tabs, first in the strip, no close X.
-            Right-click to Pin, Unpin, Duplicate, Move to Group, and Close.
-            Pinned HTTPS tabs restore from the user's local app profile on restart.
-            Private/incognito tab URLs are never included in persisted pins.
-          - Dragging into or out of the pinned area pins/unpins accordingly.
-          - Group collapse/hide never fabricates an empty New Tab. Prefer a
-            pinned tab; otherwise fall back to an existing visible tab or
-            the genuinely tabless home view.
-          - If the home has no active tab, typing an address creates the
-            first real tab on demand.
-          - Tab and group menus have dark, purple-black glass styling.
-            Bookmark-folder popups remain native cascading menus.
-
-          Tor is informational only and not integrated. This unsigned preview
-          has NOT been independently audited for production security.
-
-          Download the EXE under Assets. This is an unsigned development build.
-          Windows WebView2 runtime and its normal per-user browser data are separate.
-          NOT audited or guaranteed compatible with every website.
-          NOTES
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$TAG" release/Minternet-Portable-x64.exe \
-              release/Minternet-Portable-x64.exe.sha256 \
-              --clobber --repo "$GITHUB_REPOSITORY"
-            gh release edit "$TAG" --target "$SHA" --notes-file notes.md \
-              --repo "$GITHUB_REPOSITORY"
-          else
-            gh release create "$TAG" \
-              release/Minternet-Portable-x64.exe release/Minternet-Portable-x64.exe.sha256 \
-              --title "Minternet Portable — Pinned Tabs and Glass Menus" \
-              --notes-file notes.md --prerelease --target "$SHA" \
-              --repo "$GITHUB_REPOSITORY"
+            echo "Already archived: $TAG" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
-          echo "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/Minternet-Portable-x64.exe" >> "$GITHUB_STEP_SUMMARY"
+          gh release create "$TAG" release/assets/* \
+            --target "$SHA" \
+            --title "Minternet $PLATFORM — build $RUN_ID" \
+            --notes-file release/notes.md --prerelease \
+            --repo "$GITHUB_REPOSITORY"
+          echo "Archived permanent rollback: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
+          echo "Source SHA: $SHA" >> "$GITHUB_STEP_SUMMARY"
