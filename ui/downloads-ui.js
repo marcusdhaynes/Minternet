@@ -6,7 +6,8 @@
   const button=document.getElementById('downloadsButton');
   const badge=document.getElementById('downloadsBadge');
   if(!api||!button||!badge)return;
-  let entries=[],panel=null,refreshing=false,activeProgress=false,seenDownloads=false,dragPending=false;
+  let entries=[],panel=null,refreshing=false,activeProgress=false,dragPending=false;
+  const acknowledged=new Set();
   const command=(name,value)=>api.command(name,value);
   function close(){
     if(!panel)return;
@@ -22,7 +23,12 @@
   function key(event){if(event.key==='Escape'){event.preventDefault();close();button.focus();}}
   function updateBadge(){
     const active=entries.filter(entry=>entry.status==='downloading').length;
-    const count=seenDownloads?0:active||entries.filter(entry=>entry.status==='completed').length;
+    // Only downloads that appeared after the last panel review count.
+    // Opening the panel acknowledges current transfers, but a future
+    // download becomes a new notification again.
+    const count=entries.filter(entry=>
+      (entry.status==='downloading'||entry.status==='completed')&&
+      !acknowledged.has(entry.id)).length;
     badge.hidden=!count;
     badge.textContent=count>9?'9+':String(count);
     badge.classList.toggle('in-progress',active>0);
@@ -35,6 +41,7 @@
     return (i?n.toFixed(n>=10?1:2):Math.round(n))+' '+units[i];
   }
   function render(){
+    if(panel)for(const entry of entries)acknowledged.add(entry.id);
     updateBadge();
     // Preserve the originating row while the OS drag is being started.
     // Download progress polling must not replace it under the pointer.
@@ -153,7 +160,7 @@
   }
   async function open(){
     if(panel){close();return;}
-    seenDownloads=true;
+    for(const entry of entries)acknowledged.add(entry.id);
     badge.hidden=true;
     badge.textContent='';
     updateBadge();
