@@ -120,7 +120,17 @@ impl Vault {
     }
     pub fn matching(&self, origin:&str, manual:bool, username:Option<&str>) -> Option<Entry> {
         if !self.unlocked(){return None;}
-        self.entries.iter().find(|e|e.origin==origin&&(manual||e.autofill)&&username.map(|name|name==e.username).unwrap_or(true)).cloned()
+        if manual {
+            return self.entries.iter().find(|e|
+                e.origin==origin && username.map(|name|name==e.username).unwrap_or(true)
+            ).cloned();
+        }
+        // Auto-fill must never guess which account to use for a website.
+        // When more than one saved login is enabled, require manual choice.
+        let mut matches=self.entries.iter().filter(|e|e.origin==origin&&e.autofill);
+        let only=matches.next()?;
+        if matches.next().is_some(){return None;}
+        Some(only.clone())
     }
     fn key_from(password:&str,salt:&[u8;16]) -> Result<[u8;32],String> {
         if password.len()<12||password.len()>1024{return Err("Master password must contain 12–1024 characters".into());}
