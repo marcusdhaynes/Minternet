@@ -8,6 +8,9 @@
   try { state=model.hydrate(localStorage.getItem(KEY)); } catch {state=model.blank();}
   let latest={tabs:[],activeId:null};
   let lastRenderKey='', lastStoredGroupJson='', editing=null, assignTarget=null, fallbackPending=false;
+  // Keyed DOM reuse: changing one active tab must not recreate and rebind
+  // listeners for every other tab on each title/audio/loading notification.
+  const reusedTabs=new Map();
   let draggingTabId=null;
   let gesture=null, ghost=null, splitPreview=null, dragOverlay=false, suppressedClick=null;
   const ungroupTarget=$('tabUngroupDrop');
@@ -237,6 +240,25 @@
     return node;
   }
   function renderTabs(data,host,buildTab) {
+    const takeTab=(tab,active)=>{
+      const signature=JSON.stringify([
+        tab.title,tab.url,tab.private,tab.pinned,tab.suspended,
+        tab.audioPlaying,tab.audioMuted,tab.secretTab,tab.secretPending,
+        tab.syncId,active,
+        tab.secretTab?window.minternetSecretTabNames?.get(tab.id):''
+      ]);
+      let cache=reusedTabs.get(tab.id);
+      if(!cache||cache.signature!==signature){
+        const node=buildTab(tab,active);
+        node.dataset.tabId=String(tab.id);
+        attachTabMenu(node,tab.id);
+        cache={signature,node};
+        reusedTabs.set(tab.id,cache);
+      }
+      cache.node.classList.remove('group-member');
+      cache.node.style.removeProperty('--group-accent');
+      return cache.node;
+    };
     let secretGroupId=null;
     try{secretGroupId=localStorage.getItem('minternet.secret-tabs-group-id.v1');}catch{}
     if(secretGroupId&&model.get(state,secretGroupId)){
@@ -292,10 +314,7 @@
     // Chrome/Firefox-style pinned tabs precede groups and show no close X.
     for(const tab of model.sortedTabs(state,data.tabs).filter(t=>t.pinned)){
       if(model.findTab(state,tab.id))model.assign(state,tab.id,null);
-      const item=buildTab(tab,tab.id===data.activeId);
-      item.dataset.tabId=String(tab.id);
-      attachTabMenu(item,tab.id);
-      items.push(item);
+      items.push(takeTab(tab,tab.id===data.activeId));
     }
     for(const g of state.groups){
       if(!g.visible)continue;
@@ -303,11 +322,9 @@
       items.push(buildChip(g,members));
       if(!g.collapsed){
         for(const tab of members){
-          const item=buildTab(tab,tab.id===data.activeId);
-          item.dataset.tabId=String(tab.id);
+          const item=takeTab(tab,tab.id===data.activeId);
           item.classList.add('group-member');
           item.style.setProperty('--group-accent',groupColor(g));
-          attachTabMenu(item,tab.id);
           items.push(item);
         }
         // A visible end-cap continues the group's tinted background beyond
@@ -323,12 +340,11 @@
     }
     for(const tab of model.sortedTabs(state,data.tabs)){
       if(tab.pinned||model.findTab(state,tab.id))continue;
-      const item=buildTab(tab,tab.id===data.activeId);
-      item.dataset.tabId=String(tab.id);
-      attachTabMenu(item,tab.id);
-      items.push(item);
+      items.push(takeTab(tab,tab.id===data.activeId));
     }
     host.replaceChildren(...items);
+    const surviving=new Set(data.tabs.map(tab=>tab.id));
+    for(const id of reusedTabs.keys())if(!surviving.has(id))reusedTabs.delete(id);
     // Native tab restoration/closing may prune stale group memberships;
     // synchronize the baseline without recording a phantom user action.
     lastGroupUndoJson=groupUndoJson();
