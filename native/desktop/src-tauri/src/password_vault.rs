@@ -528,6 +528,21 @@ mod tests {
         let _=fs::remove_file(&file);
     }
     #[test]
+    fn multiple_saved_logins_require_explicit_account_choice(){
+        let file=std::env::temp_dir().join(format!("minternet-autofill-{}.enc",
+            rand::random::<u64>()));
+        let mut vault=Vault::default();
+        vault.unlock(&file,"correct horse battery staple",true).unwrap();
+        vault.put("https://example.com".into(),"alice".into(),"pass-one".into(),true).unwrap();
+        vault.put("https://example.com".into(),"bob".into(),"pass-two".into(),true).unwrap();
+        assert!(vault.matching("https://example.com",false,None).is_none());
+        assert_eq!(vault.matching("https://example.com",true,Some("alice"))
+            .unwrap().password,"pass-one");
+        assert!(vault.matching("https://another.example",false,None).is_none());
+        vault.lock();
+        let _=fs::remove_file(file);
+    }
+    #[test]
     fn identities_are_encrypted_masked_and_persist_with_existing_logins(){
         let path=std::env::temp_dir().join(format!("minternet-identities-{}.enc",
             rand::random::<u64>()));
