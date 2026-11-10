@@ -1798,3 +1798,55 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { di
 html, body, body * { scrollbar-width: none; }
 html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; }
 .downloads-open svg { display:block; pointer-events:none; }
+
+/* Compact Privacy Shield controls (in trusted browser chrome only). */
+.toolbar-actions #shieldButton{
+  position:relative;display:grid;place-items:center;flex:0 0 24px;
+  width:24px;height:23px;padding:0;margin:0 2px 0 0;
+  background:transparent;color:#adc7ec;border:0;border-radius:4px;
+  cursor:pointer;-webkit-app-region:no-drag;
+}
+.toolbar-actions #shieldButton:hover,.toolbar-actions #shieldButton[aria-expanded="true"]{
+  color:#f9f6ff;background:#68598666;
+}
+.toolbar-actions #shieldButton.shield-off{color:#8d8d97;opacity:.8;}
+.shield-popup{
+  position:fixed;z-index:410!important;width:min(256px,calc(100vw - 8px));
+  max-height:min(395px,calc(100vh - 60px));overflow-y:auto;padding:7px;
+  font-size:10px;
+}
+.shield-popup-header{display:flex;align-items:center;justify-content:space-between;gap:6px;
+  padding:3px 3px 6px;border-bottom:1px solid #b7a7ee35;}
+.shield-popup-header strong{font-size:11px;}
+.shield-popup-header small{color:#acb8ce;font-size:8px;}
+.shield-popup-site{font-size:9px;color:#e0d6fe;overflow:hidden;text-overflow:ellipsis;
+ white-space:nowrap;padding:7px 3px 2px;}
+.shield-popup-row{display:flex;justify-content:space-between;align-items:center;gap:8px;
+ min-height:31px;padding:3px;border-bottom:1px solid #b7a7ee18;}
+.shield-popup-row span{font-size:9px;color:#d5d8e4;}
+.shield-popup select,.shield-popup-action{
+ font-size:9px;max-width:142px;min-height:23px;background:#323b58;color:#edf1ff;
+ border:1px solid #747eae;border-radius:4px;padding:3px 5px;cursor:pointer;
+}
+.shield-popup select{max-width:104px;}
+.shield-popup-action:disabled{opacity:.45;cursor:default;}
+.shield-popup-settings{margin:8px 3px 3px;width:calc(100% - 6px);padding:6px 8px;
+ border-radius:5px;background:#49476f;border:1px solid #837ba9;
+ font-size:10px;color:#fff;cursor:pointer;}
+.shield-popup-footnote{display:block;font-size:8px;line-height:1.3;color:#afbbd3;padding:5px 4px;}
+.shield-settings{padding:7px;display:flex;flex-direction:column;gap:5px;}
+.shield-settings-heading{display:flex;flex-direction:column;gap:2px;padding-bottom:4px;
+ border-bottom:1px solid #77718d33;}
+.shield-settings-heading strong{font-size:11px;}
+.shield-settings-heading small{font-size:9px;color:#aeb5ce;}
+.shield-settings .bookmark-toggle,.shield-settings .search-setting-field{margin:0;min-height:29px;}
+.shield-list-field{display:flex;flex-direction:column;gap:3px;}
+.shield-list-field strong{font-size:10px;font-weight:600;}
+.shield-list-field small{font-size:9px;color:#aeb5ce;}
+.shield-list-field textarea{resize:vertical;background:#161e31;color:#fff;
+ font:10px/1.4 ui-monospace,monospace;border-radius:5px;border:1px solid #515e82;
+ padding:5px;min-height:40px;max-height:110px;scrollbar-width:none;}
+.shield-settings-foot{display:flex;flex-direction:column;gap:5px;}
+.shield-settings-foot button{color:#fff;background:#5d5387;border:1px solid #9587b8;
+ border-radius:5px;font-size:10px;padding:6px 9px;cursor:pointer;}
+.shield-settings-foot span{font-size:9px;color:#aeb9d7;}
