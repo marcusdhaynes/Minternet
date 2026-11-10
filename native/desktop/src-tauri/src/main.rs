@@ -1986,6 +1986,30 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                         .is_some_and(|browser|browser.active_id==id);
                     if is_active {restore_visible_surfaces(&for_load);}
                     record_page_history(&for_load,id,event.url().as_str(),None);
+                    // ChatGPT can occasionally finish a WebView2 navigation
+                    // while leaving an empty document surface. Retry the same
+                    // conversation URL exactly once if it remains textless and
+                    // noninteractive for twenty seconds. Do not reload a page
+                    // with any active input, media or visible application text.
+                    if event.url().host_str()==Some("chatgpt.com") {
+                        let _=view.eval(r#"
+                          (() => {
+                            const marker='minternet-blank-surface-retry-v1';
+                            setTimeout(() => {
+                              try {
+                                if(document.visibilityState!=='visible')return;
+                                if(document.readyState!=='complete')return;
+                                if(sessionStorage.getItem(marker)==='done')return;
+                                const body=document.body;
+                                if(!body || (body.innerText||'').trim().length>=32)return;
+                                if(document.querySelector('textarea,input:not([type="hidden"]),[contenteditable="true"],video,canvas'))return;
+                                sessionStorage.setItem(marker,'done');
+                                location.reload();
+                              } catch {}
+                            },20000);
+                          })();
+                        "#);
+                    }
                     if is_real_page_url(event.url().as_str()) {
                         apply_volume_to_site(&for_load,id,view.label(),true);
                     }
