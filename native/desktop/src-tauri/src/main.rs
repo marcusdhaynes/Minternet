@@ -2690,8 +2690,9 @@ fn focus_address_bar(app:&tauri::AppHandle) {
         let _=chrome.eval(r#"(() => {
             const field=document.getElementById('address');
             if(!field)return;
+            const previouslyTyped=field.dataset.minternetTyped==='true';
             field.focus({preventScroll:true});
-            field.select();
+            if(!previouslyTyped)field.select();
         })()"#);
     }
 }
