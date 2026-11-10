@@ -4749,6 +4749,14 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             let _=fill_saved_credential(&app,id,false,None);
         }
         "navigate" | "home" => {
+            if name=="home" && new_tab_is_dashboard(&app){
+                // Dashboard is a separate no-WebView command hub. Do not
+                // navigate or destroy the current tab, especially when pinned.
+                let state=app.state::<Mutex<Browser>>();
+                state.lock().map_err(|e|e.to_string())?.active_id=0;
+                display_active(&app);
+                return Ok(json!({"ok":true}));
+            }
             let mut pending:Option<PendingChatPrompt>=None;
             let url = if name=="home" {
                 if new_tab_is_dashboard(&app){None}else{Some(homepage(&app))}
