@@ -7,6 +7,12 @@
   if(!screen)return;
   const call=(name,value)=>window.minternet?.command(name,value);
   let existing=false,unlocked=false;
+  let entries=[];
+  let searchTimer=0;
+  $('vaultSearch')?.addEventListener('input',()=>{
+    clearTimeout(searchTimer);
+    searchTimer=setTimeout(renderEntries,55);
+  });
   function report(message){$('vaultMessage').textContent=String(message||'');}
   async function invoke(name,value){
     try{
@@ -33,17 +39,29 @@
     existing=Boolean(status.exists);unlocked=Boolean(status.unlocked);
     sync();
     if(unlocked)await list();
+    else {entries=[];renderEntries();}
   }
   async function list(){
     const data=await invoke('vault-list');
     if(!Array.isArray(data))return;
+    entries=data;
+    renderEntries();
+  }
+  function renderEntries(){
     const host=$('vaultEntries');host.replaceChildren();
-    if(!data.length){host.textContent='No saved passwords yet.';return;}
-    for(const entry of data){
+    if(!entries.length){host.textContent='No saved logins yet.';return;}
+    const query=($('vaultSearch')?.value||'').trim().toLocaleLowerCase();
+    let visible=0;
+    for(const entry of entries){
+      const site=window.MinternetSiteNames?.label(entry.origin)||entry.origin;
+      if(query&&![site,entry.origin,entry.username].join(' ')
+          .toLocaleLowerCase().includes(query))continue;
+      visible++;
       const row=document.createElement('div');row.className='vault-entry';
       const caption=document.createElement('span');caption.className='vault-caption';
-      const domain=document.createElement('strong');domain.textContent=entry.origin;
-      const username=document.createElement('small');username.textContent=entry.username;
+      const domain=document.createElement('strong');domain.textContent=site;
+      const username=document.createElement('small');
+      username.textContent=entry.origin+' · '+entry.username;
       caption.append(domain,username);
       const fill=document.createElement('button');fill.type='button';fill.textContent='Fill';fill.title='Fill current website (matching HTTPS origin only)';
       fill.addEventListener('click',async()=>{
@@ -60,6 +78,7 @@
       });
       row.append(caption,fill,del);host.append(row);
     }
+    if(!visible)host.textContent='No matching logins';
   }
   async function open(){
     if(!window.__TAURI__){
