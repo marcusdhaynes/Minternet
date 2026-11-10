@@ -1,9 +1,9 @@
 name: Archive every successful Minternet build to GitHub Releases
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/publish-current-portable.yml'
+  # Reconcile missing rollback archives gradually instead of dispatching
+  # dozens of release uploads simultaneously and hitting GitHub rate limits.
+  schedule:
+    - cron: '23 * * * *'
   workflow_run:
     workflows:
       - "Minternet Windows portable single EXE (under 50 MB)"
@@ -26,41 +26,39 @@ concurrency:
   group: archive-minternet-build-${{ github.event.workflow_run.id || inputs.run_id || github.run_id }}
   cancel-in-progress: false
 jobs:
-  backfill-available-binaries:
-    if: github.event_name == 'push'
+  reconcile-missing-archives:
+    if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 8
     steps:
-      - name: Archive available recent successful builds as rollback checkpoints
+      - name: Retry up to three missing successful build archives
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # One-time catch-up after the immutable archival workflow is edited.
-          # Workflow_dispatch is explicitly permitted to trigger another workflow
-          # with the repository GITHUB_TOKEN; ordinary push events are not.
-          for entry in "native-windows.yml:10" "native-unix.yml:4" "native-android.yml:3" "native-ios.yml:3"; do
-            workflow="${entry%:*}"
-            limit="${entry#*:}"
-            mapfile -t runs < <(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$workflow" \
-              --branch main --limit 60 --json databaseId,conclusion \
-              | jq -r '[.[] | select(.conclusion=="success") | .databaseId] | .[:'"$limit"'][]')
+          dispatched=0
+          # Include recent full-native builds across all platforms. All old
+          # confirmed releases remain untouched, and later runs are retried
+          # on future hourly checks while Actions artifacts remain available.
+          for entry in "native-windows.yml" "native-unix.yml" "native-android.yml" "native-ios.yml"; do
+            mapfile -t runs < <(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$entry" \
+              --branch main --limit 100 --json databaseId,conclusion \
+              | jq -r '[.[] | select(.conclusion=="success") | .databaseId] | .[]')
             for run_id in "${runs[@]}"; do
               if gh release view "minternet-build-$run_id" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-                remote=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/minternet-build-$run_id")
-                complete=$(jq -r '(.draft==false) and ([.assets[].name] | index("SHA256SUMS.txt") != null) and ([.assets[].name] | length >= 2)' <<<"$remote")
-                if [ "$complete" = "true" ]; then continue; fi
+                published=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/minternet-build-$run_id")
+                complete=$(jq -r '(.draft==false) and ([.assets[].name] | index("SHA256SUMS.txt") != null) and ([.assets[].name] | length >= 2)' <<<"$published")
+                if [ "$complete" = true ]; then continue; fi
               fi
-              usable=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100" \
+              available=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100" \
                 --jq '[.artifacts[] | select(.expired==false)] | length')
-              if [ "$usable" -gt 0 ]; then
-                echo "Backfilling $workflow run $run_id"
-                gh workflow run publish-current-portable.yml --ref main \
-                  --repo "$GITHUB_REPOSITORY" -f run_id="$run_id"
-                # Space backfill jobs so GitHub Release API calls do not hit
-                # secondary creation throttles. The archive job also retries.
-                sleep 12
-              fi
+              if [ "$available" -eq 0 ]; then continue; fi
+              echo "Retrying missing archive $run_id from $entry" >> "$GITHUB_STEP_SUMMARY"
+              gh workflow run publish-current-portable.yml --ref main \
+                --repo "$GITHUB_REPOSITORY" -f run_id="$run_id"
+              dispatched=$((dispatched+1))
+              if [ "$dispatched" -ge 3 ]; then exit 0; fi
+              sleep 35
             done
           done
   archive:
