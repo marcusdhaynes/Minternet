@@ -40,3 +40,11 @@ The layout refresh reasserts visible WebView2 bounds after a completed page load
 ## Example popup regression (November 2026)
 
 On `ww8.123moviesfree.net`, clicking the player can launch ad pages as user-activated `window.open` calls or start with `about:blank` and redirect. The WebView2 `NewWindowRequested` path must apply filtering **before** auth popup construction and before forwarding new-tab events; page JavaScript interception alone is insufficient. This rule uses host-based suspicion for blank-window requests and an origin policy for unrelated cross-site windows in Balanced mode. It intentionally does not intercept ordinary in-tab video playback. Some legitimate third-party windows may require adding the site to the allowlist.
+
+## Video playback regression fix (November 2026)
+
+The early popup blocker replaced `window.open` in the page's JavaScript and returned `null` for filtered popups. Some video player scripts treat the missing return value as a fatal error and never start playback. We removed this page-level override: the native WebView2 `NewWindowRequested` handler now owns popup blocking so rejected popups get the native dummy `WindowProxy` behavior without loading a separate ad window.
+
+The default Balanced profile continues to block built-in ad-network popup hosts and configured user block rules, but it no longer rejects arbitrary third-party popup URLs merely because they cross origins. Some legitimate third-party video players need those windows. Strict still blocks third-party popup windows. Blank popups from designated high-risk sources may remain blocked natively, preserving the safe proxy behavior. If video playback still fails on a specific provider, collect the popup URL and whether its player must open a separate window before changing site-wide policy.
+
+Native and JavaScript policies must not each deny the same popup separately. Test with an in-page video player and a native popup advertisement on Windows WebView2.
