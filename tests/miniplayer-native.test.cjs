@@ -76,7 +76,12 @@ test('native path picker gives scoped byte-range media URL, without file copies'
   assert.match(player,/asset\.localhost/);
   assert.match(player,/media-player-current/);
   assert.match(player,/startDragging/);
-  assert.match(player,/startResizeDragging/);
+  assert.match(player,/sizeToVideo/);
+  assert.match(player,/videoWidth\/videoHeight/);
+  assert.match(player,/DRAG_THRESHOLD=5/);
+  assert.match(player,/HIDE_DELAY=5000/);
+  assert.match(player,/controls-idle/);
+  assert.doesNotMatch(player,/startResizeDragging/);
   assert.match(player,/minternet:media-volume/);
   assert.doesNotMatch(html,/id="chooseFile"|id="mediaFile"/);
   assert.match(html,/http:\/\/asset\.localhost/);
@@ -98,4 +103,16 @@ test('white-screen compositor fix remains enabled',()=>{
   assert.match(native,/NotifyParentWindowPositionChanged/);
   assert.match(native,/schedule_surface_restore/);
   assert.doesNotMatch(native,/view\.eval\("location\.reload\(\)"/);
+});
+
+test('mini-player gestures and controls respect the video surface',()=>{
+  const player=read('ui/media-player.js');
+  const css=read('ui/media-player.css');
+  const native=read('native/desktop/src-tauri/src/main.rs');
+  assert.match(player,/mediaElements\.video,drag/);
+  assert.match(player,/Math\.hypot\(dx,dy\)<DRAG_THRESHOLD/);
+  assert.match(player,/toggle\.click\(\)/);
+  assert.match(player,/w\/videoRatio\(\)/);
+  assert.match(css,/controls-idle \.player-controls/);
+  assert.match(native,/\.min_inner_size\(80\.0,45\.0\)/);
 });
