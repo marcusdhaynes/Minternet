@@ -74,12 +74,14 @@
   }
   async function maybeNormalize(selection,generation){
     const name=(selection.name||'').toLowerCase();
-    // These containers commonly carry audio codecs absent from WebView2.
-    if(!/\.(mkv|mka|avi|wmv|wma|flv|ape|ac3|eac3|dts|amr|aif|aiff)$/i.test(name))return;
+    // Probe audio streams when the decoder is installed. This also detects
+    // AC-3/E-AC-3/DTS in otherwise supported MP4 video, where Chromium can
+    // render video but silently omit the incompatible audio track.
+    const unusual=/\.(mkv|mka|avi|wmv|wma|flv|ape|ac3|eac3|dts|amr|aif|aiff)$/i.test(name);
     try{
       const available=await tauri?.core?.invoke('browser_action',
         {name:'media-player-codec-available',value:null});
-      if(available?.ok&&generation===sourceGeneration){
+      if(available?.ok&&(unusual||available.needsNormalization)&&generation===sourceGeneration){
         await codecFallback(generation,false);
       }
     }catch{/* Native playback still works for supported tracks. */}
