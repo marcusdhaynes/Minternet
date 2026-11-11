@@ -3284,6 +3284,86 @@ fn minternet_ffmpeg() -> Option<std::ffi::OsString> {
     }
     None
 }
+
+fn minternet_cached_ffmpeg(cache:&std::path::Path)->Option<std::ffi::OsString>{
+    let executable=cache.join("ffmpeg.exe");
+    if executable.is_file(){Some(executable.into_os_string())}
+    else{minternet_ffmpeg()}
+}
+// Download the pinned LGPL/GPL multimedia engine only for codecs that need it.
+// This keeps Minternet itself a standalone, sub-50MB EXE. It downloads from
+// the Windows FFmpeg distributor over TLS; hash verification is mandatory.
+// A corrupt archive is never executed. No user media is uploaded.
+fn minternet_ensure_ffmpeg(cache:&std::path::Path)->Result<std::ffi::OsString,String>{
+    use std::io::{Read,Write};
+    use sha2::{Digest,Sha256};
+    static INSTALL_LOCK:Mutex<()> = Mutex::new(());
+    if let Some(path)=minternet_cached_ffmpeg(cache){return Ok(path);}
+    let _guard=INSTALL_LOCK.lock().map_err(|e|e.to_string())?;
+    if let Some(path)=minternet_cached_ffmpeg(cache){return Ok(path);}
+    std::fs::create_dir_all(cache).map_err(|e|e.to_string())?;
+    const URL:&str="https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.2-essentials_build.zip";
+    const SHA256:&str="60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba";
+    let archive=cache.join("ffmpeg-package.download");
+    let outcome=(|| ->Result<std::ffi::OsString,String>{
+        let response=ureq::get(URL)
+            .set("User-Agent","Minternet/0.3 local-codec-support")
+            .timeout(std::time::Duration::from_secs(180))
+            .call().map_err(|e|format!("Codec download failed: {e}"))?;
+        let mut source=response.into_reader();
+        let mut target=std::fs::File::create(&archive).map_err(|e|e.to_string())?;
+        let mut digest=Sha256::new();
+        let mut bytes=0u64;
+        let mut buf=[0u8;64*1024];
+        loop{
+            let n=source.read(&mut buf).map_err(|e|format!("Codec download interrupted: {e}"))?;
+            if n==0{break;}
+            bytes+=n as u64;
+            if bytes>150_000_000{return Err("Unexpected codec archive size".into());}
+            digest.update(&buf[..n]);
+            target.write_all(&buf[..n]).map_err(|e|e.to_string())?;
+        }
+        target.flush().map_err(|e|e.to_string())?;
+        drop(target);
+        if format!("{:x}",digest.finalize())!=SHA256{
+            return Err("Codec download failed SHA-256 verification; installation cancelled".into());
+        }
+        // Extract one exact file only; never trust ZIP entry paths for writes.
+        let source=std::fs::File::open(&archive).map_err(|e|e.to_string())?;
+        let mut zipped=zip::ZipArchive::new(source).map_err(|e|e.to_string())?;
+        let mut extracted=false;
+        let temporary=cache.join("ffmpeg.exe.partial");
+        for i in 0..zipped.len(){
+            let mut file=zipped.by_index(i).map_err(|e|e.to_string())?;
+            let entry=file.name().replace('\\',"/").to_ascii_lowercase();
+            if !entry.ends_with("/bin/ffmpeg.exe") || file.is_dir(){continue;}
+            if file.size()>240_000_000{
+                return Err("Decoded FFmpeg binary exceeds safety size limit".into());
+            }
+            let mut output=std::fs::File::create(&temporary)
+                .map_err(|e|e.to_string())?;
+            let written=std::io::copy(&mut file,&mut output).map_err(|e|e.to_string())?;
+            if written==0 || written>240_000_000{
+                return Err("Codec executable size was invalid".into());
+            }
+            output.flush().map_err(|e|e.to_string())?;
+            drop(output);
+            let destination=cache.join("ffmpeg.exe");
+            std::fs::rename(&temporary,&destination).map_err(|e|e.to_string())?;
+            extracted=true;
+            break;
+        }
+        if !extracted {return Err("Verified codec archive has no ffmpeg.exe".into());}
+        std::fs::write(cache.join("FFMPEG-SOURCE.txt"),
+            "FFmpeg 9.0.2 essentials Windows build from https://www.gyan.dev/ffmpeg/builds/\nSource code: https://ffmpeg.org/download.html\nLicense: https://ffmpeg.org/legal.html\nDownloaded on demand; no personal media is uploaded.\n")
+            .ok();
+        Ok(cache.join("ffmpeg.exe").into_os_string())
+    })();
+    std::fs::remove_file(&archive).ok();
+    if outcome.is_err(){std::fs::remove_file(cache.join("ffmpeg.exe.partial")).ok();}
+    outcome
+}
+
 fn minternet_transcode_file(ffmpeg:std::ffi::OsString,path:&std::path::Path,
     kind:&str) -> Result<PathBuf,String> {
     use std::process::{Command,Stdio};
@@ -3397,9 +3477,11 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         return Ok(current.unwrap_or(Value::Null));
     }
     if name=="media-player-codec-available" {
-        let found=tauri::async_runtime::spawn_blocking(minternet_ffmpeg)
-            .await.map_err(|e|e.to_string())?.is_some();
-        return Ok(json!({"ok":found}));
+        let cache=app.path().app_data_dir().map_err(|e|e.to_string())?.join("codec-engine");
+        let found=tauri::async_runtime::spawn_blocking(move||
+            minternet_cached_ffmpeg(&cache).is_some())
+            .await.map_err(|e|e.to_string())?;
+        return Ok(json!({"ok":true,"installed":found}));
     }
     if name=="media-player-transcode" {
         let kind=value.get("kind").and_then(Value::as_str)
@@ -3408,9 +3490,10 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         let path=app.state::<LocalMediaPath>().0.lock()
             .map_err(|e|e.to_string())?.clone()
             .ok_or("Select a local media file first")?;
-        let ffmpeg=tauri::async_runtime::spawn_blocking(minternet_ffmpeg)
-            .await.map_err(|e|e.to_string())?
-            .ok_or("FFmpeg is required for this codec. Install FFmpeg to enable broader format support.")?;
+        let cache=app.path().app_data_dir().map_err(|e|e.to_string())?.join("codec-engine");
+        let ffmpeg=tauri::async_runtime::spawn_blocking(move||
+            minternet_ensure_ffmpeg(&cache))
+            .await.map_err(|e|e.to_string())??;
         let original=path.clone();
         let output=tauri::async_runtime::spawn_blocking(move||
             minternet_transcode_file(ffmpeg,&original,&kind))
