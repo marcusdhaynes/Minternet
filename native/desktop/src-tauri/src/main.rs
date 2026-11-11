@@ -3403,7 +3403,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
     }
     if name=="media-player-transcode" {
         let kind=value.get("kind").and_then(Value::as_str)
-            .filter(|s|matches!(*s,"audio"|"video"))
+            .filter(|s|matches!(s,"audio"|"video"))
             .ok_or("Unknown media kind")?.to_string();
         let path=app.state::<LocalMediaPath>().0.lock()
             .map_err(|e|e.to_string())?.clone()
