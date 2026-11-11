@@ -657,96 +657,8 @@ fn open_download_file(path:&std::path::Path)->Result<(),String>{
     std::process::Command::new("xdg-open").arg(path).spawn().map_err(|e|e.to_string())?;
     Ok(())
 }
-// A WebView2 popup that has been replaced by a detached tab loses the real
-// window.opener relationship. Firebase Auth and most OAuth popup handshakes
-// depend on it. Keep auth popups in a related native WebView2 window so the
-// login can send its result back to the initiating tab and close normally.
-static NEXT_AUTH_POPUP_ID: AtomicU64 = AtomicU64::new(1);
-
-fn is_auth_popup_url(url: &tauri::Url) -> bool {
-    if url.as_str() == "about:blank" { return true; }
-    if url.scheme() != "https" { return false; }
-    let Some(host) = url.host_str() else { return false };
-    let host = host.to_ascii_lowercase();
-    let path = url.path().to_ascii_lowercase();
-    // Firebase Auth's real popup starts on the app's firebaseapp.com auth
-    // handler and then redirects to accounts.google.com and back again.
-    // Support custom Firebase auth domains as well.
-    if path.starts_with("/__/auth/") { return true; }
-    if matches!(host.as_str(), "accounts.google.com"|"login.microsoftonline.com"|
-        "login.live.com"|"appleid.apple.com"|"id.apple.com"|
-        "github.com"|"login.yahoo.com"|"www.facebook.com") {
-        return host != "github.com" || path.starts_with("/login/oauth/");
-    }
-    // Common OIDC/OAuth authorization endpoints used by other websites.
-    (path.contains("/oauth/") || path.ends_with("/authorize") ||
-        path.ends_with("/authorization") || path.ends_with("/login"))
-        && url.query_pairs().any(|(key,_)| matches!(key.as_ref(),
-            "client_id"|"redirect_uri"|"response_type"|"code_challenge"))
-}
-
-#[cfg(test)]
-mod auth_popup_tests {
-    use super::*;
-    #[test]
-    fn firebase_google_sign_in_popup_keeps_native_opener() {
-        for url in [
-            "https://proseu-working-03-624365-f0705.firebaseapp.com/__/auth/handler?authType=signInViaPopup",
-            "https://accounts.google.com/o/oauth2/v2/auth?client_id=test&response_type=code",
-            "https://auth.example.org/oauth2/authorize?client_id=demo",
-            "about:blank",
-        ] {
-            assert!(is_auth_popup_url(&tauri::Url::parse(url).unwrap()),"{url}");
-        }
-    }
-    #[test]
-    fn fake_oauth_endpoints_must_not_bypass_popup_shield(){
-        assert!(!trusted_auth_destination(&tauri::Url::parse(
-            "https://ads.example/oauth/authorize?client_id=anything").unwrap()));
-        assert!(trusted_auth_destination(&tauri::Url::parse(
-            "https://accounts.google.com/o/oauth2/v2/auth?client_id=test").unwrap()));
-        assert!(trusted_auth_destination(&tauri::Url::parse(
-            "https://test.firebaseapp.com/__/auth/handler?authType=signInViaPopup").unwrap()));
-    }
-    #[test]
-    fn normal_links_still_open_as_minternet_tabs() {
-        for url in [
-            "https://example.com",
-            "https://github.com/example/project",
-            "https://chatgpt.com/",
-            "http://accounts.google.com/o/oauth2/v2/auth?client_id=bad",
-            "file:///etc/passwd",
-        ] {
-            assert!(!is_auth_popup_url(&tauri::Url::parse(url).unwrap()),"{url}");
-        }
-    }
-}
-
-// Firefox and Chrome's store buttons cannot be installed through WebView2
-// by a webpage masquerading as an identity provider. Only known provider
-// origins or self-hosted same-origin OAuth endpoints get opener privileges.
-fn trusted_auth_destination(url:&tauri::Url)->bool{
-    if url.scheme()!="https"{return false;}
-    let host=url.host_str().unwrap_or("").to_ascii_lowercase();
-    let path=url.path().to_ascii_lowercase();
-    if matches!(host.as_str(),
-        "accounts.google.com"|"login.microsoftonline.com"|"login.live.com"|
-        "appleid.apple.com"|"id.apple.com"|"github.com"|
-        "login.yahoo.com"|"www.facebook.com"){
-        return is_auth_popup_url(url);
-    }
-    path.starts_with("/__/auth/") &&
-        (host.ends_with(".firebaseapp.com")||host.ends_with(".web.app"))
-}
-#[cfg(windows)]
-fn intentional_new_tab_shortcut()->bool{
-    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState,VK_CONTROL};
-    // Preserve explicit Ctrl+click new-tab actions even when the destination
-    // is cross-site. Ordinary video Play clicks never qualify.
-    (unsafe {GetAsyncKeyState(VK_CONTROL.0 as i32)}) < 0
-}
-#[cfg(not(windows))]
-fn intentional_new_tab_shortcut()->bool{false}
+// Every website popup keeps its native WebView2 opener and profile.
+static NEXT_POPUP_ID: AtomicU64 = AtomicU64::new(1);
 
 struct PopupDeduper(Mutex<HashMap<(u32,String),Instant>>);
 struct ZoomState(Mutex<f64>);
@@ -2228,110 +2140,48 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                 }
                 return NewWindowResponse::Deny;
             }
-            let opener=for_popup.state::<Mutex<Browser>>().lock().ok()
-                .and_then(|b|b.tabs.iter().find(|t|t.id==id).map(|t|t.url.clone()))
-                .unwrap_or_default();
-            let same_origin_auth=tauri::Url::parse(&opener).ok()
-                .and_then(|source|source.host_str().map(|host|
-                    url.host_str()==Some(host) && url.scheme()=="https"))
-                .unwrap_or(false);
-            let smoke_blank=url.as_str()=="about:blank" &&
-                std::env::args().any(|a|a=="--minternet-auth-popup-smoke") &&
-                opener.starts_with("https://example.com/");
-            let auth_target=smoke_blank ||
-                (is_auth_popup_url(&url) &&
-                 (trusted_auth_destination(&url)||same_origin_auth));
-            let explicit_user_tab=intentional_new_tab_shortcut() &&
-                matches!(url.scheme(),"http"|"https") && url.host_str().is_some();
-            // Check before the auth-popup exception: ad scripts routinely
-            // open about:blank on a Play click and redirect it to an ad.
-            // Keep legitimate OAuth popups and same-site clicks functional.
-            let deny=for_popup.state::<privacy_shield::ShieldState>().0.lock()
-                .map(|settings|{
-                    if url.as_str()=="about:blank"{
-                        privacy_shield::block_blank_popup(&settings,&opener)
-                    } else if auth_target || explicit_user_tab {
-                        false
-                    } else {
-                        privacy_shield::block_popup(&settings,&opener,url.as_str())
+            // All site-created popup windows are allowed. No origin policy,
+            // host list, user-gesture check, rate limit or window cap.
+            let label=format!("site-popup-{}",
+                NEXT_POPUP_ID.fetch_add(1,Ordering::Relaxed));
+            let builder=WebviewWindowBuilder::new(
+                    &for_popup,label,WebviewUrl::External(
+                        tauri::Url::parse("about:blank").expect("valid blank URL")))
+                .window_features(features)
+                .title("Minternet Popup")
+                // Site popup windows cannot silently download files.
+                .on_download(|_view,event|match event{
+                    DownloadEvent::Requested{..}=>false,
+                    _=>true
+                })
+                .inner_size(540.0,680.0)
+                .resizable(true)
+                .on_navigation(|destination| {
+                    (matches!(destination.scheme(),"https"|"http")
+                        && destination.host_str().is_some())
+                    || destination.as_str()=="about:blank"
+                    || (destination.scheme()=="blob"
+                        && (destination.as_str().starts_with("blob:https://")
+                            || destination.as_str().starts_with("blob:http://")))
+                })
+                .on_document_title_changed(|window,title| {
+                    let safe=title.chars().take(100).collect::<String>();
+                    if !safe.is_empty(){let _=window.set_title(&safe);}
+                    if safe=="Minternet OAuth Popup Smoke" &&
+                        std::env::args().any(|a|a=="--minternet-auth-popup-smoke") {
+                        let marker=std::env::temp_dir().join(format!(
+                            "minternet-auth-popup-{}.ok",std::process::id()));
+                        let _=std::fs::write(marker,
+                            "Native WebView2 popup retained opener and rendered title");
                     }
-                }).unwrap_or(false);
-            let deny=deny && !smoke_blank;
-            if deny {
-                let _=for_popup.emit_to("chrome","minternet:shield-blocked",json!({"kind":"popup"}));
-                return NewWindowResponse::Deny;
-            }
-            if auth_target {
-                // Create a real WebView2 popup using the opener's *same*
-                // environment. Passing the original window features is
-                // critical for window.opener, cookies, and private profiles.
-                // Do not navigate it ourselves: WebView2 attaches the new
-                // controller to the original NewWindowRequested handshake.
-                // This also handles apps that first open about:blank.
-                let open_popups = for_popup.webview_windows().keys()
-                    .filter(|name|name.starts_with("auth-popup-")).count();
-                if open_popups >= 8 { return NewWindowResponse::Deny; }
-                let label=format!("auth-popup-{}",
-                    NEXT_AUTH_POPUP_ID.fetch_add(1,Ordering::Relaxed));
-                let builder=WebviewWindowBuilder::new(
-                        &for_popup,label,WebviewUrl::External(
-                            tauri::Url::parse("about:blank").expect("valid blank URL")))
-                    .window_features(features)
-                    .title("Sign in — Minternet")
-                    // Related login windows must never save automatic files.
-                    .on_download(|_webview,event|match event{
-                        DownloadEvent::Requested{..}=>false,
-                        _=>true
-                    })
-                    .inner_size(540.0,680.0)
-                    .resizable(true)
-                    .on_navigation(|destination| {
-                        matches!(destination.scheme(),"https"|"http")
-                            && destination.host_str().is_some()
-                            || destination.as_str()=="about:blank"
-                    })
-                    // Treat remote login content like a website, not app
-                    // chrome. Never add a native bridge or read OAuth codes.
-                    .on_document_title_changed(|window,title| {
-                        let safe=title.chars().take(100).collect::<String>();
-                        if !safe.is_empty(){let _=window.set_title(&safe);}
-                        // Test only: a genuine related popup reached a rendered
-                        // document with its original window.opener intact.
-                        if safe=="Minternet OAuth Popup Smoke" &&
-                            std::env::args().any(|a|a=="--minternet-auth-popup-smoke") {
-                            let marker=std::env::temp_dir().join(format!(
-                                "minternet-auth-popup-{}.ok",std::process::id()));
-                            let _=std::fs::write(marker,
-                                "Native WebView2 popup retained opener and rendered title");
-                        }
-                    });
-                return match builder.build() {
-                    Ok(window)=>NewWindowResponse::Create{window},
-                    Err(error)=>{
-                        eprintln!("Cannot create related sign-in popup: {error}");
-                        NewWindowResponse::Deny
-                    }
-                };
-            }
-            if matches!(url.scheme(),"https"|"http") && url.host_str().is_some() {
-                // Same-site links, allowlisted sources and verified OAuth
-                // requests remain usable; rejected popunders never create tabs.
-                // Normal Ctrl-click and plain-link requests still become
-                // Minternet tabs. Only auth handshakes use a related window.
-                let key=(id,url.to_string());
-                let state=for_popup.state::<PopupDeduper>();
-                let should_open=if let Ok(mut recent)=state.0.lock(){
-                    let now=Instant::now();
-                    recent.retain(|_,t|now.duration_since(*t)<Duration::from_millis(900));
-                    if recent.get(&key).map(|t|now.duration_since(*t)<Duration::from_millis(250)).unwrap_or(false){
-                        false
-                    }else{recent.insert(key,now);true}
-                }else{false};
-                if should_open{
-                    let _=for_popup.emit_to("chrome","minternet:open-tab",json!({"url":url.to_string(),"private":private,"openerTabId":id}));
+                });
+            match builder.build(){
+                Ok(window)=>NewWindowResponse::Create{window},
+                Err(error)=>{
+                    eprintln!("Cannot open related Minternet popup: {error}");
+                    NewWindowResponse::Deny
                 }
             }
-            NewWindowResponse::Deny
         })
         .on_page_load(move |view, event| {
             if matches!(event.event(), PageLoadEvent::Started | PageLoadEvent::Finished) {
