@@ -8,6 +8,7 @@ mod privacy_shield;
 use base64::Engine as _;
 use rand::{rngs::OsRng,RngCore};
 use tauri_plugin_clipboard_manager::ClipboardExt;
+use tauri_plugin_dialog::DialogExt;
 
 use std::{sync::{Mutex,atomic::{AtomicBool,AtomicU64,Ordering}}, collections::{HashSet, HashMap, VecDeque}, path::PathBuf, time::{Instant, Duration}};
 use serde::{Serialize,Deserialize};
@@ -3233,6 +3234,72 @@ fn check_idle_tabs(app:&tauri::AppHandle, minutes:u64) -> Result<(),String>{
     Ok(())
 }
 
+// Open the Windows native picker before showing a media window. Serve only
+// the user-selected file over Tauri's range-capable local asset protocol.
+fn local_media_mime(path:&std::path::Path)->&'static str {
+    match path.extension().and_then(|s|s.to_str()).unwrap_or("")
+        .to_ascii_lowercase().as_str(){
+        "mp3"=>"audio/mpeg","wav"=>"audio/wav","flac"=>"audio/flac",
+        "m4a"|"aac"=>"audio/mp4","ogg"|"oga"=>"audio/ogg",
+        "opus"=>"audio/opus","aif"|"aiff"=>"audio/aiff",
+        "wma"=>"audio/x-ms-wma","mid"|"midi"=>"audio/midi",
+        "mp4"|"m4v"=>"video/mp4","webm"=>"video/webm",
+        "mov"=>"video/quicktime","mkv"=>"video/x-matroska",
+        "avi"=>"video/x-msvideo","wmv"=>"video/x-ms-wmv",
+        "mpg"|"mpeg"=>"video/mpeg","3gp"=>"video/3gpp",
+        "ts"|"m2ts"=>"video/mp2t",
+        _=>"application/octet-stream",
+    }
+}
+fn open_local_media(app:&tauri::AppHandle,selected:&std::path::Path,smoke:bool)
+    ->Result<Value,String>{
+    let path=std::fs::canonicalize(selected)
+        .map_err(|e|format!("Unable to open selected media file: {e}"))?;
+    if !std::fs::metadata(&path).map_err(|e|e.to_string())?.is_file(){
+        return Err("Select a file, not a directory".into());
+    }
+    // Scope starts empty and is expanded only for paths the user picked.
+    // Media streams from disk with byte ranges; no multi-GB JS Blob copy.
+    app.asset_protocol_scope().allow_file(&path).map_err(|e|e.to_string())?;
+    let player=if let Some(existing)=app.get_webview_window("minternet-media-player"){
+        existing
+    }else{
+        WebviewWindowBuilder::new(
+                app,"minternet-media-player",
+                WebviewUrl::App("media-player.html".into()))
+            .title("Minternet Local Media Player")
+            .inner_size(368.0,116.0)
+            .min_inner_size(286.0,64.0)
+            .resizable(true)
+            .decorations(false)
+            .transparent(true)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .visible(false)
+            .build().map_err(|e|format!("Unable to open floating media player: {e}"))?
+    };
+    let url=player.convert_file_src(&path,None).map_err(|e|e.to_string())?;
+    let name=path.file_name().map(|s|s.to_string_lossy().to_string())
+        .unwrap_or_else(||"Local Media".into());
+    let selected=json!({"url":url,"name":name,"mime":local_media_mime(&path),"smoke":smoke});
+    *app.state::<LocalMediaSelection>().0.lock()
+        .map_err(|e|e.to_string())?=Some(selected.clone());
+    let _=app.emit_to("minternet-media-player","minternet:media-selected",selected);
+    player.show().map_err(|e|e.to_string())?;
+    let _=player.set_focus();
+    Ok(json!({"ok":true,"cancelled":false,"name":name}))
+}
+#[cfg(test)]
+mod local_media_tests{
+    use super::*;
+    #[test]
+    fn mime_classification(){
+        assert_eq!(local_media_mime(std::path::Path::new("track.MP3")),"audio/mpeg");
+        assert_eq!(local_media_mime(std::path::Path::new("clip.mp4")),"video/mp4");
+        assert_eq!(local_media_mime(std::path::Path::new("sample.wav")),"audio/wav");
+    }
+}
+
 #[tauri::command]
 fn browser_snapshot(app: tauri::AppHandle) -> Result<Snapshot,String> { snapshot(&app) }
 
@@ -3246,43 +3313,64 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             .map_err(|e|e.to_string())?.clone();
         return Ok(current.unwrap_or(Value::Null));
     }
-    if name=="media-player-open" {
-        // No window is created until the trusted chrome's file picker
-        // has returned a local File and its opaque Blob URL.
-        let blob=value.get("url").and_then(Value::as_str)
-            .filter(|s|s.len()<320).ok_or("Selected local file required")?;
-        let inner=blob.strip_prefix("blob:").ok_or("Only local media can be opened")?;
-        let parsed=tauri::Url::parse(inner).map_err(|e|e.to_string())?;
-        if !matches!(parsed.scheme(),"http"|"https"|"tauri") ||
-            !matches!(parsed.host_str(),Some("tauri.localhost")|Some("localhost")){
-            return Err("Media selection must come from the local Minternet toolbar".into());
+    if name=="media-player-pick" {
+        // This is the OS dialog, parented to the Minternet main window.
+        // It is independent of the WebView's invisible HTML file chooser.
+        let picked=tauri::async_runtime::spawn_blocking({
+            let handle=app.clone();
+            move || {
+                let picker=handle.dialog().file().set_title("Open Audio or Video File");
+                if let Some(main)=handle.get_window("main"){
+                    picker.set_parent(&main).blocking_pick_file()
+                }else{
+                    picker.blocking_pick_file()
+                }
+            }
+        }).await.map_err(|e|format!("Windows file picker unavailable: {e}"))?;
+        let Some(selection)=picked else{
+            return Ok(json!({"ok":true,"cancelled":true}));
+        };
+        let path=selection.into_path()
+            .map_err(|e|format!("Only a local file can be selected: {e}"))?;
+        return open_local_media(&app,&path,false);
+    }
+    if name=="media-player-smoke-open" {
+        if !std::env::args().any(|a|a=="--minternet-media-smoke"){
+            return Err("Media test mode is disabled".into());
         }
-        let name=value.get("name").and_then(Value::as_str)
-            .filter(|s|s.len()<=260).unwrap_or("Local Media");
-        let mime=value.get("mime").and_then(Value::as_str)
-            .filter(|s|s.len()<=130).unwrap_or("");
-        let selected=json!({"url":blob,"name":name,"mime":mime});
-        *app.state::<LocalMediaSelection>().0.lock()
-            .map_err(|e|e.to_string())?=Some(selected.clone());
-        if let Some(player)=app.get_webview_window("minternet-media-player"){
-            let _=app.emit_to("minternet-media-player","minternet:media-selected",selected);
-            let _=player.show();let _=player.set_focus();
-            return Ok(json!({"ok":true,"existing":true}));
+        let samples=vec![128u8;4000];
+        let mut wav=Vec::with_capacity(44+samples.len());
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36u32+samples.len() as u32).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&8000u32.to_le_bytes());
+        wav.extend_from_slice(&8000u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&8u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&(samples.len() as u32).to_le_bytes());
+        wav.extend_from_slice(&samples);
+        let path=std::env::temp_dir().join(format!("minternet-smoke-media-{}.wav",std::process::id()));
+        std::fs::write(&path,wav).map_err(|e|e.to_string())?;
+        return open_local_media(&app,&path,true);
+    }
+    if name=="media-player-smoke-proof" {
+        if !std::env::args().any(|a|a=="--minternet-media-smoke"){
+            return Err("Media test mode is disabled".into());
         }
-        WebviewWindowBuilder::new(
-                &app,"minternet-media-player",
-                WebviewUrl::App("media-player.html".into()))
-            .title("Minternet Local Media Player")
-            .inner_size(368.0,116.0)
-            .min_inner_size(286.0,64.0)
-            .resizable(true)
-            .decorations(false)
-            .transparent(true)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .visible(false)
-            .build().map_err(|e|e.to_string())?;
-        return Ok(json!({"ok":true,"existing":false}));
+        let duration=value.get("duration").and_then(Value::as_f64).unwrap_or(0.);
+        let smoke_selected=app.state::<LocalMediaSelection>().0.lock()
+            .ok().and_then(|v|v.as_ref().and_then(|v|v.get("smoke")).and_then(Value::as_bool));
+        if duration<0.4 || smoke_selected!=Some(true){
+            return Err("The selected local WAV was not decoded".into());
+        }
+        let marker=std::env::temp_dir().join(format!("minternet-media-{}.ok",std::process::id()));
+        std::fs::write(&marker,format!("Native local media player loaded WAV {duration:.3}s"))
+            .map_err(|e|e.to_string())?;
+        return Ok(json!({"ok":true}));
     }
     if name=="volume-get" {
         let state=app.state::<VolumeState>();
@@ -5370,6 +5458,7 @@ fn install_panic_diagnostics(app:&tauri::AppHandle){
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(PopupDeduper(Mutex::new(HashMap::new())))
         .manage(DownloadsState::default())
         .manage(Mutex::new(browsing_history::History::default()))
@@ -5446,6 +5535,7 @@ fn main() {
             let smoke = std::env::args().any(|a| a == "--minternet-smoke");
             let turbo_smoke = std::env::args().any(|a| a == "--minternet-turbo-smoke");
             let auth_popup_smoke = std::env::args().any(|a| a == "--minternet-auth-popup-smoke");
+            let media_smoke = std::env::args().any(|a| a == "--minternet-media-smoke");
             let bookmarks_smoke = std::env::args().any(|a| a == "--minternet-bookmarks-smoke");
             let bookmarks_reopen = std::env::args().any(|a| a == "--minternet-bookmarks-reopen");
             let menus_smoke = std::env::args().any(|a| a == "--minternet-menus-smoke");
@@ -5527,6 +5617,17 @@ fn main() {
                                       await command('stability-smoke-failure',String(error));
                                     }
                                   },800);
+                                "#);
+                            } else if media_smoke {
+                                let _=view.eval(r#"
+                                  setTimeout(async()=>{
+                                    try{
+                                      await window.__TAURI__.core.invoke('browser_action',
+                                        {name:'media-player-smoke-open',value:null});
+                                    }catch(error){
+                                      window.minternetToast?.('Native media smoke failed: '+error);
+                                    }
+                                  },300);
                                 "#);
                             } else if smoke || auth_popup_smoke {
                                 let _ = view.eval(
