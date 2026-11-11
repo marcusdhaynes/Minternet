@@ -32,6 +32,7 @@ struct Store {
     saved:HashMap<String,SiteMedia>,
     ephemeral:HashMap<(u32,String),SiteMedia>,
     tabs:HashMap<u32,TabMedia>,
+    profile_resets:HashMap<u32,String>,
 }
 #[derive(Default)]
 pub struct MediaDeviceState(Mutex<Store>);
@@ -101,6 +102,7 @@ pub fn close_tab(app:&AppHandle,id:u32){
     if let Ok(mut store)=app.state::<MediaDeviceState>().0.lock(){
         store.tabs.remove(&id);
         store.ephemeral.retain(|(tab, _),_|*tab!=id);
+        store.profile_resets.remove(&id);
     }
     inform(app,id);
 }
@@ -254,6 +256,17 @@ fn permission_requested(app:&AppHandle,id:u32,private:bool,origin:&str,
 // A persistent WebView2 decision from an earlier Minternet build can bypass
 // all new handlers. Reset mic/camera state in the profile on configuration
 // changes, allowing the new origin-scoped handler to take effect.
+#[cfg(windows)]
+pub fn reset_old_denials(app:&AppHandle,id:u32,address:&str){
+    let Some(origin)=valid_origin(address)else{return};
+    let should_reset={
+        let store=app.state::<MediaDeviceState>();
+        let Ok(mut state)=store.0.lock()else{return};
+        if state.profile_resets.get(&id).is_some_and(|s|s==&origin){false}
+        else {state.profile_resets.insert(id,origin.clone());true}
+    };
+    if should_reset{clear_webview2_profile(app,id,&origin);}
+}
 #[cfg(windows)]
 pub fn clear_webview2_profile(app:&AppHandle,id:u32,origin:&str){
     use windows::core::{Interface,PCWSTR};
