@@ -6,13 +6,13 @@
   const mediaElements={video:$('localVideo'),audio:$('localAudio')};
   const error=$('mediaError');
   const controls=$('playerControls'),toggle=$('togglePlayback'),scrubber=$('playbackPosition');
-  const close=$('playerClose'),playbackIcon=$('playbackIcon');
+  const close=$('playerClose'),drag=$('dragZone'),playbackIcon=$('playbackIcon');
   const currentTime=$('currentTime'),durationTime=$('durationTime');
   const subtitleToggle=$('subtitleToggle'),subtitlePanel=$('subtitlePanel');
   const subtitlePick=$('subtitlePick'),subtitleOff=$('subtitleOff');
   const subtitleOverlay=$('subtitleOverlay'),subtitleName=$('subtitleName');
   const fullscreenToggle=$('fullscreenToggle');
-  let subtitleCues=[],subtitleEnabled=false,stopHoldTimer=null,holdFired=false;
+  let subtitleCues=[],subtitleEnabled=false,stopHoldTimer=null,holdFired=false,fullscreenActive=false;
   const volume={level:100,muted:false};
   let current=null,url=null,sourceGeneration=0,normalizing=false,normalizingGeneration=0,usedCodecFallback=false;
   const HIDE_DELAY=5000,DRAG_THRESHOLD=5,MIN_VIDEO_WIDTH=80;
@@ -294,6 +294,7 @@
     try{
       const full=await win.isFullscreen();
       await win.setFullscreen(!full);
+      fullscreenActive=!full;
       fullscreenToggle.setAttribute('aria-pressed',String(!full));
       fullscreenToggle.title=full?'Full Screen':'Exit Full Screen';
       showControls();
@@ -418,7 +419,10 @@
   function endGesture(event){
     if(!gesture)return;
     const g=gesture;gesture=null;
-    if(g.resize&&g.dragged)applyResizeGesture(g);
+    if(g.resize&&g.dragged){
+      applyResizeGesture(g);
+      setTimeout(()=>{void snapToEdge();},140);
+    }
     if(!g.dragged&&!g.resize&&event.type==='pointerup')toggle.click();
     showControls();
   }
@@ -433,6 +437,14 @@
   window.addEventListener('pointermove',moveGesture);
   window.addEventListener('pointerup',endGesture);
   window.addEventListener('pointercancel',()=>{gesture=null;});
+  // Audio-only mini-player remains movable through its unobtrusive title strip.
+  drag.addEventListener('pointerdown',event=>{
+    if(current!=='audio'||event.button!==0||!win)return;
+    event.preventDefault();
+    void win.startDragging().then(()=>{
+      void snapToEdge();setTimeout(()=>{void snapToEdge();},140);
+    }).catch(()=>{});
+  });
   close.addEventListener('click',()=>{
     for(const media of Object.values(mediaElements))media.pause();
     // Native scope grants live only for the media selected in this session.
@@ -445,7 +457,7 @@
   const SNAP=26;
   let snapTimer=null,snapping=false;
   async function snapToEdge(){
-    if(!win||snapping||current!=='video')return;
+    if(!win||snapping||fullscreenActive||gesture?.resize||resizingVideo)return;
     snapping=true;
     try{
       const [monitor,position,size,targets]=await Promise.all([
@@ -468,7 +480,7 @@
   }
   if(win){
     void win.onMoved(()=>{
-      if(snapping||current!=='video')return;
+      if(snapping||fullscreenActive)return;
       if(snapTimer!==null)clearTimeout(snapTimer);
       snapTimer=setTimeout(()=>{snapTimer=null;void snapToEdge();},175);
     }).catch(()=>{});
@@ -505,7 +517,11 @@
     }
     if(event.key==='Escape'&&current){
       void win?.isFullscreen().then(full=>{
-        if(full){void win.setFullscreen(false);fullscreenToggle.setAttribute('aria-pressed','false');}
+        if(full){
+          fullscreenActive=false;
+          void win.setFullscreen(false);
+          fullscreenToggle.setAttribute('aria-pressed','false');
+        }
         else close.click();
       }).catch(()=>close.click());return;
     }
