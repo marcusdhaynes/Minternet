@@ -62,14 +62,17 @@
       row.className='downloads-entry'+(completed?' downloads-draggable':'');
       row.dataset.downloadId=String(entry.id);
       const symbol=document.createElement('span');symbol.className='downloads-entry-symbol';
-      symbol.textContent=completed?'✓':entry.status==='invalid'?'!':entry.status==='failed'?'!':'↓';
+      symbol.textContent=completed?'✓':
+        ['blocked','invalid','failed','interrupted'].includes(entry.status)?'!':'↓';
       const details=document.createElement('div');details.className='downloads-entry-details';
       const name=document.createElement('strong');name.textContent=entry.name;
       name.title=entry.name;
       const status=document.createElement('span');
       status.textContent=completed?'Ready · Drag out to desktop or a folder':
+        entry.status==='blocked'?'Blocked: unsafe or mislabeled executable':
         entry.status==='invalid'?'Invalid executable: server returned non-EXE data':
-        entry.status==='failed'?'Download failed':entry.status==='interrupted'?'Interrupted':'Downloading…';
+        entry.status==='failed'?'Download failed':
+        entry.status==='interrupted'?'Interrupted':'Downloading…';
       details.append(name,status);
       if(entry.status==='downloading'){
         const bar=document.createElement('div');bar.className='downloads-progress';
@@ -189,7 +192,7 @@
     clear.textContent='Clear';clear.title='Clear download history (does not delete files)';
     clear.addEventListener('click',async()=>{
       const result=await command('downloads-clear');
-      if(result?.ok){entries=[];render();}
+      if(result?.ok){await refresh();render();}
     });
     header.append(title,clear);
     const list=document.createElement('div');list.className='downloads-entries';
