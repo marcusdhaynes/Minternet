@@ -244,9 +244,9 @@ pub fn clear_webview2_profile(app:&AppHandle,id:u32,origin:&str){
     let Some(webview)=app.get_webview(&format!("tab-{id}"))else{return};
     let Some(origin)=valid_origin(origin)else{return};
     let _=webview.with_webview(move|native|{
-        let Ok(core)=unsafe{native.controller().CoreWebView2()}else{return};
+        let Ok(core)=(unsafe{native.controller().CoreWebView2()})else{return};
         let Ok(rev13)=core.cast::<ICoreWebView2_13>()else{return};
-        let Ok(profile)=unsafe{rev13.Profile()}else{return};
+        let Ok(profile)=(unsafe{rev13.Profile()})else{return};
         let Ok(p4)=profile.cast::<ICoreWebView2Profile4>()else{return};
         let wide=origin.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
         for kind in [COREWEBVIEW2_PERMISSION_KIND_MICROPHONE,
@@ -264,7 +264,7 @@ pub fn set_tab_output(app:&AppHandle,id:u32,mute:bool){
     use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_8;
     let Some(webview)=app.get_webview(&format!("tab-{id}"))else{return};
     let _=webview.with_webview(move|native|{
-        let Ok(core)=unsafe{native.controller().CoreWebView2()}else{return};
+        let Ok(core)=(unsafe{native.controller().CoreWebView2()})else{return};
         let Ok(v8)=core.cast::<ICoreWebView2_8>()else{return};
         let _=unsafe{v8.SetIsMuted(mute)};
     });
@@ -276,7 +276,7 @@ pub fn attach(app:&AppHandle,id:u32,view:&tauri::Webview,private:bool){
     let requested_app=app.clone();
     let telemetry_app=app.clone();
     let _=view.with_webview(move|native|{
-        let Ok(core)=unsafe{native.controller().CoreWebView2()}else{return};
+        let Ok(core)=(unsafe{native.controller().CoreWebView2()})else{return};
         // WebView2 passes the ACTUAL requesting frame URI, unlike the Tauri
         // generic permission callback which only supplies a permission kind.
         let permission=webview2_com::PermissionRequestedEventHandler::create(
