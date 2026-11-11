@@ -34,35 +34,36 @@ test('Downloads notification resets on panel review, but future downloads still 
   assert.match(downloads,/badge\.hidden=true/);
 });
 
-test('Native WebView2 blocker honors authentication popup and configurable rules',()=>{
+test('Native WebView2 allows popups while preserving separate page policies',()=>{
   const main=source('native/desktop/src-tauri/src/main.rs');
   const shield=source('native/desktop/src-tauri/src/privacy_shield.rs');
   assert.match(main,/mod privacy_shield;/);
   assert.match(main,/\.initialization_script\(privacy_shield::script/);
   assert.match(main,/if auth_target \{/);
-  assert.match(main,/privacy_shield::block_popup/);
+  assert.match(main,/NEXT_POPUP_ID\.fetch_add\(1,Ordering::Relaxed\)/);
+  assert.match(main,/NewWindowResponse::Create\{window\}/);
+  assert.doesNotMatch(main,/privacy_shield::block_popup|privacy_shield::block_blank_popup/);
   assert.match(main,/restore_visible_surfaces/);
-  assert.match(shield,/pub fn block_popup/);
+  assert.doesNotMatch(shield,/pub fn block_popup|pub fn block_blank_popup/);
   assert.match(shield,/pub fn block_navigation/);
   assert.match(shield,/fn host_matches/);
   assert.match(shield,/username|host_matches/);
 });
 
-test('Click-triggered third-party popunders are denied before OAuth popup creation',()=>{
+test('Website popup creation has no domain/origin filters, count caps or deduplication',()=>{
   const native=source('native/desktop/src-tauri/src/main.rs');
-  const policy=source('native/desktop/src-tauri/src/privacy_shield.rs');
-  assert.match(native,/let deny=for_popup\.state::<privacy_shield::ShieldState>/);
-  assert.match(native,/privacy_shield::block_blank_popup\(&settings,&opener\)/);
-  assert.match(native,/if auth_target \{/);
-  assert.match(policy,/high_risk_popup_source/);
-  assert.match(policy,/123moviesfree\.net/);
-  assert.match(policy,/built_in_popup/);
-  assert.match(policy,/Cross-site popups are denied by default in both/);
-  // A native denied popup supplies a dummy WindowProxy; the page must never
-  // receive null from our own window.open override and abort video playback.
-  assert.doesNotMatch(policy,/window\.open\s*=\s*function/);
-  assert.doesNotMatch(policy,/return\s+null\s*;\s*\}\s*return\s+Reflect\.apply\(originalOpen/);
-  assert.match(policy,/Do not replace window\.open/);
+  const shield=source('native/desktop/src-tauri/src/privacy_shield.rs');
+  const a=native.indexOf('.on_new_window(move |url, features|');
+  const b=native.indexOf('.on_page_load(move |view, event|',a);
+  assert.ok(a>0 && b>a);
+  const handler=native.slice(a,b);
+  assert.match(handler,/WebviewWindowBuilder::new/);
+  assert.match(handler,/window_features\(features\)/);
+  assert.match(handler,/NewWindowResponse::Create\{window\}/);
+  assert.match(handler,/DownloadEvent::Requested\{\.\.\}=>false/);
+  assert.doesNotMatch(handler,/block_popup|block_blank_popup|built_in_popup|should_open|open_popups|>= 8|shield-blocked/);
+  assert.doesNotMatch(shield,/fn block_popup|fn block_blank_popup|fn built_in_popup|fn high_risk_popup_source/);
+  assert.doesNotMatch(shield,/window\.open\s*=\s*function/);
 });
 
 test('Favicons are restored from validated persistent bytes, never persisted for private-only sites',()=>{
@@ -101,12 +102,12 @@ test('Injected popup and login scripts compile before they are sent to WebView2'
   new vm.Script(loginScript[1],{filename:'login_form_autofill.js'});
 });
 
-test('Balanced prioritizes blocking cross-site ad windows on video clicks',()=>{
-  const policy=source('native/desktop/src-tauri/src/privacy_shield.rs');
-  assert.match(policy,/Cross-site popups are denied by default in both/);
-  assert.match(policy,/cdn-streaming-player\.example\/embed/);
-  assert.match(policy,/popads\.net\/landing/);
-  assert.match(policy,/p\.mode="strict"\.into\(\)/);
-  assert.match(policy,/p\.mode="balanced"\.into\(\)/);
-  assert.match(policy,/assert!\(block_blank_popup\(&p,"https:\/\/www\.example\.org\/login"\)\)/);
+test('Android and iOS both accept JavaScript-created popup windows',()=>{
+  const android=source('native/android/app/src/main/java/app/minternet/browser/MainActivity.java');
+  const ios=source('native/ios/Sources/MinternetApp.swift');
+  assert.match(android,/setJavaScriptCanOpenWindowsAutomatically\(true\)/);
+  assert.doesNotMatch(android,/if\(!userGesture\)return false/);
+  assert.match(ios,/javaScriptCanOpenWindowsAutomatically = true/);
+  assert.match(ios,/adoptedView: child/);
+  assert.match(ios,/return state\.newTab\(privateMode: privateSource, adoptedView: child\)/);
 });
