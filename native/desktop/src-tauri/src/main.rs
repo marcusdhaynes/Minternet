@@ -412,13 +412,23 @@ fn restore_recent_downloads(app:&tauri::AppHandle){
         history.push_back(entry);
     }
 }
+// Keep server-suggested Unicode filenames but reject traversal/control chars.
+fn safe_download_filename(value:&str)->String{
+    let filtered=value.chars().take(160).map(|c|{
+        if c.is_control()||matches!(c,'<'|'>'|':'|'"'|'/'|'\\'|'|'|'?'|'*'){'_'}else{c}
+    }).collect::<String>();
+    let name=filtered.trim_matches(|c:char|c=='.'||c==' ').to_string();
+    if name.is_empty(){return "download".into();}
+    let stem=name.split('.').next().unwrap_or("").to_ascii_uppercase();
+    if matches!(stem.as_str(),"CON"|"PRN"|"AUX"|"NUL"|
+        "COM1"|"COM2"|"COM3"|"COM4"|"COM5"|"COM6"|"COM7"|"COM8"|"COM9"|
+        "LPT1"|"LPT2"|"LPT3"|"LPT4"|"LPT5"|"LPT6"|"LPT7"|"LPT8"|"LPT9"){
+        format!("_{name}")
+    }else{name}
+}
 fn download_name(url:&tauri::Url)->String{
     let segment=url.path_segments().and_then(|mut segments|segments.next_back()).unwrap_or("download");
-    let cleaned=segment.chars().map(|c|{
-        if c.is_ascii_alphanumeric() || matches!(c,'.'|'-'|'_'|'('|')'|' ') {c} else {'_'}
-    }).collect::<String>();
-    let name=cleaned.trim_matches(|c:char|c=='.'||c==' ').chars().take(120).collect::<String>();
-    if name.is_empty() {"download".into()}else{name}
+    safe_download_filename(segment)
 }
 fn download_path(app:&tauri::AppHandle,url:&tauri::Url,suggested:&std::path::Path)->Result<PathBuf,String>{
     let dir=configured_download_folder(app)?;
@@ -426,11 +436,8 @@ fn download_path(app:&tauri::AppHandle,url:&tauri::Url,suggested:&std::path::Pat
     // destination. Prefer that over a generic /download URL, but never trust
     // its directory or any unsafe filename characters.
     let supplied=suggested.file_name().and_then(|v|v.to_str()).unwrap_or("");
-    let safe=supplied.chars().map(|c|{
-        if c.is_ascii_alphanumeric() || matches!(c,'.'|'-'|'_'|'('|')'|' ') {c} else {'_'}
-    }).collect::<String>();
-    let safe=safe.trim_matches(|c:char|c=='.'||c==' ').chars().take(120).collect::<String>();
-    let original=if safe.is_empty(){download_name(url)}else{safe};
+    let original=if supplied.is_empty(){download_name(url)}
+        else{safe_download_filename(supplied)};
     let candidate=std::path::Path::new(&original);
     let stem=candidate.file_stem().and_then(|n|n.to_str()).unwrap_or("download");
     let extension=candidate.extension().and_then(|n|n.to_str()).unwrap_or("");
@@ -446,6 +453,18 @@ fn download_path(app:&tauri::AppHandle,url:&tauri::Url,suggested:&std::path::Pat
         }
     }
     Err("Too many files with this name in Downloads".into())
+}
+#[cfg(test)]
+mod safe_download_filename_tests{
+    use super::safe_download_filename;
+    #[test]
+    fn preserves_unicode_and_sanitizes_windows_path_names(){
+        assert_eq!(safe_download_filename("رسالة اليمن.pdf"),"رسالة اليمن.pdf");
+        assert_eq!(safe_download_filename("Laporan wakaf.docx"),"Laporan wakaf.docx");
+        assert_eq!(safe_download_filename("CON.txt"),"_CON.txt");
+        assert_eq!(safe_download_filename("../test\\paper?.pdf"),"_test_paper_.pdf");
+        assert_eq!(safe_download_filename("  "),"download");
+    }
 }
 // Server URLs often end in /download or .txt even when the response is a
 // genuine executable. Detect the actual file signature AFTER a completed
