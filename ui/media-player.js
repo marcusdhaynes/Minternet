@@ -30,7 +30,7 @@
   }
   const active=()=>current&&mediaElements[current];
   // The local asset protocol is not the webview page's origin. Passing it through
-  // createMediaElementSource can permanently silence the entire media element
+  // a Web Audio media-source node can permanently silence the media element
   // under Web Audio's cross-origin security rules, even for ordinary WAV/MP3.
   // Use the media element's own native output path for ALL local files.
   function applyVolume(){
