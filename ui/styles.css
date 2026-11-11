@@ -2006,3 +2006,8 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { di
   box-shadow:0 4px 18px #000a;
 }
 #minternetMediaStatus[hidden]{display:none!important;}
+
+/* Local media is opened through the native OS dialog, never a transparent
+   HTML input. Keep the toolbar control keyboard- and mouse-accessible. */
+.toolbar-actions #mediaPlayerButton{position:relative;cursor:pointer;overflow:visible;}
+.toolbar-actions #mediaPlayerButton[aria-busy="true"]{opacity:.7;}
