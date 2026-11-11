@@ -51,7 +51,8 @@ test('preserve aspect-lock, five-second fade and native content/taskbar queries'
   assert.match(player,/media-player-snap-targets/);
   assert.match(player,/win\.onMoved/);
   assert.doesNotMatch(css,/\.player-controls:focus-within/);
-  assert.match(css,/controls-idle \.player-controls\{opacity:0;pointer-events:none;\}/);
+  assert.match(css,/controls-idle \.player-controls\{/);
+  assert.match(css,/opacity:0;transform:translateY\(6px\);pointer-events:none;/);
   assert.match(native,/\.resizable\(false\)/);
   assert.match(native,/if name=="media-player-snap-targets"/);
   assert.match(native,/chrome_top\(&app\)/);
