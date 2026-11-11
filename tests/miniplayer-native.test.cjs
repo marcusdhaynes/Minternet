@@ -88,6 +88,10 @@ test('native path picker gives scoped byte-range media URL, without file copies'
   assert.match(player,/media-player-transcode/);
   assert.match(rust,/if name=="media-player-transcode"/);
   assert.match(rust,/fn minternet_transcode_file/);
+  assert.match(rust,/fn minternet_ensure_ffmpeg/);
+  assert.match(rust,/SHA256:&str/);
+  assert.match(rust,/zip::ZipArchive/);
+  assert.match(cargo,/zip = \{/);
   assert.doesNotMatch(html,/id="chooseFile"|id="mediaFile"/);
   assert.match(html,/http:\/\/asset\.localhost/);
   new vm.Script(player);
