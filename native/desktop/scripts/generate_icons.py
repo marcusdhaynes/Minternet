@@ -118,14 +118,15 @@ def png(target, size, opaque=False):
 
 DESKTOP.mkdir(parents=True, exist_ok=True)
 png(DESKTOP / "icon.png", 1024)
-# All Windows shell sizes retain genuine transparency, including 16 / 24 px.
-# Enlarge the actual Windows shortcut symbol by 10% inside its ICO canvas.
-# The transparent outside stays transparent; macOS/Android/iOS are unaffected.
-windows_symbol = icon(512)
-enlarged_side = round(512 * 1.10)
-windows_symbol = windows_symbol.resize((enlarged_side, enlarged_side), resample)
-offset = (enlarged_side - 512) // 2
-windows_symbol = windows_symbol.crop((offset, offset, offset + 512, offset + 512))
+# Windows shell badges need a little breathing room at 16–48 pixels.
+# The previous 110% zoom/crop clipped the circular ring on desktop shortcuts.
+# Draw the ORIGINAL circular artwork at 95% on a fully transparent ICO canvas:
+# no cropping, no halos, and no changes to the rabbit's details or other OS icons.
+windows_symbol = Image.new("RGBA", (512, 512), (0, 0, 0, 0))
+ring_side = round(512 * 0.95)
+ring_artwork = icon(512).resize((ring_side, ring_side), resample)
+inset = (512 - ring_side) // 2
+windows_symbol.alpha_composite(ring_artwork, (inset, inset))
 windows_symbol.save(
     DESKTOP / "icon.ico",
     format="ICO",
