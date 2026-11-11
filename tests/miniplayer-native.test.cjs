@@ -77,7 +77,7 @@ test('native path picker gives scoped byte-range media URL, without file copies'
   assert.match(player,/media-player-current/);
   assert.match(player,/startDragging/);
   assert.match(player,/sizeToVideo/);
-  assert.match(player,/videoWidth\/videoHeight/);
+  assert.match(player,/videoWidth\/v\.videoHeight/);
   assert.match(player,/DRAG_THRESHOLD=5/);
   assert.match(player,/HIDE_DELAY=5000/);
   assert.match(player,/controls-idle/);
