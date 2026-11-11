@@ -4,91 +4,98 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
 const path=require('node:path');
-const read=file=>fs.readFileSync(path.join(__dirname,'..',file),'utf8');
-test('Minternet has a separate trusted media window and compact button before Tor',()=>{
-  const native=read('native/desktop/src-tauri/src/main.rs');
-  const html=read('ui/index.html');
-  const caps=JSON.parse(read('native/desktop/src-tauri/capabilities/default.json'));
-  assert.match(native,/if name=="media-player-open"/);
-  assert.match(native,/WebviewUrl::App\("media-player.html"\.into\(\)\)/);
-  assert.match(native,/\.always_on_top\(true\)/);
-  assert.match(native,/\.transparent\(true\)/);
-  assert.ok(html.indexOf('id="mediaPlayerButton"')<html.indexOf('id="tor"'));
-  const player=JSON.parse(read('native/desktop/src-tauri/capabilities/media-player.json'));
-  assert.deepEqual(caps.webviews,['chrome']);
-  assert.deepEqual(caps.windows,['main']);
-  assert.deepEqual(player.webviews,['minternet-media-player']);
-  assert.ok(player.permissions.includes('core:window:allow-start-resize-dragging'));
-});
-test('media player uses local user-picked Blob and supports floating audio/video modes',()=>{
-  const js=read('ui/media-player.js');
-  new vm.Script(js);
-  const launch=read('ui/media-launch.js');
-  new vm.Script(launch);
-  assert.match(launch,/picker\.files\?\.\[0\]/);
-  assert.match(launch,/URL\.createObjectURL\(file\)/);
-  assert.match(read('ui/index.html'),/id="minternetMediaPicker" type="file"/);
-  assert.doesNotMatch(launch,/picker\.click\(\)/);
-  assert.match(js,/selectSource\(selected\)/);
-  assert.match(js,/media-player-current/);
-  assert.match(js,/body\.dataset\.mode=current/);
-  assert.match(js,/win\.startDragging\(\)/);
-  assert.match(js,/startResizeDragging\('SouthEast'\)/);
-  assert.match(js,/win\.currentMonitor\(\)/);
-  assert.match(js,/PhysicalPosition\(x,y\)/);
-  assert.match(js,/audioContext\.createGain\(\)/);
-  assert.match(js,/minternet:media-volume/);
-  assert.match(js,/volume\.level\/100/);
-  assert.doesNotMatch(js,/fetch\(|XMLHttpRequest|\.send\(/);
-});
-test('browser compositor is notified after bounds and window move, preserving site DOM',()=>{
- const native=read('native/desktop/src-tauri/src/main.rs');
- assert.match(native,/NotifyParentWindowPositionChanged/);
- assert.match(native,/notify_native_compositor\(&view\)/);
- assert.match(native,/WindowEvent::Moved\(_\)/);
- assert.match(native,/schedule_surface_restore\(&handle\)/);
- assert.doesNotMatch(native,/view\.eval\("location\.reload\(\)"/);
-});
+const read=f=>fs.readFileSync(path.join(__dirname,'..',f),'utf8');
 
-test('direct media chooser accepts a real user click and cancellation opens nothing',()=>{
- const markup=read('ui/index.html'),launch=read('ui/media-launch.js');
- const native=read('native/desktop/src-tauri/src/main.rs'),styles=read('ui/styles.css');
- const start=markup.indexOf('<label id="mediaPlayerButton"');
- const end=markup.indexOf('</label>',start);
- assert.ok(start>=0&&end>start);
- const label=markup.slice(start,end);
- assert.match(label,/id="minternetMediaPicker" type="file"/);
- assert.match(styles,/#minternetMediaPicker\{/);
- assert.match(styles,/opacity:0!important;display:block!important/);
- assert.doesNotMatch(launch,/picker\.click\(\)|picker\.hidden=true|if\(!button\|\|!window\.minternet\)return/);
- assert.match(launch,/if\(!file\|\|busy\)return/);
- assert.match(launch,/picker\.addEventListener\('change'/);
- assert.match(launch,/window\.minternet\.command\('media-player-open'/);
- assert.match(launch,/Native Minternet bridge is unavailable/);
- assert.match(native,/\.visible\(false\)/);
- assert.match(native,/if name=="media-player-current"/);
+test('media toolbar uses the native Windows Open File dialog on a normal button click',async()=>{
+  const html=read('ui/index.html'),launcher=read('ui/media-launch.js');
+  const native=read('native/desktop/src-tauri/src/main.rs');
+  const cargo=read('native/desktop/src-tauri/Cargo.toml');
+  assert.ok(html.indexOf('id="mediaPlayerButton"')<html.indexOf('id="tor"'));
+  assert.match(html,/<button id="mediaPlayerButton"/);
+  assert.doesNotMatch(html,/id="minternetMediaPicker"/);
+  assert.doesNotMatch(launcher,/createObjectURL|picker\.click\(\)|getElementById\('minternetMediaPicker'\)/);
+  assert.match(native,/if name=="media-player-pick"/);
+  assert.match(native,/\.set_parent\(&main\)\.blocking_pick_file\(\)/);
+  assert.match(native,/\.plugin\(tauri_plugin_dialog::init\(\)\)/);
+  assert.match(cargo,/tauri-plugin-dialog = "2"/);
+  new vm.Script(launcher);
 });
-test('media chooser reports the real native failure instead of silently doing nothing',async()=>{
- const launch=read('ui/media-launch.js');
- const events={},toasts=[];
- let picker={files:[{name:'clip.mp4',size:1200,type:'video/mp4'}],value:'sample',
-   disabled:false,addEventListener(n,fn){events[n]=fn}};
- let button={classList:{add(){},remove(){}}};
- const fakeWindow={
-   minternet:{command:async()=>({message:'Local media could not be opened'})},
-   minternetToast:s=>toasts.push(s),addEventListener(){},
- };
- const fakeDocument={getElementById(id){
-   if(id==='mediaPlayerButton')return button;
-   if(id==='minternetMediaPicker')return picker;
-   return null;
- }};
- vm.runInNewContext(launch,{window:fakeWindow,document:fakeDocument,
-   URL:{createObjectURL:()=> 'blob:http://tauri.localhost/1234',
-        revokeObjectURL(){}},setTimeout});
- assert.equal(typeof events.change,'function');
- await events.change();
- assert.equal(toasts.length,1);
- assert.match(toasts[0],/Local media could not be opened/);
- assert.equal(picker.disabled,false);
+test('click calls native IPC exactly once and cancel leaves the player closed',async()=>{
+  const src=read('ui/media-launch.js');
+  const handlers={},calls=[];
+  const button={
+    disabled:false,
+    setAttribute(){},removeAttribute(){},
+    addEventListener(name,handler){handlers[name]=handler}
+  };
+  const fakeWindow={__TAURI__:{core:{invoke:async(name,payload)=>{
+    calls.push({name,payload});
+    return {ok:true,cancelled:true};
+  }}}};
+  const fakeDocument={getElementById:id=>id==='mediaPlayerButton'?button:null};
+  vm.runInNewContext(src,{window:fakeWindow,document:fakeDocument,setTimeout:()=>{}});
+  assert.equal(typeof handlers.click,'function');
+  await handlers.click();
+  assert.equal(calls.length,1);
+  assert.equal(calls[0].name,'browser_action');
+  assert.equal(calls[0].payload.name,'media-player-pick');
+  assert.equal(button.disabled,false);
+});
+test('errors from the native Windows dialog are visible to the user',async()=>{
+  const src=read('ui/media-launch.js');
+  const handlers={};
+  const button={disabled:false,setAttribute(){},removeAttribute(){},
+    addEventListener(n,fn){handlers[n]=fn}};
+  const message={id:'minternetMediaStatus',textContent:'',hidden:true};
+  const root={
+    getElementById:id=>id==='mediaPlayerButton'?button:id==='minternetMediaStatus'?message:null
+  };
+  const fakeWindow={__TAURI__:{core:{invoke:async()=>{
+    throw new Error('Windows file picker failed');
+  }}}};
+  vm.runInNewContext(src,{window:fakeWindow,document:root,setTimeout:()=>{}});
+  await handlers.click();
+  assert.match(message.textContent,/Windows file picker failed/);
+  assert.equal(message.hidden,false);
+  assert.equal(button.disabled,false);
+});
+test('native path picker gives scoped byte-range media URL, without file copies',()=>{
+  const rust=read('native/desktop/src-tauri/src/main.rs');
+  const conf=JSON.parse(read('native/desktop/src-tauri/tauri.conf.json'));
+  const cargo=read('native/desktop/src-tauri/Cargo.toml');
+  const player=read('ui/media-player.js');
+  const html=read('ui/media-player.html');
+  assert.equal(conf.app.security.assetProtocol.enable,true);
+  assert.deepEqual(conf.app.security.assetProtocol.scope,[]);
+  assert.match(conf.app.security.csp,/media-src 'self' blob: asset: http:\/\/asset\.localhost/);
+  assert.match(cargo,/protocol-asset/);
+  assert.match(rust,/asset_protocol_scope\(\)\.allow_file\(&path\)/);
+  assert.match(rust,/player\.convert_file_src\(&path,None\)/);
+  assert.match(rust,/if name=="media-player-current"/);
+  assert.match(rust,/if name=="media-player-pick"/);
+  assert.match(player,/asset\.localhost/);
+  assert.match(player,/media-player-current/);
+  assert.match(player,/startDragging/);
+  assert.match(player,/startResizeDragging/);
+  assert.match(player,/minternet:media-volume/);
+  assert.doesNotMatch(html,/id="chooseFile"|id="mediaFile"/);
+  assert.match(html,/http:\/\/asset\.localhost/);
+  new vm.Script(player);
+});
+test('Windows workflow includes a real WAV playback smoke test',()=>{
+  const rust=read('native/desktop/src-tauri/src/main.rs');
+  const workflow=read('.github/workflows/native-windows.yml');
+  const player=read('ui/media-player.js');
+  assert.match(rust,/if name=="media-player-smoke-open"/);
+  assert.match(rust,/if name=="media-player-smoke-proof"/);
+  assert.match(rust,/wav\.extend_from_slice\(b"RIFF"\)/);
+  assert.match(workflow,/--minternet-media-smoke/);
+  assert.match(workflow,/minternet-media-/);
+  assert.match(player,/loadedmetadata/);
+});
+test('white-screen compositor fix remains enabled',()=>{
+  const native=read('native/desktop/src-tauri/src/main.rs');
+  assert.match(native,/NotifyParentWindowPositionChanged/);
+  assert.match(native,/schedule_surface_restore/);
+  assert.doesNotMatch(native,/view\.eval\("location\.reload\(\)"/);
 });
