@@ -3260,7 +3260,7 @@ fn open_local_media(app:&tauri::AppHandle,selected:&std::path::Path,smoke:bool)
     }
     // Scope starts empty and is expanded only for paths the user picked.
     // Media streams from disk with byte ranges; no multi-GB JS Blob copy.
-    app.asset_protocol_scope().allow_file(&path).map_err(|e|e.to_string())?;
+    app.state::<tauri::scope::Scopes>().allow_file(&path).map_err(|e|e.to_string())?;
     let player=if let Some(existing)=app.get_webview_window("minternet-media-player"){
         existing
     }else{
