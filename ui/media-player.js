@@ -10,6 +10,7 @@
   const volume={level:100,muted:false};
   let current=null,url=null,sourceGeneration=0,normalizing=false,normalizingGeneration=0,usedCodecFallback=false;
   const HIDE_DELAY=5000,DRAG_THRESHOLD=5,MIN_VIDEO_WIDTH=80;
+  let controlsDelay=HIDE_DELAY;
   const geometry=window.MinternetMediaGeometry;
   let controlsTimer=null,lastVideoRatio=16/9,gesture=null;
   let pendingVideoSize=null,resizingVideo=false,metadataSizedGeneration=0;
@@ -17,9 +18,16 @@
     if(current!=='video')return;
     document.body.classList.remove('controls-idle');
     clearTimeout(controlsTimer);
-    controlsTimer=setTimeout(()=>{
-      if(!gesture)document.body.classList.add('controls-idle');
-    },HIDE_DELAY);
+    if(controlsDelay>0){
+      controlsTimer=setTimeout(()=>{
+        if(!gesture)document.body.classList.add('controls-idle');
+      },controlsDelay);
+    }
+  }
+  function setFadeSeconds(seconds){
+    if(!Number.isInteger(seconds)||seconds<0||seconds>300)return;
+    controlsDelay=seconds*1000;
+    showControls();
   }
   function videoRatio(){
     const v=mediaElements.video;
@@ -27,7 +35,8 @@
   }
   async function sizeToVideo(width){
     if(!win||current!=='video')return;
-    pendingVideoSize=geometry.aspectSize(width,videoRatio(),MIN_VIDEO_WIDTH,45);
+    const dims=geometry.aspectSize(width,videoRatio(),MIN_VIDEO_WIDTH,45);
+    pendingVideoSize=dims;
     if(resizingVideo)return;
     resizingVideo=true;
     try{
@@ -221,26 +230,79 @@
   root.addEventListener('pointerdown',showControls);
   controls.addEventListener('focusin',showControls);
   controls.addEventListener('input',showControls);
-  function startGesture(event,isResize=false){
-    if(event.button!==0||!win||current!=='video')return;
+  // All four edges and all corners resize. In addition, Shift+drag or
+  // right-drag anywhere in the video resizes without sacrificing left-drag
+  // to move, or a click to toggle playback.
+  const EDGE_HIT=13;
+  function edgeAt(event){
+    const bounds=root.getBoundingClientRect();
+    const x=event.clientX-bounds.left,y=event.clientY-bounds.top;
+    return (x<=EDGE_HIT?'l':x>=bounds.width-EDGE_HIT?'r':'')+
+           (y<=EDGE_HIT?'t':y>=bounds.height-EDGE_HIT?'b':'');
+  }
+  function edgeCursor(edges){
+    if(edges==='lt'||edges==='rb')return 'nwse-resize';
+    if(edges==='rt'||edges==='lb')return 'nesw-resize';
+    if(edges==='l'||edges==='r')return 'ew-resize';
+    if(edges==='t'||edges==='b')return 'ns-resize';
+    return 'grab';
+  }
+  function startGesture(event){
+    if(!win||current!=='video'||(event.button!==0&&event.button!==2))return;
+    if(event.target.closest?.('.player-controls,.player-close,#mediaError') &&
+        event.target!==resize)return;
+    const edges=event.target===resize?'rb':edgeAt(event);
+    const isResize=Boolean(edges)||event.shiftKey||event.button===2;
+    // Arbitrary-surface resizes anchor at the lower-right corner.
+    const anchor=edges||'rb';
     event.preventDefault();
     event.stopPropagation();
-    gesture={x:event.screenX,y:event.screenY,resize:isResize,
-      width:window.innerWidth,dragged:false,requestedWidth:window.innerWidth};
-    event.currentTarget.setPointerCapture?.(event.pointerId);
+    const g={x:event.screenX,y:event.screenY,resize:isResize,edges:anchor,
+      width:window.innerWidth,height:window.innerHeight,
+      dragged:false,requestedWidth:window.innerWidth,
+      initialPosition:null,scale:1,desiredPosition:null};
+    gesture=g;
+    root.setPointerCapture?.(event.pointerId);
+    if(isResize){
+      void Promise.all([win.outerPosition(),win.scaleFactor()]).then(([position,scale])=>{
+        g.initialPosition=position;
+        g.scale=Number.isFinite(scale)&&scale>0?scale:1;
+        if(g.dragged)applyResizeGesture(g);
+      }).catch(()=>{});
+    }
     showControls();
+  }
+  function applyResizeGesture(g){
+    if(!g.initialPosition)return;
+    const ratio=videoRatio(),dx=g.deltaX||0,dy=g.deltaY||0;
+    const side=g.edges;
+    const xWidth=side.includes('l')?-dx:dx;
+    const yWidth=(side.includes('t')?-dy:dy)*ratio;
+    let change;
+    if(side.length===2){
+      change=Math.abs(xWidth)>=Math.abs(yWidth)?xWidth:yWidth;
+    }else if(side.includes('l')||side.includes('r'))change=xWidth;
+    else change=yWidth;
+    const dims=geometry.aspectSize(g.width+change,ratio,MIN_VIDEO_WIDTH,45);
+    g.requestedWidth=dims.width;
+    const pos={
+      x:Math.round(g.initialPosition.x+
+        (side.includes('l')?(g.width-dims.width)*g.scale:0)),
+      y:Math.round(g.initialPosition.y+
+        (side.includes('t')?(g.height-dims.height)*g.scale:0))
+    };
+    g.desiredPosition=pos;
+    void sizeToVideo(g.requestedWidth,pos);
   }
   function moveGesture(event){
     if(!gesture)return;
-    const g=gesture,dx=event.screenX-g.x,dy=event.screenY-g.y;
-    if(!g.dragged&&Math.hypot(dx,dy)<DRAG_THRESHOLD)return;
+    const g=gesture;
+    g.deltaX=event.screenX-g.x;
+    g.deltaY=event.screenY-g.y;
+    if(!g.dragged&&Math.hypot(g.deltaX,g.deltaY)<DRAG_THRESHOLD)return;
     g.dragged=true;
-    if(g.resize){
-      const delta=Math.abs(dx)>Math.abs(dy)*videoRatio()?dx:dy*videoRatio();
-      g.requestedWidth=g.width+delta;
-      void sizeToVideo(g.requestedWidth);
-    }else{
-      // Only begin native dragging when the pointer has moved beyond a click.
+    if(g.resize)applyResizeGesture(g);
+    else{
       gesture=null;
       void win.startDragging().catch(()=>{});
     }
@@ -248,14 +310,18 @@
   function endGesture(event){
     if(!gesture)return;
     const g=gesture;gesture=null;
-    if(g.resize&&g.dragged)void sizeToVideo(g.requestedWidth);
+    if(g.resize&&g.dragged)applyResizeGesture(g);
     if(!g.dragged&&!g.resize&&event.type==='pointerup')toggle.click();
     showControls();
   }
-  for(const surface of [mediaElements.video,drag]){
-    surface.addEventListener('pointerdown',event=>startGesture(event));
-  }
-  resize.addEventListener('pointerdown',event=>startGesture(event,true));
+  root.addEventListener('pointerdown',startGesture,true);
+  mediaElements.video.addEventListener('pointermove',event=>{
+    if(!gesture&&current==='video')mediaElements.video.style.cursor=
+      edgeCursor(edgeAt(event));
+  });
+  root.addEventListener('contextmenu',event=>{
+    if(current==='video')event.preventDefault();
+  });
   window.addEventListener('pointermove',moveGesture);
   window.addEventListener('pointerup',endGesture);
   window.addEventListener('pointercancel',()=>{gesture=null;});
@@ -298,6 +364,16 @@
       if(snapTimer!==null)clearTimeout(snapTimer);
       snapTimer=setTimeout(()=>{snapTimer=null;void snapToEdge();},175);
     }).catch(()=>{});
+  }
+  if(tauri?.event){
+    void tauri.event.listen('minternet:miniplayer-settings',event=>{
+      setFadeSeconds(event.payload?.fadeSeconds);
+    }).catch(()=>{});
+  }
+  if(tauri?.core){
+    void tauri.core.invoke('browser_action',
+      {name:'media-player-settings-get',value:null})
+      .then(preferences=>setFadeSeconds(preferences?.fadeSeconds)).catch(()=>{});
   }
   if(tauri?.event){
     void tauri.event.listen('minternet:media-volume',event=>{
