@@ -31,6 +31,9 @@ test('snap to any segment of the browser content perimeter, independent of corne
   assert.deepEqual(snapPosition({x:470,y:210},size,viewport,workArea),{x:470,y:200});
   assert.deepEqual(snapPosition({x:470,y:680},size,viewport,workArea),{x:470,y:688});
   assert.deepEqual(snapPosition({x:794,y:207},size,viewport,workArea),{x:800,y:200});
+  assert.deepEqual(snapPosition({x:-94,y:420},size,viewport,workArea),{x:-100,y:420});
+  assert.deepEqual(snapPosition({x:997,y:420},size,viewport,workArea),{x:1000,y:420});
+  assert.deepEqual(snapPosition({x:410,y:90},size,viewport,workArea),{x:410,y:88});
 });
 
 test('snap to Windows taskbar-facing work area instead of the full screen edge',()=>{
