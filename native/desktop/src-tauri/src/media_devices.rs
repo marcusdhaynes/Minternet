@@ -142,9 +142,9 @@ pub fn action(app:&AppHandle,name:&str,value:&Value,id:u32,
     let mut stop=false;
     match name{
         "site-media-revoke"=>{
+            // Stop current capture and return to Ask. Revoke should not
+            // silently disable hardware forever or require manual repair.
             settings.microphone=ask();settings.camera=ask();
-            settings.microphone_device="disabled".into();
-            settings.camera_device="disabled".into();
             stop=true;
         },
         "site-media-set"=>match field{
@@ -190,20 +190,31 @@ pub fn action(app:&AppHandle,name:&str,value:&Value,id:u32,
     }
     drop(state);
     if !ephemeral{persist(app)?;}
-    if let Some(webview)=app.get_webview(&format!("tab-{id}")){
-        if stop{let _=webview.eval("window.__minternetMediaStop?.();");}
-        if let Ok(encoded)=serde_json::to_string(&settings){
-            let _=webview.eval(&format!("window.__minternetMediaApply?.({encoded});"));
+    // Persistent site grants/revocations apply to every normal tab at that
+    // origin, not just the currently selected tab. Private/one-time rules
+    // remain isolated to their originating tab.
+    let targets={
+        let browser=app.state::<Mutex<super::Browser>>();
+        let b=browser.lock().map_err(|e|e.to_string())?;
+        b.tabs.iter().filter(|tab|{
+            if ephemeral {tab.id==id}
+            else {!tab.private&&!tab.secret_id.is_some()&&
+                valid_origin(&tab.url).as_deref()==Some(origin.as_str())}
+        }).map(|tab|tab.id).collect::<Vec<_>>()
+    };
+    let payload=serde_json::to_string(&settings).map_err(|e|e.to_string())?;
+    for target in targets{
+        if let Some(view)=app.get_webview(&format!("tab-{target}")){
+            if stop{let _=view.eval("window.__minternetMediaStop?.();");}
+            let _=view.eval(&format!("window.__minternetMediaApply?.({payload});"));
+            // The native output mute covers WebAudio beyond HTML media sinks.
+            super::apply_volume_to_site(app,target,view.label(),false);
         }
-    }
-    if let Some(view)=app.get_webview(&format!("tab-{id}")){
-        // Native WebView2 mute also covers WebAudio/AudioContexts, not merely
-        // HTMLMediaElement.sinkId used by individual web applications.
-        super::apply_volume_to_site(app,id,view.label(),false);
-    }
-    #[cfg(windows)]
-    if matches!(field,"microphone"|"camera")||name=="site-media-revoke"{
-        clear_webview2_profile(app,id,&origin);
+        #[cfg(windows)]
+        if matches!(field,"microphone"|"camera")||name=="site-media-revoke"{
+            clear_webview2_profile(app,target,&origin);
+        }
+        inform(app,target);
     }
     inform(app,id);
     Ok(snapshot(app,id,&origin,private))
