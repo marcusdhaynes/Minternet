@@ -2,7 +2,7 @@
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src blob:; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob: asset: http://asset.localhost https://asset.localhost; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Minternet Local Media Player</title>
 <link rel="stylesheet" href="./media-player.css">
 <script src="./media-player.js" defer></script></head>
@@ -10,11 +10,6 @@
   <main class="player-root">
     <div class="drag-zone" id="dragZone" title="Drag to Move" aria-label="Drag Player"></div>
     <button class="player-close" id="playerClose" type="button" aria-label="Close Player" title="Close">×</button>
-    <section class="player-chooser" id="chooseSection">
-      <button id="chooseFile" type="button" class="choose-file">▣ &nbsp; Select Local Video or Audio</button>
-      <p>Uses locally supported codecs. Unrecognized formats show an error, never an automatic download.</p>
-    </section>
-    <input id="mediaFile" type="file" aria-label="Select Local Video or Audio" hidden>
     <video id="localVideo" playsinline preload="metadata" hidden></video>
     <audio id="localAudio" preload="metadata" hidden></audio>
     <div id="mediaError" role="status" hidden></div>
