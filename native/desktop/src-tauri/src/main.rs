@@ -1816,6 +1816,7 @@ fn refresh_layout(app: &tauri::AppHandle) {
                 size: LogicalSize::new(w.max(1.0),h.max(1.0)).into(),
             };
             if view.set_bounds(bounds).is_err() { applied = false; }
+            notify_native_compositor(&view);
         } else {
             applied = false;
         }
@@ -1852,6 +1853,17 @@ fn schedule_surface_restore(app:&tauri::AppHandle){
         }
     });
 }
+#[cfg(windows)]
+fn notify_native_compositor(view:&tauri::Webview){
+    // WebView2's HWND composition can keep stale/white surface rectangles
+    // after a parent resize, OS snap, tab restore or DPI change. Notify its
+    // native controller after setting the child bounds. Never reload a SPA.
+    let _=view.with_webview(|native|{
+        let _=unsafe{native.controller().NotifyParentWindowPositionChanged()};
+    });
+}
+#[cfg(not(windows))]
+fn notify_native_compositor(_view:&tauri::Webview){}
 fn restore_visible_surfaces(app:&tauri::AppHandle){
     invalidate_layout(app);
     refresh_layout(app);
@@ -1869,6 +1881,7 @@ fn restore_visible_surfaces(app:&tauri::AppHandle){
     for label in labels {
         if let Some(view)=app.get_webview(&label){
             let _=view.show();
+            notify_native_compositor(&view);
         }
     }
 }
@@ -3376,6 +3389,28 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
     // OAuth, Drive and Gmail are only available to the trusted local chrome.
     // All remote network calls run on worker threads so they never pause the
     // native browser event loop. No Google token is returned to web content.
+    if name=="media-player-open" {
+        // A separate native WebView window avoids a full-screen transparent
+        // chrome overlay that could cover or block the current website.
+        if let Some(player)=app.get_webview_window("minternet-media-player"){
+            let _=player.show();let _=player.set_focus();
+            return Ok(json!({"ok":true,"existing":true}));
+        }
+        let player=WebviewWindowBuilder::new(
+                &app,"minternet-media-player",
+                WebviewUrl::App("media-player.html".into()))
+            .title("Minternet Local Media Player")
+            .inner_size(368.0,116.0)
+            .min_inner_size(286.0,64.0)
+            .resizable(true)
+            .decorations(false)
+            .transparent(true)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .build().map_err(|e|e.to_string())?;
+        let _=player.set_focus();
+        return Ok(json!({"ok":true,"existing":false}));
+    }
     if name=="volume-get" {
         let state=app.state::<VolumeState>();
         let config=state.0.lock().map_err(|e|e.to_string())?;
@@ -3400,6 +3435,8 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                     .collect::<Vec<_>>()
             };
             for (id,label) in active {apply_volume_to_site(&app,id,&label,false);}
+            let _=app.emit_to("minternet-media-player","minternet:media-volume",
+                json!({"level":level,"muted":muted}));
         }
         return Ok(json!({"ok":true,"level":level,"muted":muted}));
     }
@@ -5946,10 +5983,16 @@ fn main() {
                             if app.run_on_main_thread(move || {
                                 callback_pending.store(false,Ordering::Release);
                                 refresh_layout(&callback_app);
+                                schedule_surface_restore(&callback_app);
                             }).is_err() {
                                 pending.store(false,Ordering::Release);
                             }
                         });
+                    },
+                    tauri::WindowEvent::Moved(_) => {
+                        // A parent HWND move, including cross-monitor dragging,
+                        // can invalidate WebView2's DirectComposition surfaces.
+                        schedule_surface_restore(&handle);
                     },
                     tauri::WindowEvent::CloseRequested { .. } => {
                         // On title-bar close / Alt-F4, capture the last SPA path

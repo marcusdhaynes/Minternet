@@ -4,13 +4,22 @@
   "description": "Only the trusted local browser chrome can access Minternet native commands; remote sites receive no capabilities",
   "local": true,
   "windows": [
-    "main"
+    "main",
+    "minternet-media-player"
   ],
   "webviews": [
-    "chrome"
+    "chrome",
+    "minternet-media-player"
   ],
   "permissions": [
     "core:default",
-    "core:menu:default"
+    "core:menu:default",
+    "core:window:allow-close",
+    "core:window:allow-start-dragging",
+    "core:window:allow-start-resize-dragging",
+    "core:window:allow-set-size",
+    "core:window:allow-set-position",
+    "core:window:allow-show",
+    "core:window:allow-set-focus"
   ]
 }

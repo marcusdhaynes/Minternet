@@ -1979,3 +1979,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { di
 .extension-stores button{flex:1;min-width:0;min-height:23px;border-radius:4px;
   background:#273551;border:1px solid #546280;color:#e5ebfd;font-size:10px;cursor:pointer;}
 .extension-stores button:hover{background:#364665;}
+
+/* The compact media launcher is immediately left of Tor. */
+.toolbar-actions #mediaPlayerButton{flex:0 0 22px;width:22px;height:22px;min-width:22px;padding:0;display:grid;place-items:center;color:#c5d5f1;border:0;background:transparent;border-radius:4px;}
+.toolbar-actions #mediaPlayerButton:hover{background:#425371;}
