@@ -2248,6 +2248,17 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                 }
                 if matches!(event.event(), PageLoadEvent::Finished) {
                     media_devices::apply(&for_load,id,event.url().as_str(),private);
+                    #[cfg(windows)]
+                    if event.url().scheme()=="https" || event.url().scheme()=="http"{
+                        let task=for_load.clone();
+                        let address=event.url().as_str().to_string();
+                        std::thread::spawn(move||{
+                            std::thread::sleep(Duration::from_millis(35));
+                            let main=task.clone();
+                            let _=task.run_on_main_thread(move||
+                                media_devices::reset_old_denials(&main,id,&address));
+                        });
+                    }
                     // A completed navigation can still display an unrepainted
                     // WebView2 surface. Restore its bounds without reloading.
                     let is_active=for_load.state::<Mutex<Browser>>().lock().ok()
@@ -2393,6 +2404,10 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     #[cfg(windows)]
     attach_browser_favicon(app,id,&created);
     media_devices::attach(app,id,&created,private);
+    #[cfg(windows)]
+    if let Ok(page)=created.url(){
+        media_devices::reset_old_denials(app,id,page.as_str());
+    }
     let state = app.state::<Mutex<Browser>>();
     let mut browser = state.lock().map_err(|e| e.to_string())?;
     if let Some(tab) = browser.tabs.iter_mut().find(|tab| tab.id == id) {
