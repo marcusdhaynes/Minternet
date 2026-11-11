@@ -8,7 +8,7 @@
   if(!api)return;
   const home=$('homePageUrl'),saveHome=$('homePageSave');
   const folder=$('downloadFolderPath'),saveFolder=$('downloadFolderSave');
-  const reset=$('downloadFolderDefault'),status=$('browserPreferencesStatus');
+  const reset=$('downloadFolderDefault'),browse=$('downloadFolderBrowse'),status=$('browserPreferencesStatus');
   const tabLimit=$('tabLimit'),saveTabLimit=$('tabLimitSave');
   const miniplayerFade=$('miniplayerFadeSeconds'),miniplayerStatus=$('miniplayerFadeStatus');
   if(!home||!saveHome||!folder||!saveFolder||!reset||!status||!tabLimit||!saveTabLimit)return;
@@ -20,6 +20,7 @@
   };
   function setBusy(busy){
     saveHome.disabled=saveFolder.disabled=reset.disabled=saveTabLimit.disabled=Boolean(busy);
+    if(browse)browse.disabled=Boolean(busy);
   }
   async function invoke(command,payload){
     const result=await api.command(command,payload);
@@ -83,6 +84,18 @@
       folder.placeholder=result.usingSystemDownloads
         ?result.downloadFolder:'Enter absolute folder path';
       report('Approved downloads will save to '+result.downloadFolder);
+    }catch(e){report('Downloads folder was not changed: '+String(e.message||e));}
+    finally{setBusy(false);}
+  }
+  async function browseDownloadsFolder(){
+    setBusy(true);
+    try{
+      const result=await invoke('downloads-folder-choose');
+      if(result?.cancelled)return;
+      if(!result?.ok)throw Error('Folder selection failed');
+      folder.value=result.downloadFolder||'';
+      folder.placeholder='Enter absolute folder path';
+      report('Downloads will save to '+result.downloadFolder);
     }catch(e){report('Downloads folder was not changed: '+String(e.message||e));}
     finally{setBusy(false);}
   }
@@ -155,6 +168,7 @@
   home.addEventListener('keydown',event=>{
     if(event.key==='Enter'){event.preventDefault();void updateHome();}
   });
+  browse?.addEventListener('click',()=>void browseDownloadsFolder());
   saveFolder.addEventListener('click',()=>void updateDownloads());
   reset.addEventListener('click',()=>void updateDownloads(true));
   folder.addEventListener('keydown',event=>{
