@@ -6,7 +6,13 @@
   const mediaElements={video:$('localVideo'),audio:$('localAudio')};
   const error=$('mediaError');
   const controls=$('playerControls'),toggle=$('togglePlayback'),scrubber=$('playbackPosition');
-  const close=$('playerClose'),resize=$('resizeCorner'),drag=$('dragZone');
+  const close=$('playerClose'),playbackIcon=$('playbackIcon');
+  const currentTime=$('currentTime'),durationTime=$('durationTime');
+  const subtitleToggle=$('subtitleToggle'),subtitlePanel=$('subtitlePanel');
+  const subtitlePick=$('subtitlePick'),subtitleOff=$('subtitleOff');
+  const subtitleOverlay=$('subtitleOverlay'),subtitleName=$('subtitleName');
+  const fullscreenToggle=$('fullscreenToggle');
+  let subtitleCues=[],subtitleEnabled=false,stopHoldTimer=null,holdFired=false;
   const volume={level:100,muted:false};
   let current=null,url=null,sourceGeneration=0,normalizing=false,normalizingGeneration=0,usedCodecFallback=false;
   const HIDE_DELAY=5000,DRAG_THRESHOLD=5,MIN_VIDEO_WIDTH=80;
@@ -121,13 +127,31 @@
   function fail(message){
     error.textContent=message;error.hidden=false;
   }
+  function clock(seconds){
+    if(!Number.isFinite(seconds)||seconds<0)return '0:00';
+    const s=Math.floor(seconds),m=Math.floor(s/60),h=Math.floor(m/60);
+    return (h?h+':'+String(m%60).padStart(2,'0'):String(m))+
+      ':'+String(s%60).padStart(2,'0');
+  }
+  function renderCaptions(){
+    const media=active(),t=media?.currentTime||0;
+    const cue=subtitleEnabled&&current==='video'
+      ?subtitleCues.find(c=>c.start<=t&&c.end>=t):null;
+    subtitleOverlay.textContent=cue?.text||'';
+    subtitleOverlay.hidden=!cue;
+  }
   function updateControls(){
     const media=active();if(!media)return;
-    toggle.textContent=media.paused?'▶':'Ⅱ';
-    toggle.setAttribute('aria-label',media.paused?'Play':'Pause');
+    playbackIcon.innerHTML=media.paused
+      ?'<path d="m8.5 5.5 10.5 6.5-10.5 6.5V5.5Z"/>'
+      :'<path d="M8 5.5v13m8-13v13"/>';
+    toggle.setAttribute('aria-label',media.paused?'Play · Hold to Stop':'Pause · Hold to Stop');
     scrubber.value=Number.isFinite(media.duration)&&media.duration>0?
       String(Math.round(media.currentTime/media.duration*1000)):'0';
     scrubber.disabled=!Number.isFinite(media.duration)||media.duration<=0;
+    currentTime.textContent=clock(media.currentTime);
+    durationTime.textContent=clock(media.duration);
+    renderCaptions();
   }
   function kindFor(file){
     const ext=(file.name.split('.').pop()||'').toLowerCase();
@@ -160,7 +184,13 @@
     error.hidden=true;
     current=kindFor({name:selection.name||'',type:selection.mime||''});
     document.body.dataset.mode=current;
-    controls.hidden=false;resize.hidden=current!=='video';
+    controls.hidden=false;
+    subtitlePanel.hidden=true;
+    subtitleOverlay.hidden=true;
+    subtitleCues=[];subtitleEnabled=false;
+    subtitleName.textContent='Off';
+    subtitleToggle.setAttribute('aria-pressed','false');
+    subtitleToggle.setAttribute('aria-expanded','false');
     document.body.classList.remove('controls-idle');
     clearTimeout(controlsTimer);
     metadataSizedGeneration=0;
@@ -200,7 +230,25 @@
     }).catch(()=>{});
   }
   void startSelectedMedia();
+  // Marmalade-style play/pause; a deliberate hold stops and rewinds without
+  // opening Explorer or discarding the current selected media file.
+  function stopPlayback(){
+    const media=active();if(!media)return;
+    media.pause();
+    try{media.currentTime=0;}catch{}
+    updateControls();
+    showControls();
+  }
+  toggle.addEventListener('pointerdown',event=>{
+    if(event.button!==0)return;
+    holdFired=false;
+    clearTimeout(stopHoldTimer);
+    stopHoldTimer=setTimeout(()=>{holdFired=true;stopPlayback();},600);
+  });
+  for(const type of ['pointerup','pointercancel','pointerleave'])
+    toggle.addEventListener(type,()=>clearTimeout(stopHoldTimer));
   toggle.addEventListener('click',async()=>{
+    if(holdFired){holdFired=false;return;}
     const media=active();if(!media)return;
     if(media.paused){
       try{await media.play();}catch(e){
@@ -209,6 +257,47 @@
       }
     }else media.pause();
     updateControls();
+  });
+  subtitleToggle.addEventListener('click',()=>{
+    if(current!=='video')return;
+    subtitlePanel.hidden=!subtitlePanel.hidden;
+    subtitleToggle.setAttribute('aria-expanded',String(!subtitlePanel.hidden));
+    showControls();
+  });
+  subtitlePick.addEventListener('click',async()=>{
+    if(!tauri?.core?.invoke)return;
+    try{
+      const chosen=await tauri.core.invoke('browser_action',
+        {name:'media-player-subtitle-pick',value:null});
+      if(chosen?.cancelled)return;
+      const parsed=window.MinternetSubtitles.parse(chosen.content||'',chosen.name||'');
+      if(!parsed.length){fail('No valid subtitle cues found in this file.');return;}
+      subtitleCues=parsed;subtitleEnabled=true;
+      subtitleName.textContent=chosen.name;
+      subtitleToggle.setAttribute('aria-pressed','true');
+      subtitlePanel.hidden=true;
+      subtitleToggle.setAttribute('aria-expanded','false');
+      error.hidden=true;
+      renderCaptions();showControls();
+    }catch(e){fail('Could not load subtitles: '+String(e?.message||e));}
+  });
+  subtitleOff.addEventListener('click',()=>{
+    subtitleEnabled=false;subtitleCues=[];
+    subtitleOverlay.textContent='';subtitleOverlay.hidden=true;
+    subtitleName.textContent='Off';
+    subtitleToggle.setAttribute('aria-pressed','false');
+    subtitleToggle.setAttribute('aria-expanded','false');
+    subtitlePanel.hidden=true;showControls();
+  });
+  fullscreenToggle.addEventListener('click',async()=>{
+    if(!win||current!=='video')return;
+    try{
+      const full=await win.isFullscreen();
+      await win.setFullscreen(!full);
+      fullscreenToggle.setAttribute('aria-pressed',String(!full));
+      fullscreenToggle.title=full?'Full Screen':'Exit Full Screen';
+      showControls();
+    }catch(e){fail('Full screen failed: '+String(e?.message||e));}
   });
   scrubber.addEventListener('input',()=>{
     const media=active();
@@ -261,9 +350,9 @@
   }
   function startGesture(event){
     if(!win||current!=='video'||(event.button!==0&&event.button!==2))return;
-    if(event.target.closest?.('.player-controls,.player-close,#mediaError') &&
-        event.target!==resize)return;
-    const edges=event.target===resize?'rb':edgeAt(event);
+    if(event.target.closest?.('.player-controls,.player-close,.subtitle-popover,#mediaError'))
+      return;
+    const edges=edgeAt(event);
     const isResize=Boolean(edges)||event.shiftKey||event.button===2;
     // Arbitrary-surface resizes anchor at the lower-right corner.
     const anchor=edges||'rb';
@@ -316,7 +405,14 @@
     if(g.resize)applyResizeGesture(g);
     else{
       gesture=null;
-      void win.startDragging().catch(()=>{});
+      // startDragging may enter the native Windows modal move loop. Snap on
+      // its release as well as onMoved; relying on debounced onMoved alone
+      // misses the final position on some WebView2 runtimes.
+      void win.startDragging().then(()=>{
+        void snapToEdge();
+        setTimeout(()=>{void snapToEdge();},140);
+      }).catch(()=>{});
+
     }
   }
   function endGesture(event){
@@ -404,7 +500,15 @@
       }).catch(()=>{});
   }
   window.addEventListener('keydown',event=>{
-    if(event.key==='Escape'&&current)close.click();
+    if(event.key==='Escape'&&!subtitlePanel.hidden){
+      subtitlePanel.hidden=true;subtitleToggle.setAttribute('aria-expanded','false');return;
+    }
+    if(event.key==='Escape'&&current){
+      void win?.isFullscreen().then(full=>{
+        if(full){void win.setFullscreen(false);fullscreenToggle.setAttribute('aria-pressed','false');}
+        else close.click();
+      }).catch(()=>close.click());return;
+    }
     if(event.key===' '&&current&&event.target!==scrubber){
       event.preventDefault();toggle.click();
     }
