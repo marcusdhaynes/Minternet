@@ -191,8 +191,10 @@
       if(panel)void refresh();
     }
     const tab=(state.tabs||[]).find(t=>t.id===id);
-    activeStatus=Boolean(tab?.audioPlaying);
-    // Native media events have the authoritative capture/request status.
+    const observed=lastState?.tabId===id?lastState.status:{};
+    activeStatus=Boolean(tab?.audioPlaying||observed?.microphone||
+      observed?.camera||observed?.speaker||observed?.requested);
+    // A fresh tab update must not erase a still-active capture indicator.
     if(!panel)trigger.hidden=!activeStatus;
   }
   api.onState?.(onState);
