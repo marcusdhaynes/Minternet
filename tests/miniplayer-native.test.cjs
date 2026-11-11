@@ -14,9 +14,11 @@ test('Minternet has a separate trusted media window and compact button before To
   assert.match(native,/\.always_on_top\(true\)/);
   assert.match(native,/\.transparent\(true\)/);
   assert.ok(html.indexOf('id="mediaPlayerButton"')<html.indexOf('id="tor"'));
-  assert.ok(caps.windows.includes('minternet-media-player'));
-  assert.ok(caps.webviews.includes('minternet-media-player'));
-  assert.ok(caps.permissions.includes('core:window:allow-start-resize-dragging'));
+  const player=JSON.parse(read('native/desktop/src-tauri/capabilities/media-player.json'));
+  assert.deepEqual(caps.webviews,['chrome']);
+  assert.deepEqual(caps.windows,['main']);
+  assert.deepEqual(player.webviews,['minternet-media-player']);
+  assert.ok(player.permissions.includes('core:window:allow-start-resize-dragging'));
 });
 test('media player uses local user-picked Blob and supports floating audio/video modes',()=>{
   const js=read('ui/media-player.js');

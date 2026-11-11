@@ -1,0 +1,22 @@
+{
+  "$schema": "../../gen/schemas/desktop-schema.json",
+  "identifier": "local-media-player",
+  "description": "Only Minternet local floating media window can control its position, size and closure. Remote websites have no native permissions.",
+  "local": true,
+  "windows": [
+    "minternet-media-player"
+  ],
+  "webviews": [
+    "minternet-media-player"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:allow-close",
+    "core:window:allow-start-dragging",
+    "core:window:allow-start-resize-dragging",
+    "core:window:allow-set-size",
+    "core:window:allow-set-position",
+    "core:window:allow-show",
+    "core:window:allow-set-focus"
+  ]
+}
