@@ -21,10 +21,9 @@ button:focus-visible,input:focus-visible{outline:1px solid #aabaff;outline-offse
 #resizeCorner{position:absolute;z-index:7;right:0;bottom:0;width:19px;height:19px;border:0;background:transparent;color:#b2bfd7;cursor:nwse-resize;padding:0;font-size:15px;}
 body[data-mode="video"] .player-root{background:transparent;border:0;border-radius:0;box-shadow:none;}
 body[data-mode="video"] .drag-zone{background:linear-gradient(#090e17a0,transparent);}
-body[data-mode="video"] .player-controls{bottom:3px;left:3px;right:23px;height:32px;opacity:.17;transition:opacity .16s;}
-body[data-mode="video"] .player-controls{opacity:1;pointer-events:auto;}
+body[data-mode="video"] .player-controls{bottom:3px;left:3px;right:23px;height:32px;opacity:1;transition:opacity .18s ease;}
+body[data-mode="video"] .player-controls{pointer-events:auto;}
 body[data-mode="video"].controls-idle .player-controls{opacity:0;pointer-events:none;}
-body[data-mode="video"] .player-controls:focus-within{opacity:1;pointer-events:auto;}
 body[data-mode="video"] .drag-zone{pointer-events:none;}
 body[data-mode="video"] #localVideo{cursor:grab;touch-action:none;}
 body[data-mode="video"] #localVideo:active{cursor:grabbing;}
