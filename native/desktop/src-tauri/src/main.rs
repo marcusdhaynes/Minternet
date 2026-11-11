@@ -2013,6 +2013,72 @@ fn record_page_history(app:&tauri::AppHandle,id:u32,url:&str,title_hint:Option<&
     }
 }
 
+
+#[cfg(windows)]
+fn emit_browser_favicon(app:tauri::AppHandle,id:u32,
+    source:webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2) {
+    use windows::core::Interface;
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        ICoreWebView2_15, COREWEBVIEW2_FAVICON_IMAGE_FORMAT_PNG
+    };
+    let mut url=windows::core::PWSTR::null();
+    if (unsafe{source.Source(&mut url)}).is_err(){return;}
+    let page=webview2_com::take_pwstr(url);
+    let Ok(mut address)=tauri::Url::parse(&page) else{return};
+    if !matches!(address.scheme(),"http"|"https") || address.host_str().is_none(){return;}
+    address.set_query(None);
+    address.set_fragment(None);
+    let Ok(favicon)=source.cast::<ICoreWebView2_15>() else{return};
+    let page=address.to_string();
+    let callback=webview2_com::GetFaviconCompletedHandler::create(Box::new(move |result,stream|{
+        if !result.is_ok(){return Ok(());}
+        let Some(stream)=stream else{return Ok(())};
+        let mut bytes=Vec::new();
+        loop {
+            let mut chunk=[0u8;8192];
+            let mut count=0u32;
+            if (unsafe{stream.Read(chunk.as_mut_ptr().cast(),8192,&mut count)}).is_err(){break;}
+            if count==0{break;}
+            if bytes.len()+count as usize>90_000{return Ok(());}
+            bytes.extend_from_slice(&chunk[..count as usize]);
+        }
+        if bytes.len()<8 || !bytes.starts_with(b"\x89PNG\r\n\x1a\n"){return Ok(());}
+        let encoded=base64::engine::general_purpose::STANDARD.encode(bytes);
+        let _=app.emit_to("chrome","minternet:native-favicon",
+            json!({"tabId":id,"page":page,"image":format!("data:image/png;base64,{encoded}")}));
+        Ok(())
+    }));
+    let _=unsafe{favicon.GetFavicon(COREWEBVIEW2_FAVICON_IMAGE_FORMAT_PNG,callback)};
+}
+#[cfg(windows)]
+fn attach_browser_favicon(app:&tauri::AppHandle,id:u32,view:&tauri::Webview){
+    use windows::core::Interface;
+    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_15;
+    let caller=app.clone();
+    let _=view.with_webview(move |native|{
+        let Ok(web)=unsafe{native.controller().CoreWebView2()} else{return};
+        let Ok(favicon)=web.cast::<ICoreWebView2_15>() else{return};
+        let handler=webview2_com::FaviconChangedEventHandler::create(Box::new(move |source,_|{
+            if let Some(source)=source {
+                emit_browser_favicon(caller.clone(),id,source);
+            }
+            Ok(())
+        }));
+        let mut token=0i64;
+        let _=unsafe{favicon.add_FaviconChanged(handler,&mut token)};
+    });
+}
+#[cfg(windows)]
+fn refresh_browser_favicon(app:&tauri::AppHandle,id:u32,label:&str){
+    let Some(view)=app.get_webview(label) else{return};
+    let handle=app.clone();
+    let _=view.with_webview(move |native|{
+        if let Ok(source)=unsafe{native.controller().CoreWebView2()} {
+            emit_browser_favicon(handle,id,source);
+        }
+    });
+}
+
 fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: bool) -> Result<(), String> {
     let Some(window) = app.get_window("main") else { return Err("Missing window".into()) };
     let label = format!("tab-{id}");
@@ -2242,6 +2308,16 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                     // re-enter its COM controller. Queue a repaint instead.
                     if is_active {schedule_surface_restore(&for_load);}
                     record_page_history(&for_load,id,event.url().as_str(),None);
+                    #[cfg(windows)]
+                    if event.url().scheme()=="https" || event.url().scheme()=="http" {
+                        let app=for_load.clone();
+                        let label=view.label().to_string();
+                        std::thread::spawn(move||{
+                            std::thread::sleep(Duration::from_millis(380));
+                            let worker=app.clone();
+                            let _=app.run_on_main_thread(move||refresh_browser_favicon(&worker,id,&label));
+                        });
+                    }
                     // Automatically fill one enabled, encrypted saved login
                     // after the exact HTTPS page has loaded. Locked vaults,
                     // private/secret tabs and ambiguous accounts are skipped.
@@ -2363,6 +2439,11 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
         LogicalSize::new(width, (height - top).max(1.0)),
     ).map_err(|e| e.to_string())?;
     let _=created.set_zoom(zoom);
+    // WebView2 has already selected the page's actual favicon (including
+    // dynamic icons, custom paths and CDN icons). Subscribe to changes
+    // instead of guessing /favicon.ico like the old toolbar did.
+    #[cfg(windows)]
+    attach_browser_favicon(app,id,&created);
     let state = app.state::<Mutex<Browser>>();
     let mut browser = state.lock().map_err(|e| e.to_string())?;
     if let Some(tab) = browser.tabs.iter_mut().find(|tab| tab.id == id) {

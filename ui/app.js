@@ -72,7 +72,23 @@ function tabTooltip(tab) {
 // fetch, but later tab creation/restoration never waits for its favicon.
 const FAVICON_STORE='minternet.tab-favicons.v2';
 const faviconCache=new Map();
+// Browser-native icons are tab scoped, not just host scoped: distinct GitHub
+// Pages projects share one hostname but publish different icons.
+const nativeTabIcons=new Map();
 const cachedIconPattern=/^data:image\/(?:png|jpeg|webp|x-icon);base64,[a-z0-9+/=]+$/i;
+function siteIconKey(address){
+  try{
+    const u=new URL(address);
+    if(!/^https?:$/.test(u.protocol))return '';
+    const host=u.hostname.toLowerCase();
+    // Project-specific site roots on shared GitHub Pages hosts.
+    if(host.endsWith('.github.io')){
+      const project=u.pathname.split('/').filter(Boolean)[0]||'';
+      return project?host+'/'+project.toLowerCase():host;
+    }
+    return host;
+  }catch{return '';}
+}
 function restoreFaviconCache(){
   try{
     const entries=JSON.parse(localStorage.getItem(FAVICON_STORE)||'[]');
@@ -81,103 +97,114 @@ function restoreFaviconCache(){
     for(const item of entries.slice(-120)){
       if(!Array.isArray(item)||item.length!==2)continue;
       const [host,src]=item;
-      if(typeof host!=='string'||!/^[a-z0-9.-]{1,253}$/.test(host)||
-        typeof src!=='string'||src.length>70000||!cachedIconPattern.test(src))continue;
+      if(typeof host!=='string'||!/^[a-z0-9.\/-]{1,300}$/.test(host)||
+         typeof src!=='string'||src.length>125000||!cachedIconPattern.test(src))continue;
       used+=src.length;
       if(used>1400000)break;
-      faviconCache.set(host,{src,loading:false,persisted:true});
+      faviconCache.set(host,{src,loading:false,persisted:true,native:true});
     }
   }catch{}
 }
 restoreFaviconCache();
-// Reuse the already-cached 24px bookmark favicon thumbnails as an
-// instantaneous fallback for previously bookmarked websites. These images
-// were stored by trusted chrome, never taken from a private tab.
-try {
+try{
   const thumbnails=JSON.parse(localStorage.getItem('minternet.bookmark-icon-thumbnails.v1')||'{}');
   for(const [address,png] of Object.entries(thumbnails||{}).slice(-180)){
     if(typeof png!=='string'||png.length>10000||
        !/^data:image\/png;base64,[a-z0-9+/=]+$/i.test(png))continue;
-    const u=new URL(address);
-    const host=u.hostname.toLowerCase();
-    if(u.protocol==='https:'&&!faviconCache.has(host)&&/^[a-z0-9.-]{1,253}$/.test(host))
+    const u=new URL(address),host=siteIconKey(address);
+    if(u.protocol==='https:'&&!faviconCache.has(host)&&host)
       faviconCache.set(host,{src:png,loading:false,persisted:true});
   }
-} catch {}
+}catch{}
+function persistFavicon(key,image){
+  if(!window.__TAURI__||!key||!cachedIconPattern.test(image)||image.length>125000)return;
+  if(!snapshot.tabs.some(t=>!t.private&&!t.secretTab&&siteIconKey(t.url)===key))return;
+  try{
+    const stored=JSON.parse(localStorage.getItem(FAVICON_STORE)||'[]');
+    const map=new Map(Array.isArray(stored)?stored.filter(e=>Array.isArray(e)&&e.length===2):[]);
+    map.delete(key);map.set(key,image);
+    let entries=[...map.entries()].slice(-100);
+    while(entries.length&&JSON.stringify(entries).length>1400000)entries.shift();
+    localStorage.setItem(FAVICON_STORE,JSON.stringify(entries));
+  }catch{}
+}
 function rememberFavicon(host,source){
   if(!window.__TAURI__||!source||!source.startsWith('https://'))return;
   const state=faviconCache.get(host);
-  if(!state||state.persisted||state.persisting)return;
-  if(!snapshot.tabs.some(t=>!t.private&&!t.secretTab&&
-    (()=>{try{return new URL(t.url).hostname.toLowerCase()===host;}catch{return false;}})()))return;
+  if(!state||state.persisted||state.persisting||state.native)return;
+  if(!snapshot.tabs.some(t=>!t.private&&!t.secretTab&&siteIconKey(t.url)===host))return;
   state.persisting=true;
   void api.command('bookmark-icon-data',source).then(image=>{
     state.persisting=false;
-    if(typeof image!=='string'||image.length>70000||!cachedIconPattern.test(image))return;
-    state.src=image;
-    state.persisted=true;
-    // MRU eviction. Avoid storage failures blocking browser rendering.
-    try{
-      const stored=JSON.parse(localStorage.getItem(FAVICON_STORE)||'[]');
-      const map=new Map(Array.isArray(stored)?stored.filter(e=>Array.isArray(e)&&e.length===2):[]);
-      map.delete(host);map.set(host,image);
-      let entries=[...map.entries()].slice(-100);
-      while(entries.length&&JSON.stringify(entries).length>1400000)entries.shift();
-      localStorage.setItem(FAVICON_STORE,JSON.stringify(entries));
-    }catch{}
+    if(typeof image!=='string'||image.length>125000||!cachedIconPattern.test(image)||state.native)return;
+    state.src=image;state.persisted=true;
+    persistFavicon(host,image);
     refreshHostIcons(host);
   }).catch(()=>{state.persisting=false;});
 }
-function iconCandidates(host){
+function iconCandidates(host,page){
   const root='https://'+host;
-  return [root+'/favicon.ico',root+'/favicon.svg',root+'/favicon-32x32.png',
-    root+'/apple-touch-icon.png'];
+  const key=siteIconKey(page),project=key.startsWith(host+'/')?key.slice(host.length+1):'';
+  const base=project?root+'/'+encodeURIComponent(project):root;
+  const roots=[base+'/favicon.ico',base+'/favicon.svg',base+'/favicon-32x32.png',
+    base+'/apple-touch-icon.png'];
+  if(project)roots.push(root+'/favicon.ico',root+'/favicon.svg');
+  return roots;
 }
 function iconFallback(host){
   const chip=document.createElement('span');
   chip.className='site-icon-fallback'+(host==='chatgpt.com'||host.endsWith('.chatgpt.com')?' site-icon-chatgpt':'');
   chip.textContent=chip.classList.contains('site-icon-chatgpt')?'✳':
     (host.replace(/^www\./,'').charAt(0).toUpperCase()||'◆');
-  // Distinct visible fallback at 16px even if the site supplies no icon.
   let hash=0;for(const c of host)hash=(hash*31+c.charCodeAt(0))>>>0;
   chip.style.setProperty('--favicon-hue',String(hash%360));
   return chip;
 }
-function refreshHostIcons(host){
-  document.querySelectorAll('.tab-symbol[data-site-host]').forEach(slot=>{
-    if(slot.dataset.siteHost!==host)return;
-    const state=faviconCache.get(host);
-    if(!state?.src)return;
-    const img=document.createElement('img');
-    img.alt='';img.decoding='async';img.loading='eager';img.referrerPolicy='no-referrer';
-    img.src=state.src;
-    slot.replaceChildren(img);
+function paintIcon(slot,source){
+  const img=document.createElement('img');
+  img.alt='';img.decoding='async';img.loading='eager';img.referrerPolicy='no-referrer';
+  img.src=source;slot.replaceChildren(img);
+}
+function refreshHostIcons(key){
+  document.querySelectorAll('.tab-symbol[data-site-key]').forEach(slot=>{
+    if(slot.dataset.siteKey!==key)return;
+    const id=Number(slot.dataset.tabId);
+    const state=nativeTabIcons.get(id);
+    const src=(state?.key===key&&state.src)||faviconCache.get(key)?.src;
+    if(src)paintIcon(slot,src);
   });
 }
 function discoverSiteIcon(host,page){
-  if(faviconCache.has(host))return;
+  const key=siteIconKey(page);
+  if(!key)return;
+  const previous=faviconCache.get(key);
+  if(previous?.src||previous?.loading||
+      (previous?.failedAt&&Date.now()-previous.failedAt<30000))return;
   const state={src:null,loading:true};
-  faviconCache.set(host,state);
-  const candidates=iconCandidates(host);
+  faviconCache.set(key,state);
+  const candidates=iconCandidates(host,page);
   const tryIcon=index=>{
+    if(faviconCache.get(key)!==state)return;
     if(index>=candidates.length){
-      // Reuse native site-declared icon discovery for sites such as ChatGPT
-      // with app-specific favicon paths rather than /favicon.ico.
-      if(!window.__TAURI__||!page||state.discovered)return;
+      if(!window.__TAURI__||!page||state.discovered){
+        state.loading=false;state.failedAt=Date.now();return;
+      }
       state.discovered=true;
       void api.command('bookmark-site-icons',page).then(found=>{
-        if(!Array.isArray(found))return;
-        const extras=found.filter(url=>typeof url==='string'&&url.startsWith('https://')).slice(0,5);
+        if(faviconCache.get(key)!==state)return;
+        const extras=Array.isArray(found)?found.filter(url=>typeof url==='string'&&url.startsWith('https://')).slice(0,5):[];
         if(extras.length){candidates.push(...extras);tryIcon(index);}
-      }).catch(()=>{});
+        else{state.loading=false;state.failedAt=Date.now();}
+      }).catch(()=>{state.loading=false;state.failedAt=Date.now();});
       return;
     }
     const probe=new Image();
     probe.decoding='async';probe.referrerPolicy='no-referrer';
     probe.onload=()=>{
+      if(faviconCache.get(key)!==state)return;
       if(probe.naturalWidth===0||probe.naturalHeight===0){tryIcon(index+1);return;}
-      state.src=candidates[index];state.loading=false;refreshHostIcons(host);
-      rememberFavicon(host,candidates[index]);
+      state.src=candidates[index];state.loading=false;refreshHostIcons(key);
+      rememberFavicon(key,candidates[index]);
     };
     probe.onerror=()=>tryIcon(index+1);
     probe.src=candidates[index];
@@ -186,43 +213,60 @@ function discoverSiteIcon(host,page){
 }
 function renderSiteIcon(tab,slot){
   slot.replaceChildren();
+  slot.dataset.tabId=String(tab.id);
   if(tab.secretTab){
     slot.textContent='◈';
     slot.classList.add('secret-tab-icon');
-    slot.removeAttribute('data-site-host');
+    slot.removeAttribute('data-site-key');
     return;
   }
-  slot.classList.remove('secret-tab-icon');
-  slot.classList.remove('private-eye');
-  slot.removeAttribute('data-site-host');
+  slot.classList.remove('secret-tab-icon','private-eye');
+  slot.removeAttribute('data-site-key');
   if(!tab.url||!/^https?:\/\//i.test(tab.url)){
     if(!tab.url||tab.url==='about:blank'){
       const image=document.createElement('img');
       image.className='minternet-new-tab-icon';
       image.src='./minternet-brand.png';
-      image.alt='';
-      image.decoding='async';
-      slot.append(image);
-    }else{
-      slot.append(iconFallback('',tab.private));
-    }
+      image.alt='';image.decoding='async';slot.append(image);
+    }else slot.append(iconFallback(''));
     return;
   }
-  let host;
-  try{host=new URL(tab.url).hostname.toLowerCase();}catch{
-    slot.append(iconFallback(''));return;
-  }
-  slot.dataset.siteHost=host;
-  const cached=faviconCache.get(host);
-  if(cached?.src){
-    const img=document.createElement('img');
-    img.alt='';img.decoding='async';img.loading='eager';img.referrerPolicy='no-referrer';
-    img.src=cached.src;slot.append(img);
-    if(!tab.private&&!cached.persisted)rememberFavicon(host,cached.src);
+  const key=siteIconKey(tab.url),host=new URL(tab.url).hostname.toLowerCase();
+  slot.dataset.siteKey=key;
+  const native=nativeTabIcons.get(tab.id);
+  const cached=faviconCache.get(key);
+  const image=(native?.key===key&&native.src)||cached?.src;
+  if(image){
+    paintIcon(slot,image);
+    if(!tab.private&&!cached?.persisted&&!cached?.native&&cached?.src)
+      rememberFavicon(key,cached.src);
   }else{
     slot.append(iconFallback(host));
     discoverSiteIcon(host,tab.url);
   }
+}
+// WebView2 supplies the actual favicon image bytes from its own browser cache.
+// There is no guessing or cross-site probe required for an opened Windows tab.
+if(window.__TAURI__?.event){
+  void window.__TAURI__.event.listen('minternet:native-favicon',event=>{
+    const {tabId,page,image}=event.payload||{};
+    if(!Number.isSafeInteger(tabId)||typeof page!=='string'||
+        typeof image!=='string'||image.length>125000||
+        !/^data:image\/png;base64,[a-z0-9+/=]+$/i.test(image))return;
+    const tab=snapshot.tabs.find(t=>t.id===tabId);
+    if(!tab||tab.secretTab||!/^https?:\/\//.test(tab.url))return;
+    let source,actual;
+    try{source=new URL(page);actual=new URL(tab.url);}catch{return;}
+    if(source.origin!==actual.origin)return;
+    const key=siteIconKey(page);
+    if(!key||key!==siteIconKey(tab.url))return;
+    nativeTabIcons.set(tabId,{key,src:image});
+    if(!tab.private){
+      faviconCache.set(key,{src:image,loading:false,persisted:true,native:true});
+      persistFavicon(key,image);
+    }
+    refreshHostIcons(key);
+  }).catch(()=>{});
 }
 function buildTab(tab, active) {
   const root = document.createElement('div');
@@ -283,6 +327,8 @@ function render(data) {
     focusCancelled=true;
   }
   snapshot = data;
+  const ids=new Set(data.tabs.map(t=>t.id));
+  for(const id of nativeTabIcons.keys())if(!ids.has(id))nativeTabIcons.delete(id);
   const tabs = byId('tabs');
   const active = data.tabs.find(t => t.id === data.activeId);
   if(pendingNavigation){

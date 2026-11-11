@@ -160,3 +160,16 @@ test('unknown OAuth-looking popup URLs cannot bypass cross-site blocker',()=>{
  assert.match(native,/intentional_new_tab_shortcut/);
  assert.match(native,/trusted_auth_destination\(&url\)\|\|same_origin_auth/);
 });
+
+test('Windows tabs consume actual WebView2 favicon bytes, not root guesses',()=>{
+  const native=read('native/desktop/src-tauri/src/main.rs'),ui=read('ui/app.js');
+  assert.match(native,/FaviconChangedEventHandler::create/);
+  assert.match(native,/GetFavicon\(COREWEBVIEW2_FAVICON_IMAGE_FORMAT_PNG/);
+  assert.match(native,/minternet:native-favicon/);
+  assert.match(ui,/siteIconKey\(page\)/);
+  assert.match(ui,/host.endsWith\('\.github\.io'\)/);
+  assert.match(ui,/nativeTabIcons\.set\(tabId,\{key,src:image\}\)/);
+  assert.match(ui,/!tab\.private/);
+  assert.match(ui,/persistFavicon\(key,image\)/);
+  assert.match(ui,/if\(faviconCache\.get\(key\)!==state\)return/);
+});
