@@ -1,7 +1,7 @@
 'use strict';
 // The toolbar icon contains a real transparent <input type="file">.
 // Native WebView2 sees a genuine mouse click on the input: no hidden-input
-// picker.click() synthetic event, no dialog plugin, and no intermediate window.
+// synthetic file-dialog activation, dialog plugin, or intermediate window.
 (()=>{
   const icon=document.getElementById('mediaPlayerButton');
   const picker=document.getElementById('minternetMediaPicker');
