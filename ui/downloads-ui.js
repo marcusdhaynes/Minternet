@@ -7,7 +7,7 @@
   const badge=document.getElementById('downloadsBadge');
   if(!api||!button||!badge)return;
   let entries=[],panel=null,refreshing=false,activeProgress=false,dragPending=false;
-  const acknowledged=new Set();
+  let acknowledging=false;
   const command=(name,value)=>api.command(name,value);
   function close(){
     if(!panel)return;
@@ -26,9 +26,9 @@
     // Only downloads that appeared after the last panel review count.
     // Opening the panel acknowledges current transfers, but a future
     // download becomes a new notification again.
-    const count=entries.filter(entry=>
+    const count=panel?0:entries.filter(entry=>
       (entry.status==='downloading'||entry.status==='completed')&&
-      !acknowledged.has(entry.id)).length;
+      entry.unread===true).length;
     badge.hidden=!count;
     badge.textContent=count>9?'9+':String(count);
     badge.classList.toggle('in-progress',active>0);
@@ -41,7 +41,6 @@
     return (i?n.toFixed(n>=10?1:2):Math.round(n))+' '+units[i];
   }
   function render(){
-    if(panel)for(const entry of entries)acknowledged.add(entry.id);
     updateBadge();
     // Preserve the originating row while the OS drag is being started.
     // Download progress polling must not replace it under the pointer.
@@ -140,6 +139,18 @@
     const clear=panel.querySelector('.downloads-clear');
     clear.disabled=!entries.length;
   }
+  async function acknowledgeDownloads(){
+    for(const entry of entries)entry.unread=false;
+    updateBadge();
+    if(acknowledging)return;
+    acknowledging=true;
+    try{
+      // A native mutation writes the acknowledgement to durable download
+      // history. Restarts, polling and late DownloadEvents cannot resurrect it.
+      await command('downloads-acknowledge');
+    }catch(error){window.minternetToast?.('Could not clear download counter: '+String(error));}
+    finally{acknowledging=false;}
+  }
   async function refresh(){
     if(refreshing)return;
     refreshing=true;
@@ -160,10 +171,9 @@
   }
   async function open(){
     if(panel){close();return;}
-    for(const entry of entries)acknowledged.add(entry.id);
-    badge.hidden=true;
-    badge.textContent='';
-    updateBadge();
+    // Clear existing notifications *persistently* on every open,
+    // including those restored from an earlier browsing session.
+    await acknowledgeDownloads();
     if(window.__TAURI__)await command('chrome-overlay',true);
     const host=document.createElement('section');
     host.className='system-popup-root minternet-context-menu downloads-popup';
@@ -181,7 +191,18 @@
     header.append(title,clear);
     const list=document.createElement('div');list.className='downloads-entries';
     const footer=document.createElement('div');footer.className='downloads-footer';
-    footer.textContent='Files are saved in your Downloads folder';
+    const footerLabel=document.createElement('span');
+    footerLabel.textContent='Files remain in your selected Downloads folder';
+    const openFolder=document.createElement('button');
+    openFolder.type='button';openFolder.className='downloads-open-folder';
+    openFolder.textContent='Open Folder';
+    openFolder.addEventListener('click',async()=>{
+      try{
+        const result=await command('downloads-folder-open');
+        if(result?.message)window.minternetToast?.(result.message);
+      }catch(error){window.minternetToast?.(String(error));}
+    });
+    footer.append(footerLabel,openFolder);
     host.append(header,list,footer);
     document.body.append(host);
     panel=host;button.setAttribute('aria-expanded','true');
@@ -189,12 +210,18 @@
     document.addEventListener('pointerdown',outside,true);
     document.addEventListener('keydown',key,true);
     await refresh();
+    await acknowledgeDownloads();
     position();
   }
   button.addEventListener('click',()=>{void open();});
   if(window.__TAURI__?.event?.listen){
     window.__TAURI__.event.listen('minternet:downloads',event=>{
-      if(Array.isArray(event.payload)){entries=event.payload;render();if(activeProgress)void refresh().catch(()=>{});}
+      if(Array.isArray(event.payload)){
+        entries=event.payload;
+        render();
+        if(panel&&entries.some(entry=>entry.unread))void acknowledgeDownloads();
+        if(activeProgress)void refresh().catch(()=>{});
+      }
     }).catch(()=>{});
   }
   void refresh();
