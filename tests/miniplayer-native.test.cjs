@@ -23,8 +23,12 @@ test('Minternet has a separate trusted media window and compact button before To
 test('media player uses local user-picked Blob and supports floating audio/video modes',()=>{
   const js=read('ui/media-player.js');
   new vm.Script(js);
-  assert.match(js,/picker\.files\?\.\[0\]/);
-  assert.match(js,/URL\.createObjectURL\(file\)/);
+  const launch=read('ui/media-launch.js');
+  new vm.Script(launch);
+  assert.match(launch,/picker\.files\?\.\[0\]/);
+  assert.match(launch,/URL\.createObjectURL\(file\)/);
+  assert.match(js,/selectSource\(selected\)/);
+  assert.match(js,/media-player-current/);
   assert.match(js,/body\.dataset\.mode=current/);
   assert.match(js,/win\.startDragging\(\)/);
   assert.match(js,/startResizeDragging\('SouthEast'\)/);
@@ -42,4 +46,14 @@ test('browser compositor is notified after bounds and window move, preserving si
  assert.match(native,/WindowEvent::Moved\(_\)/);
  assert.match(native,/schedule_surface_restore\(&handle\)/);
  assert.doesNotMatch(native,/view\.eval\("location\.reload\(\)"/);
+});
+
+test('toolbar selects file before opening player, and cancellation opens nothing',()=>{
+ const launch=read('ui/media-launch.js');
+ const native=read('native/desktop/src-tauri/src/main.rs');
+ assert.ok(launch.indexOf('picker.click()')<launch.indexOf("command('media-player-open'"));
+ assert.match(launch,/if\(!file\|\|busy\)return/);
+ assert.match(native,/\.visible\(false\)/);
+ assert.match(native,/if name=="media-player-current"/);
+ assert.match(native,/Only local media can be opened/);
 });

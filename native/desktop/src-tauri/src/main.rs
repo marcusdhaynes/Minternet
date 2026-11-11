@@ -23,6 +23,8 @@ const CHROME: f64 = 52.0;
 const BOOKMARK_BAR: f64 = 22.0;
 const FIND_BAR: f64 = 22.0;
 struct FindBarState(Mutex<bool>);
+#[derive(Default)]
+struct LocalMediaSelection(Mutex<Option<Value>>);
 fn find_visible(app:&tauri::AppHandle)->bool{
     app.state::<FindBarState>().0.lock().map(|v|*v).unwrap_or(false)
 }
@@ -3389,14 +3391,35 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
     // OAuth, Drive and Gmail are only available to the trusted local chrome.
     // All remote network calls run on worker threads so they never pause the
     // native browser event loop. No Google token is returned to web content.
+    if name=="media-player-current" {
+        let current=app.state::<LocalMediaSelection>().0.lock()
+            .map_err(|e|e.to_string())?.clone();
+        return Ok(current.unwrap_or(Value::Null));
+    }
     if name=="media-player-open" {
-        // A separate native WebView window avoids a full-screen transparent
-        // chrome overlay that could cover or block the current website.
+        // No window is created until the trusted chrome's file picker
+        // has returned a local File and its opaque Blob URL.
+        let blob=value.get("url").and_then(Value::as_str)
+            .filter(|s|s.len()<320).ok_or("Selected local file required")?;
+        let inner=blob.strip_prefix("blob:").ok_or("Only local media can be opened")?;
+        let parsed=tauri::Url::parse(inner).map_err(|e|e.to_string())?;
+        if !matches!(parsed.scheme(),"http"|"https"|"tauri") ||
+            !matches!(parsed.host_str(),Some("tauri.localhost")|Some("localhost")){
+            return Err("Media selection must come from the local Minternet toolbar".into());
+        }
+        let name=value.get("name").and_then(Value::as_str)
+            .filter(|s|s.len()<=260).unwrap_or("Local Media");
+        let mime=value.get("mime").and_then(Value::as_str)
+            .filter(|s|s.len()<=130).unwrap_or("");
+        let selected=json!({"url":blob,"name":name,"mime":mime});
+        *app.state::<LocalMediaSelection>().0.lock()
+            .map_err(|e|e.to_string())?=Some(selected.clone());
         if let Some(player)=app.get_webview_window("minternet-media-player"){
+            let _=app.emit_to("minternet-media-player","minternet:media-selected",selected);
             let _=player.show();let _=player.set_focus();
             return Ok(json!({"ok":true,"existing":true}));
         }
-        let player=WebviewWindowBuilder::new(
+        WebviewWindowBuilder::new(
                 &app,"minternet-media-player",
                 WebviewUrl::App("media-player.html".into()))
             .title("Minternet Local Media Player")
@@ -3407,8 +3430,8 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             .transparent(true)
             .always_on_top(true)
             .skip_taskbar(true)
+            .visible(false)
             .build().map_err(|e|e.to_string())?;
-        let _=player.set_focus();
         return Ok(json!({"ok":true,"existing":false}));
     }
     if name=="volume-get" {
@@ -5515,6 +5538,7 @@ fn main() {
         .manage(SessionSaveQueued(AtomicBool::new(false)))
         .manage(SurfaceRestoreQueued(AtomicBool::new(false)))
         .manage(FindBarState(Mutex::new(false)))
+        .manage(LocalMediaSelection::default())
         .manage(privacy_shield::ShieldState(Mutex::new(privacy_shield::ShieldConfig::default())))
         .invoke_handler(tauri::generate_handler![browser_action, browser_snapshot])
         .setup(|app| {

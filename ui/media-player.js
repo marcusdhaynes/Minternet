@@ -57,31 +57,47 @@
         mode==='audio'?76:mode==='video'?258:116));
     }catch{}
   }
-  async function selectFile(file){
-    if(!file)return;
-    // File is an OS-mediated user selection. The file never enters a tab,
-    // cloud service, or any network request; it stays in this local WebView.
-    for(const media of Object.values(mediaElements)){media.pause();media.removeAttribute('src');media.hidden=true;media.load();}
-    if(url)URL.revokeObjectURL(url);
-    url=URL.createObjectURL(file);
+  async function selectSource(selection){
+    if(!selection || typeof selection.url!=='string' ||
+       !selection.url.startsWith('blob:')){
+      fail('Cannot open the selected local file.');
+      return;
+    }
+    // The file was picked by the trusted chrome WebView; its Blob stays
+    // alive in that WebView while the separate floating window plays it.
+    for(const media of Object.values(mediaElements)){
+      media.pause();media.removeAttribute('src');media.hidden=true;media.load();
+    }
+    url=selection.url;
     error.hidden=true;
-    current=kindFor(file);
+    current=kindFor({name:selection.name||'',type:selection.mime||''});
     document.body.dataset.mode=current;
     chooser.hidden=true;controls.hidden=false;resize.hidden=current!=='video';
     const media=active();
     media.hidden=false;media.src=url;media.load();
     ensureGain(media);
     await resizeWindow(current);
+    await win?.show(); // never expose the intermediate chooser screen
     updateControls();
-    try{await media.play();}catch{/* Play button remains available for codecs/autoplay blocks. */}
+    try{await media.play();}catch{}
     updateControls();
   }
-  $('chooseFile').addEventListener('click',()=>picker.click());
-  picker.addEventListener('change',()=>{
-    const file=picker.files?.[0];
-    if(file)void selectFile(file);
-    picker.value='';
-  });
+  // Query the latest selection after initial load, eliminating the race
+  // where the window opens before the event listener is installed.
+  async function startSelectedMedia(){
+    try{
+      const selected=await tauri?.core?.invoke('browser_action',
+        {name:'media-player-current',value:null});
+      if(selected?.url)await selectSource(selected);
+      else await win?.close();
+    }catch{await win?.close();}
+  }
+  if(tauri?.event){
+    void tauri.event.listen('minternet:media-selected',event=>{
+      void selectSource(event.payload);
+    }).catch(()=>{});
+  }
+  void startSelectedMedia();
   toggle.addEventListener('click',async()=>{
     const media=active();if(!media)return;
     if(media.paused){
@@ -104,7 +120,7 @@
   }
   close.addEventListener('click',()=>{
     for(const media of Object.values(mediaElements))media.pause();
-    if(url)URL.revokeObjectURL(url);
+    // The chrome owns the Blob URL; it revokes it on replacement or exit.
     void win?.close();
   });
   drag.addEventListener('pointerdown',event=>{
