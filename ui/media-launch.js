@@ -1,56 +1,39 @@
 'use strict';
-// The toolbar icon contains a real transparent <input type="file">.
-// Native WebView2 sees a genuine mouse click on the input: no hidden-input
-// synthetic file-dialog activation, dialog plugin, or intermediate window.
+// The icon invokes the native operating-system Open File dialog directly.
+// No hidden input, synthetic click, WebView2 picker or intermediate window.
 (()=>{
-  const icon=document.getElementById('mediaPlayerButton');
-  const picker=document.getElementById('minternetMediaPicker');
-  if(!icon||!picker)return;
-  let busy=false,activeBlob=null;
+  const button=document.getElementById('mediaPlayerButton');
+  if(!button)return;
   function report(message){
-    if(typeof window.minternetToast==='function')window.minternetToast(message);
-    else{
-      // A visible fallback prevents a failed player start from appearing to
-      // do nothing if the toast subsystem has not loaded.
-      let status=document.getElementById('minternetMediaStatus');
-      if(!status){
-        status=document.createElement('div');
-        status.id='minternetMediaStatus';
-        status.setAttribute('role','alert');
-        document.body.append(status);
-      }
-      status.textContent=message;
-      status.hidden=false;
-      setTimeout(()=>{status.hidden=true;},7500);
+    if(typeof window.minternetToast==='function'){
+      window.minternetToast(message);
     }
+    let alert=document.getElementById('minternetMediaStatus');
+    if(!alert){
+      alert=document.createElement('div');
+      alert.id='minternetMediaStatus';
+      alert.setAttribute('role','alert');
+      alert.hidden=true;
+      document.body.appendChild(alert);
+    }
+    alert.textContent=message;
+    alert.hidden=false;
+    setTimeout(()=>{alert.hidden=true;},8500);
   }
-  picker.addEventListener('change',async()=>{
-    const file=picker.files?.[0];
-    picker.value='';
-    if(!file||busy)return; // Cancel never opens the player.
-    busy=true;icon.classList.add('media-loading');
-    picker.disabled=true;
-    let selectedUrl=null;
+  let busy=false;
+  button.addEventListener('click',async()=>{
+    if(busy)return;
+    busy=true;button.disabled=true;button.setAttribute('aria-busy','true');
     try{
-      if(!window.minternet?.command)throw Error('Native Minternet bridge is unavailable');
-      selectedUrl=URL.createObjectURL(file);
-      const answer=await window.minternet.command('media-player-open',{
-        url:selectedUrl,name:file.name,mime:file.type||'',size:file.size
-      });
-      if(!answer?.ok)throw Error(answer?.message||'The media window did not open');
-      if(activeBlob&&activeBlob!==selectedUrl)URL.revokeObjectURL(activeBlob);
-      activeBlob=selectedUrl;
-      selectedUrl=null; // owned by the trusted chrome while the player runs
+      const invoke=window.__TAURI__?.core?.invoke;
+      if(!invoke)throw Error('Native file picker unavailable in this preview');
+      const result=await invoke('browser_action',{name:'media-player-pick',value:null});
+      if(result?.cancelled)return;
+      if(!result?.ok)throw Error(result?.message||'Media selection could not start');
     }catch(error){
       report('Media player: '+String(error?.message||error));
     }finally{
-      if(selectedUrl)URL.revokeObjectURL(selectedUrl);
-      busy=false;picker.disabled=false;
-      icon.classList.remove('media-loading');
+      busy=false;button.disabled=false;button.removeAttribute('aria-busy');
     }
-  });
-  window.addEventListener('pagehide',()=>{
-    if(activeBlob)URL.revokeObjectURL(activeBlob);
-    activeBlob=null;
   });
 })();
