@@ -111,7 +111,7 @@
     const header=document.createElement('div');header.className='shield-popup-header';
     const title=document.createElement('strong');title.textContent='Privacy Shield';
     const count=document.createElement('small');
-    count.textContent=blockedThisSession+' Native Popups Blocked';
+    count.textContent=blockedThisSession+' Blocked Navigations';
     header.append(title,count);
     popup.append(header);
     const host=document.createElement('div');
@@ -161,7 +161,7 @@
     popup.append(link);
     const info=document.createElement('small');
     info.className='shield-popup-footnote';
-    info.textContent='Blocks unwanted popups and selected ad elements. Cannot guarantee ad-free video or unlock subscriber content.';
+    info.textContent='Popup windows are allowed. Optional content filters remain; unsolicited file downloads are still prevented.';
     popup.append(info);
   }
   function position(){
