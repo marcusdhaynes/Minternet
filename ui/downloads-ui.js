@@ -7,7 +7,7 @@
   const badge=document.getElementById('downloadsBadge');
   if(!api||!button||!badge)return;
   let entries=[],panel=null,refreshing=false,activeProgress=false,dragPending=false;
-  let acknowledging=false;
+  let acknowledging=false,ackPending=false;
   const command=(name,value)=>api.command(name,value);
   function close(){
     if(!panel)return;
@@ -142,12 +142,15 @@
   async function acknowledgeDownloads(){
     for(const entry of entries)entry.unread=false;
     updateBadge();
-    if(acknowledging)return;
+    if(acknowledging){ackPending=true;return;}
     acknowledging=true;
     try{
       // A native mutation writes the acknowledgement to durable download
-      // history. Restarts, polling and late DownloadEvents cannot resurrect it.
-      await command('downloads-acknowledge');
+      // history. Rerun after concurrent downloads to avoid lost clears.
+      do{
+        ackPending=false;
+        await command('downloads-acknowledge');
+      }while(ackPending);
     }catch(error){window.minternetToast?.('Could not clear download counter: '+String(error));}
     finally{acknowledging=false;}
   }
