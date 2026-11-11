@@ -27,6 +27,8 @@ test('media player uses local user-picked Blob and supports floating audio/video
   new vm.Script(launch);
   assert.match(launch,/picker\.files\?\.\[0\]/);
   assert.match(launch,/URL\.createObjectURL\(file\)/);
+  assert.match(read('ui/index.html'),/id="minternetMediaPicker" type="file"/);
+  assert.doesNotMatch(launch,/picker\.click\(\)/);
   assert.match(js,/selectSource\(selected\)/);
   assert.match(js,/media-player-current/);
   assert.match(js,/body\.dataset\.mode=current/);
@@ -48,12 +50,45 @@ test('browser compositor is notified after bounds and window move, preserving si
  assert.doesNotMatch(native,/view\.eval\("location\.reload\(\)"/);
 });
 
-test('toolbar selects file before opening player, and cancellation opens nothing',()=>{
- const launch=read('ui/media-launch.js');
- const native=read('native/desktop/src-tauri/src/main.rs');
- assert.ok(launch.indexOf('picker.click()')<launch.indexOf("command('media-player-open'"));
+test('direct media chooser accepts a real user click and cancellation opens nothing',()=>{
+ const markup=read('ui/index.html'),launch=read('ui/media-launch.js');
+ const native=read('native/desktop/src-tauri/src/main.rs'),styles=read('ui/styles.css');
+ const start=markup.indexOf('<label id="mediaPlayerButton"');
+ const end=markup.indexOf('</label>',start);
+ assert.ok(start>=0&&end>start);
+ const label=markup.slice(start,end);
+ assert.match(label,/id="minternetMediaPicker" type="file"/);
+ assert.match(styles,/#minternetMediaPicker\{/);
+ assert.match(styles,/opacity:0!important;display:block!important/);
+ assert.doesNotMatch(launch,/picker\.click\(\)|picker\.hidden=true|if\(!button\|\|!window\.minternet\)return/);
  assert.match(launch,/if\(!file\|\|busy\)return/);
+ assert.match(launch,/picker\.addEventListener\('change'/);
+ assert.match(launch,/window\.minternet\.command\('media-player-open'/);
+ assert.match(launch,/Native Minternet bridge is unavailable/);
  assert.match(native,/\.visible\(false\)/);
  assert.match(native,/if name=="media-player-current"/);
- assert.match(native,/Only local media can be opened/);
+});
+test('media chooser reports the real native failure instead of silently doing nothing',async()=>{
+ const launch=read('ui/media-launch.js');
+ const events={},toasts=[];
+ let picker={files:[{name:'clip.mp4',size:1200,type:'video/mp4'}],value:'sample',
+   disabled:false,addEventListener(n,fn){events[n]=fn}};
+ let button={classList:{add(){},remove(){}}};
+ const fakeWindow={
+   minternet:{command:async()=>({message:'Local media could not be opened'})},
+   minternetToast:s=>toasts.push(s),addEventListener(){},
+ };
+ const fakeDocument={getElementById(id){
+   if(id==='mediaPlayerButton')return button;
+   if(id==='minternetMediaPicker')return picker;
+   return null;
+ }};
+ vm.runInNewContext(launch,{window:fakeWindow,document:fakeDocument,
+   URL:{createObjectURL:()=> 'blob:http://tauri.localhost/1234',
+        revokeObjectURL(){}},setTimeout});
+ assert.equal(typeof events.change,'function');
+ await events.change();
+ assert.equal(toasts.length,1);
+ assert.match(toasts[0],/Local media could not be opened/);
+ assert.equal(picker.disabled,false);
 });
