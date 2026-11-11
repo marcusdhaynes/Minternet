@@ -8,7 +8,7 @@
   const controls=$('playerControls'),toggle=$('togglePlayback'),scrubber=$('playbackPosition');
   const close=$('playerClose'),resize=$('resizeCorner'),drag=$('dragZone');
   const volume={level:100,muted:false};
-  let current=null,url=null,sourceGeneration=0,normalizing=false,usedCodecFallback=false;
+  let current=null,url=null,sourceGeneration=0,normalizing=false,normalizingGeneration=0,usedCodecFallback=false;
   const HIDE_DELAY=5000,DRAG_THRESHOLD=5,MIN_VIDEO_WIDTH=80;
   let controlsTimer=null,lastVideoRatio=16/9,gesture=null;
   function showControls(){
@@ -44,9 +44,10 @@
     if(generation!==sourceGeneration||normalizing||usedCodecFallback)return false;
     if(!tauri?.core?.invoke)return false;
     normalizing=true;
+    normalizingGeneration=generation;
     const media=active();
     if(!quiet){
-      error.textContent='Preparing this format with the local codec engine…';
+      error.textContent='Preparing this format with the local codec engine (first use may download codecs)…';
       error.hidden=false;
     }
     try{
@@ -68,7 +69,7 @@
       }
       return false;
     }finally{
-      normalizing=false;
+      if(normalizingGeneration===generation)normalizing=false;
     }
   }
   async function maybeNormalize(selection,generation){
@@ -97,7 +98,7 @@
   function kindFor(file){
     const ext=(file.name.split('.').pop()||'').toLowerCase();
     if(file.type.startsWith('audio/')||
-       /^(mp3|aac|m4a|wav|flac|ogg|oga|opus|aiff|aif|wma|mid|midi)$/.test(ext))return 'audio';
+       /^(mp3|aac|m4a|wav|flac|ogg|oga|opus|aiff|aif|wma|mid|midi|ape|ac3|eac3|dts|amr|mka|alac|caf|wv|tta|tak)$/.test(ext))return 'audio';
     return 'video';
   }
   async function resizeWindow(mode){
@@ -124,6 +125,7 @@
     const generation=++sourceGeneration;
     usedCodecFallback=false;
     normalizing=false;
+    normalizingGeneration=0;
     error.hidden=true;
     current=kindFor({name:selection.name||'',type:selection.mime||''});
     document.body.dataset.mode=current;
@@ -169,8 +171,9 @@
   toggle.addEventListener('click',async()=>{
     const media=active();if(!media)return;
     if(media.paused){
-      try{await media.play();}catch{
-        void codecFallback(sourceGeneration);
+      try{await media.play();}catch(e){
+        if(e?.name==='NotSupportedError')void codecFallback(sourceGeneration);
+        else if(e?.name!=='NotAllowedError')fail('Playback failed: '+String(e?.message||e));
       }
     }else media.pause();
     updateControls();
