@@ -6,6 +6,7 @@
 <title>Minternet Local Media Player</title>
 <link rel="stylesheet" href="./media-player.css">
 <script src="./media-player-geometry.js" defer></script>
+<script src="./media-player-subtitles.js" defer></script>
 <script src="./media-player.js" defer></script></head>
 <body data-mode="chooser">
   <main class="player-root">
@@ -14,10 +15,34 @@
     <video id="localVideo" playsinline preload="metadata" hidden></video>
     <audio id="localAudio" preload="metadata" hidden></audio>
     <div id="mediaError" role="status" hidden></div>
-    <div class="player-controls" id="playerControls" hidden>
-      <button id="togglePlayback" type="button" aria-label="Play or Pause" title="Play or Pause">▶</button>
-      <input id="playbackPosition" type="range" min="0" max="1000" step="1" value="0" aria-label="Scrub Media">
+    <div class="subtitle-overlay" id="subtitleOverlay" role="status" dir="auto" hidden></div>
+    <div class="subtitle-popover" id="subtitlePanel" hidden>
+      <strong>Subtitles</strong>
+      <span id="subtitleName">Off</span>
+      <div class="subtitle-actions">
+        <button id="subtitlePick" type="button">Load SRT / VTT / ASS</button>
+        <button id="subtitleOff" type="button">Off</button>
+      </div>
     </div>
-    <button id="resizeCorner" type="button" aria-label="Resize Player" title="Drag to Resize" hidden>◢</button>
+    <div class="player-controls" id="playerControls" aria-label="Mini-player media controls" hidden>
+      <div class="player-seek-row">
+        <span class="timecode" id="currentTime">0:00</span>
+        <input id="playbackPosition" type="range" min="0" max="1000" step="1" value="0" aria-label="Scrub Media">
+        <span class="timecode" id="durationTime">0:00</span>
+      </div>
+      <div class="player-action-row">
+        <button id="togglePlayback" class="player-icon-button player-play" type="button"
+          aria-label="Play or Pause, Hold to Stop" title="Play / Pause · Hold to Stop">
+          <svg id="playbackIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8.5 5.5 10.5 6.5-10.5 6.5V5.5Z"/></svg>
+        </button>
+        <span class="player-action-spacer"></span>
+        <button id="subtitleToggle" class="player-icon-button" type="button" aria-label="Subtitles" title="Subtitles" aria-expanded="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M7.5 12.5h3.5m-3.5 3h3.5m2-3h3.5m-3.5 3h3.5"/></svg>
+        </button>
+        <button id="fullscreenToggle" class="player-icon-button" type="button" aria-label="Full Screen" title="Full Screen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.5 4.5H4.5v4m11-4h4v4m-15 7v4h4m11-4v4h-4"/></svg>
+        </button>
+      </div>
+    </div>
   </main>
 </body></html>
