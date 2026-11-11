@@ -33,8 +33,13 @@
     if(validRect(viewport)){
       // Align to any segment of the content-area perimeter, not only corners.
       // Keep the player *inside* Minternet's web content when it fits.
-      const xs=[viewport.left,viewport.right-size.width];
-      const ys=[viewport.top,viewport.bottom-size.height];
+      // Both sides of every content edge are valid docking targets:
+      // inside the browser for normal PiP, outside when the user parks
+      // the mini-player next to the browser without obscuring a webpage.
+      const xs=[viewport.left-size.width,viewport.left,
+                viewport.right-size.width,viewport.right];
+      const ys=[viewport.top-size.height,viewport.top,
+                viewport.bottom-size.height,viewport.bottom];
       offer(viewport,{x:xs,y:ys},0);
     }
     if(validRect(workArea)){
