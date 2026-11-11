@@ -123,7 +123,8 @@ test('mini-player gestures and controls respect the video surface',()=>{
   assert.match(player,/mediaElements\.video,drag/);
   assert.match(player,/Math\.hypot\(dx,dy\)<DRAG_THRESHOLD/);
   assert.match(player,/toggle\.click\(\)/);
-  assert.match(player,/w\/videoRatio\(\)/);
+  assert.match(player,/geometry\.aspectSize/);
+  assert.match(player,/media-player-snap-targets/);
   assert.match(css,/controls-idle \.player-controls/);
   assert.match(native,/\.min_inner_size\(80\.0,45\.0\)/);
 });
