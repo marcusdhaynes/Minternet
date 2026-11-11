@@ -17,15 +17,15 @@ final class BrowserState: ObservableObject {
         @MainActor static func makeWebView(isPrivate: Bool) -> WKWebView {
             let configuration = WKWebViewConfiguration()
             configuration.websiteDataStore = isPrivate ? .nonPersistent() : .default()
-            configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+            configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
             let view = WKWebView(frame: .zero, configuration: configuration)
             view.allowsBackForwardNavigationGestures = true
             view.scrollView.contentInsetAdjustmentBehavior = .never
             return view
         }
-        @MainActor init(isPrivate: Bool) {
+        @MainActor init(isPrivate: Bool, adoptedView: WKWebView? = nil) {
             self.isPrivate = isPrivate
-            self.webView = Tab.makeWebView(isPrivate: isPrivate)
+            self.webView = adoptedView ?? Tab.makeWebView(isPrivate: isPrivate)
         }
     }
 
@@ -43,18 +43,21 @@ final class BrowserState: ObservableObject {
 
     var active: Tab? { tabs.first(where: { $0.id == selectedId }) }
 
-    func newTab(privateMode: Bool = false, load: URL? = nil) {
+    @discardableResult
+    func newTab(privateMode: Bool = false, load: URL? = nil,
+                adoptedView: WKWebView? = nil) -> WKWebView? {
         guard tabLimit == 0 || tabs.count < tabLimit else {
             message = "Tab limit reached (\(tabLimit)). Set Tab Limit to 0 for unlimited."
-            return
+            return nil
         }
         if let former=active { former.inactiveSince = Date() }
-        let tab = Tab(isPrivate: privateMode)
+        let tab = Tab(isPrivate: privateMode, adoptedView: adoptedView)
         tabs.append(tab)
         selectedId = tab.id
         address = load?.absoluteString ?? ""
         tab.url = load
         if let load { tab.webView?.load(URLRequest(url: load)) }
+        return tab.webView
     }
 
     func select(_ id: UUID) {
@@ -247,10 +250,19 @@ struct SecureWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-            guard let url = action.request.url, url.scheme == "https" else { return nil }
-            // OAuth and login popups open as another Minternet tab instead of Safari.
-            Task { @MainActor in state.newTab(privateMode: state.active?.isPrivate ?? false, load: url) }
-            return nil
+            // WebKit requires returning its actual related child WebView
+            // to preserve window.opener and about:blank popup behavior.
+            if let url = action.request.url,
+               url.scheme != "https" && url.absoluteString != "about:blank" {
+                return nil // normal scheme restriction, not popup filtering
+            }
+            return MainActor.assumeIsolated {
+                let child = WKWebView(frame: .zero, configuration: configuration)
+                child.navigationDelegate = self
+                child.uiDelegate = self
+                let privateSource = state.tabs.first(where: { $0.webView === webView })?.isPrivate ?? false
+                return state.newTab(privateMode: privateSource, adoptedView: child)
+            }
         }
     }
 
