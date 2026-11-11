@@ -2037,7 +2037,7 @@ fn emit_browser_favicon(app:tauri::AppHandle,id:u32,
         loop {
             let mut chunk=[0u8;8192];
             let mut count=0u32;
-            if (unsafe{stream.Read(chunk.as_mut_ptr().cast(),8192,&mut count)}).is_err(){break;}
+            if (unsafe{stream.Read(chunk.as_mut_ptr().cast(),8192,Some(&mut count))}).is_err(){break;}
             if count==0{break;}
             if bytes.len()+count as usize>90_000{return Ok(());}
             bytes.extend_from_slice(&chunk[..count as usize]);
@@ -2048,7 +2048,7 @@ fn emit_browser_favicon(app:tauri::AppHandle,id:u32,
             json!({"tabId":id,"page":page,"image":format!("data:image/png;base64,{encoded}")}));
         Ok(())
     }));
-    let _=unsafe{favicon.GetFavicon(COREWEBVIEW2_FAVICON_IMAGE_FORMAT_PNG,callback)};
+    let _=unsafe{favicon.GetFavicon(COREWEBVIEW2_FAVICON_IMAGE_FORMAT_PNG,&callback)};
 }
 #[cfg(windows)]
 fn attach_browser_favicon(app:&tauri::AppHandle,id:u32,view:&tauri::Webview){
@@ -2056,7 +2056,7 @@ fn attach_browser_favicon(app:&tauri::AppHandle,id:u32,view:&tauri::Webview){
     use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_15;
     let caller=app.clone();
     let _=view.with_webview(move |native|{
-        let Ok(web)=unsafe{native.controller().CoreWebView2()} else{return};
+        let Ok(web)=(unsafe{native.controller().CoreWebView2()}) else{return};
         let Ok(favicon)=web.cast::<ICoreWebView2_15>() else{return};
         let handler=webview2_com::FaviconChangedEventHandler::create(Box::new(move |source,_|{
             if let Some(source)=source {
@@ -2065,7 +2065,7 @@ fn attach_browser_favicon(app:&tauri::AppHandle,id:u32,view:&tauri::Webview){
             Ok(())
         }));
         let mut token=0i64;
-        let _=unsafe{favicon.add_FaviconChanged(handler,&mut token)};
+        let _=unsafe{favicon.add_FaviconChanged(&handler,&mut token)};
     });
 }
 #[cfg(windows)]
