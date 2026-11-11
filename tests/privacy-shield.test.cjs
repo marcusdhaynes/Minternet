@@ -26,12 +26,16 @@ test('Privacy Shield toolbar, settings and trusted JS controller stay connected'
   new (require('node:vm').Script)(ui,{filename:'ui/privacy-shield-ui.js'});
 });
 
-test('Downloads notification resets on panel review, but future downloads still count',()=>{
+test('Downloads acknowledgement persists across reviews, restarts and refreshing',()=>{
   const downloads=source('ui/downloads-ui.js');
-  assert.match(downloads,/const acknowledged=new Set\(\)/);
-  assert.match(downloads,/for\(const entry of entries\)acknowledged\.add\(entry\.id\)/);
-  assert.match(downloads,/!acknowledged\.has\(entry\.id\)/);
-  assert.match(downloads,/badge\.hidden=true/);
+  const native=source('native/desktop/src-tauri/src/main.rs');
+  assert.match(downloads,/entry\.unread===true/);
+  assert.match(downloads,/downloads-acknowledge/);
+  assert.match(downloads,/await acknowledgeDownloads\(\)/);
+  assert.match(native,/"downloads-acknowledge"/);
+  assert.match(native,/unread:bool/);
+  assert.match(native,/entry\.unread=false/);
+  assert.match(native,/save_recent_downloads\(&app\)/);
 });
 
 test('Native WebView2 allows popups while preserving separate page policies',()=>{
