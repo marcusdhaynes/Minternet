@@ -61,45 +61,8 @@ pub fn host_matches(host:&str,entry:&str)->bool{
 pub fn is_allowed(config:&ShieldConfig,host:&str)->bool{
     config.allow_sites.iter().any(|s|host_matches(host,s))
 }
-fn built_in_popup(host:&str)->bool{
-    ["popads.net","popcash.net","propellerads.com","onclickads.net",
-     "exoclick.com","trafficstars.com","adsterra.com","ad-maven.com",
-     "popunder.net","clickadu.com","hilltopads.net","clickaine.com",
-     "adexchangeclear.com","onclickperformance.com"]
-    .iter().any(|s|host_matches(host,s))
-}
-// On some streaming pages a "Play" click intentionally opens an ad
-// window first, often through about:blank. Treat these as abusive
-// popunders even when JavaScript still has transient user activation.
-fn high_risk_popup_source(host:&str)->bool{
-    ["123moviesfree.net"].iter().any(|s|host_matches(host,s))
-}
-pub fn block_blank_popup(config:&ShieldConfig,source:&str)->bool{
-    if !config.enabled||config.mode=="off"{return false;}
-    let source_host=tauri::Url::parse(source).ok()
-        .and_then(|u|u.host_str().map(str::to_ascii_lowercase))
-        .unwrap_or_default();
-    if is_allowed(config,&source_host){return false;}
-    // An about:blank popunder can redirect to an arbitrary advertising host
-    // after WebView2 has already accepted its creation.
-    true
-}
-pub fn block_popup(config:&ShieldConfig,source:&str,target:&str)->bool{
-    if !config.enabled||config.mode=="off"{return false;}
-    let Some(target_host)=tauri::Url::parse(target).ok()
-        .and_then(|u|u.host_str().map(str::to_ascii_lowercase)) else{return false};
-    let source_host=tauri::Url::parse(source).ok()
-        .and_then(|u|u.host_str().map(str::to_ascii_lowercase))
-        .unwrap_or_default();
-    if is_allowed(config,&source_host)||is_allowed(config,&target_host){return false;}
-    if config.blocked_domains.iter().any(|s|host_matches(&target_host,s)) {return true;}
-    if config.block_ads && built_in_popup(&target_host){return true;}
-    // Blocking only known ad domains missed rotating ad domains opened
-    // on video-play clicks. Cross-site popups are denied by default in both
-    // Balanced and Strict; same-site links and explicit site exceptions work.
-    !source_host.is_empty() &&
-        !host_matches(&target_host,&source_host) && !host_matches(&source_host,&target_host)
-}
+// The Privacy Shield filters site content and navigation, not popup creation.
+// All website popup requests are handled by the browser without domain rules.
 pub fn block_navigation(config:&ShieldConfig,target:&tauri::Url)->bool{
     if !config.enabled||config.mode=="off"{return false;}
     let Some(host)=target.host_str().map(str::to_ascii_lowercase) else{return false};
@@ -167,12 +130,8 @@ const SCRIPT:&str=r###"
           adHosts.some(rule=>domainMatches(target,rule)));
     }catch{return false;}
   };
-  // Do not replace window.open. Returning null on a Play click can cause
-  // legitimate embedded players to abort their own playback initialization.
-  // All popup decisions run in native WebView2 NewWindowRequested instead.
-  // When native rejects a popunder, WebView2 returns a dummy WindowProxy to
-  // the initiating script without creating an actual advertising window.
-  // This keeps window.open, OAuth window.opener and site playback semantics.
+  // Never intercept window.open or suppress native popup windows.
+  // This script filters selected content requests and cosmetic elements only.
   // Prevent common third-party ad/tracking requests initiated by page JS.
   // This is page-level interception, not a substitute for WebView2's native
   // WebResourceRequested API or a complete ABP/uBlock filter-list engine.
@@ -301,35 +260,9 @@ pub fn script(config:&ShieldConfig)->String {
 mod tests{
     use super::*;
     #[test]
-    fn strict_and_allowlist() {
-        let mut p=ShieldConfig{mode:"strict".into(),..Default::default()};
-        assert!(block_popup(&p,"https://example.com/","https://ads.other.com/"));
-        assert!(!block_popup(&p,"https://example.com/","https://example.com/next"));
-        p.allow_sites.push("example.com".into());
-        assert!(!block_popup(&p,"https://example.com/","https://ads.other.com/"));
-    }
-    #[test]
-    fn click_driven_popunders_and_blank_windows_are_denied(){
-        let mut p=ShieldConfig::default();
-        // An arbitrary third-party player is not proof of advertising.
-        assert!(block_popup(&p,
-            "https://ww8.123moviesfree.net/movie/example",
-            "https://cdn-streaming-player.example/embed"));
-        assert!(block_popup(&p,
-            "https://ww8.123moviesfree.net/movie/example",
-            "https://popads.net/landing"));
-        p.mode="strict".into();
-        assert!(block_popup(&p,
-            "https://ww8.123moviesfree.net/movie/example",
-            "https://cdn-streaming-player.example/embed"));
-        p.mode="balanced".into();
-        assert!(block_blank_popup(&p,
-            "https://ww8.123moviesfree.net/movie/example"));
-        assert!(block_blank_popup(&p,"https://www.example.org/login"));
-        assert!(!block_popup(&p,"https://www.example.org/","https://example.org/help"));
-        p.allow_sites.push("123moviesfree.net".into());
-        assert!(!block_blank_popup(&p,
-            "https://ww8.123moviesfree.net/movie/example"));
+    fn no_popup_filter_is_installed(){
+        let p=ShieldConfig::default();
+        assert!(!block_navigation(&p,&tauri::Url::parse("https://other.example").unwrap()));
     }
     #[test]
     fn domains_are_exact_or_subdomains(){
