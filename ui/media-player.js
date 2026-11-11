@@ -454,7 +454,7 @@
   // Snap flush to the browser's inner content edges (not just the outer
   // desktop corners) and to the monitor work area, which excludes taskbars.
   // Every coordinate in snapPosition is a physical pixel for DPI correctness.
-  const SNAP=26;
+  const SNAP=40; // Physical pixels: usable even at 125–200% display scaling.
   let snapTimer=null,snapping=false;
   async function snapToEdge(){
     if(!win||snapping||fullscreenActive||gesture?.resize||resizingVideo)return;
