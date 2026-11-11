@@ -529,7 +529,7 @@ public class MainActivity extends Activity {
         s.setAllowFileAccessFromFileURLs(false);
         s.setAllowUniversalAccessFromFileURLs(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        s.setJavaScriptCanOpenWindowsAutomatically(false);
+        s.setJavaScriptCanOpenWindowsAutomatically(true);
         s.setSupportMultipleWindows(true);
         s.setSafeBrowsingEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(true);
@@ -575,7 +575,7 @@ public class MainActivity extends Activity {
                 if(tab.web==v && favicon!=null){tab.icon=favicon;updateTabLabels();}
             }
             @Override public boolean onCreateWindow(WebView v,boolean dialog,boolean userGesture,Message resultMsg){
-                if(!userGesture)return false;
+                // Browser popups are allowed regardless of gesture source.
                 BrowserTab child=newTab("about:blank",true);
                 if(child==null)return false;
                 WebView.WebViewTransport transport=(WebView.WebViewTransport)resultMsg.obj;
