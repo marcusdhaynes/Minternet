@@ -85,7 +85,7 @@ test('Password autofill uses unlocked unique HTTPS-origin logins and does not ov
   assert.match(main,/tab\.private\|\|tab\.secret_id\.is_some\(\)/);
   assert.match(main,/password\.autocomplete==='new-password'/);
   assert.match(main,/if\(password\.value\|\|user\?\.value/);
-  assert.match(main,/observer\.disconnect\(\),9000/);
+  assert.match(main,/setTimeout\(stop,90000\)/);
   assert.match(vault,/if matches\.next\(\)\.is_some\(\)\{return None;\}/);
 });
 

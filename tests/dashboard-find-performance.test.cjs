@@ -173,3 +173,20 @@ test('Windows tabs consume actual WebView2 favicon bytes, not root guesses',()=>
   assert.match(ui,/persistFavicon\(key,image\)/);
   assert.match(ui,/if\(faviconCache\.get\(key\)!==state\)return/);
 });
+
+test('login autofill supports one-time password and delayed sign-in steps safely',()=>{
+  const native=read('native/desktop/src-tauri/src/main.rs');
+  const match=native.match(/const LOGIN_FILL_JS:&str=r###"([\s\S]*?)"###;/);
+  assert.ok(match,'missing login autofill script');
+  new vm.Script(match[1].replace('__MINTERNET_LOGIN_PAYLOAD__',
+    JSON.stringify({origin:'https://accounts.example.com',username:'person',password:'secret'})));
+  assert.match(match[1],/current-password/);
+  assert.match(match[1],/usernamePrepared=put/);
+  assert.match(match[1],/el\.shadowRoot/);
+  assert.match(match[1],/frame\.defaultView\?\.location\.origin===credential\.origin/);
+  assert.match(match[1],/register\.test\(location\.pathname\)/);
+  assert.match(match[1],/credential\.password=''/);
+  assert.match(native,/minternet-autofill\.invalid\/__retry/);
+  assert.match(native,/duration_since\(\*last\)<Duration::from_millis\(700\)/);
+  assert.match(native,/fill_saved_credential\(&main,id,false,None\)/);
+});

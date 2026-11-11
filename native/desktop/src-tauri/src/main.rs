@@ -2109,6 +2109,21 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                 ['https://minternet-find.invalid/__open','_blank']);
             }
           },true);
+          // A focus signal does not contain a username, password, or page text.
+          // Native code will enforce exact HTTPS origin and unlocked vault.
+          let lastLoginSignal=0;
+          window.addEventListener('focusin',event=>{
+            const field=event.target;
+            if(!field||field.tagName!=='INPUT')return;
+            const type=(field.type||'').toLowerCase();
+            const auto=(field.autocomplete||'').toLowerCase();
+            const login=type==='password'||auto.includes('username')||
+              (type==='email'&&/login|signin|sign-in|auth|account|session/i.test(location.pathname));
+            if(!login||Date.now()-lastLoginSignal<800)return;
+            lastLoginSignal=Date.now();
+            Reflect.apply(nativeOpen,window,
+              ['https://minternet-autofill.invalid/__retry','_blank']);
+          },true);
         })();"#)
         // Honor Ctrl/Cmd + plus/minus and Ctrl + mouse-wheel when focus is
         // inside the actual website WebView, not just the browser toolbar.
@@ -2172,6 +2187,30 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
         .on_new_window(move |url, features| {
             if url.as_str()=="https://minternet-find.invalid/__open" {
                 let _=for_popup.emit_to("chrome","minternet:find-open",json!({}));
+                return NewWindowResponse::Deny;
+            }
+            if url.as_str()=="https://minternet-autofill.invalid/__retry" {
+                // A website may request a retry, but it cannot specify the
+                // credential or receive any native response. The vault and
+                // exact visible HTTPS origin are checked again in native code.
+                let proceed=for_popup.state::<PopupDeduper>().0.lock().map(|mut state|{
+                    let key=(id,String::from("autofill"));
+                    let now=Instant::now();
+                    if state.get(&key).is_some_and(|last|
+                        now.duration_since(*last)<Duration::from_millis(700)){return false;}
+                    state.insert(key,now);
+                    true
+                }).unwrap_or(false);
+                if proceed {
+                    let app=for_popup.clone();
+                    std::thread::spawn(move||{
+                        std::thread::sleep(Duration::from_millis(100));
+                        let main=app.clone();
+                        let _=app.run_on_main_thread(move||{
+                            let _=fill_saved_credential(&main,id,false,None);
+                        });
+                    });
+                }
                 return NewWindowResponse::Deny;
             }
             let opener=for_popup.state::<Mutex<Browser>>().lock().ok()
@@ -2552,51 +2591,144 @@ fn fill_saved_credential(app:&tauri::AppHandle,id:u32,manual:bool,username:Optio
     // React/SPA forms added after the load event; never submit automatically,
     // change existing input, or select an arbitrary login on multi-account sites.
     const LOGIN_FILL_JS:&str=r###"(function(){
-        'use strict';
-        const credential=__MINTERNET_LOGIN_PAYLOAD__;
-        if(location.protocol!=='https:'||location.origin!==credential.origin||
-           window!==window.top)return;
-        // Never fill registration, reset or password-change pages.
-        if(/\/(?:sign-up|signup|register|join|create-account|password-reset|forgot-password|reset-password|change-password)(?:[/?#]|$)/i.test(location.pathname))return;
-        const visible=e=>e instanceof HTMLInputElement&&
-          !e.disabled&&!e.readOnly&&e.getClientRects().length>0;
-        const put=(element,value)=>{
-          if(!element)return;
-          const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')?.set;
-          if(setter)setter.call(element,value);else element.value=value;
-          element.dispatchEvent(new Event('input',{bubbles:true}));
-          element.dispatchEvent(new Event('change',{bubbles:true}));
-        };
-        function tryFill(){
-          if(location.origin!==credential.origin)return true;
-          const passwords=[...document.querySelectorAll('input[type="password"]')].filter(visible);
-          if(passwords.length!==1)return false;
-          const password=passwords[0];
-          if(password.autocomplete==='new-password'||
-             password.autocomplete==='one-time-code')return true;
-          const form=password.form||document;
-          if(form instanceof HTMLFormElement &&
-             /(?:sign.?up|register|create.?account|reset.?password)/i.test(
-               (form.getAttribute('action')||'')+' '+form.id+' '+form.className))return true;
-          const inputs=[...form.querySelectorAll('input')].filter(visible);
-          const user=inputs.find(e=>e.autocomplete==='username')||
-            inputs.find(e=>e.type==='email')||
-            inputs.find(e=>e.type==='text'&&/user|email|login/i.test(e.name+' '+e.id));
-          // A user already entering credentials always wins.
-          if(password.value||user?.value&&user.value!==credential.username)return true;
-          put(user,credential.username);
-          put(password,credential.password);
-          return true;
+      'use strict';
+      const credential=__MINTERNET_LOGIN_PAYLOAD__;
+      if(location.protocol!=='https:'||location.origin!==credential.origin||
+         window!==window.top)return;
+      const register=/(?:sign.?up|register|create.?account|join|forgot.?password|reset.?password|change.?password)/i;
+      const signin=/(?:log.?in|sign.?in|auth|account|session|identify)/i;
+      const safeRoute=()=>!register.test(location.pathname);
+      const visible=el=>el instanceof HTMLInputElement&&
+        !el.disabled&&!el.readOnly&&el.getClientRects().length>0&&
+        el.type!=='hidden'&&el.type!=='file';
+      const token=el=>(el.getAttribute('autocomplete')||'').toLowerCase().split(/\s+/);
+      const hint=el=>[
+        el.name||'',el.id||'',el.placeholder||'',el.getAttribute('aria-label')||'',
+        el.labels?.[0]?.textContent||'',el.closest('label')?.textContent||''
+      ].join(' ').toLowerCase();
+      function roots(){
+        const result=[document],seen=new Set(result),queue=[document];
+        let budget=0;
+        while(queue.length&&budget<6000&&result.length<28){
+          const root=queue.shift();
+          let nodes;
+          try{nodes=root.querySelectorAll('*');}catch{continue;}
+          for(const node of nodes){
+            if(++budget>6000)break;
+            if(node.shadowRoot&&!seen.has(node.shadowRoot)){
+              seen.add(node.shadowRoot);queue.push(node.shadowRoot);result.push(node.shadowRoot);
+            }
+            if(node.tagName==='IFRAME'){
+              try{
+                const frame=node.contentDocument;
+                if(frame&&frame.defaultView?.location.origin===credential.origin&&!seen.has(frame)){
+                  seen.add(frame);queue.push(frame);result.push(frame);
+                }
+              }catch{}
+            }
+          }
         }
-        if(tryFill())return;
-        // In SPA applications, the input may mount after page-load. Keep the
-        // observer bounded; credentials never cross native chrome IPC or logs.
-        if(!document.documentElement)return;
-        const observer=new MutationObserver(()=>{
-          if(tryFill())observer.disconnect();
-        });
-        observer.observe(document.documentElement,{childList:true,subtree:true});
-        setTimeout(()=>observer.disconnect(),9000);
+        return result;
+      }
+      function fields(){
+        const list=[];
+        for(const root of roots()){
+          try{list.push(...root.querySelectorAll('input'));}catch{}
+        }
+        return list.filter(visible);
+      }
+      const put=(element,value)=>{
+        if(!element||element.value||typeof value!=='string'||!value)return false;
+        const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')?.set;
+        if(setter)setter.call(element,value);else element.value=value;
+        element.dispatchEvent(new Event('input',{bubbles:true,composed:true}));
+        element.dispatchEvent(new Event('change',{bubbles:true,composed:true}));
+        return true;
+      };
+      const userCandidate=el=>
+        token(el).includes('username') ||
+        el.type==='email' || (el.type==='text' && /user|email|e.?mail|login|account/i.test(hint(el)));
+      const dangerousForm=el=>{
+        const form=el?.form;
+        return form instanceof HTMLFormElement &&
+          register.test([form.getAttribute('action')||'',form.id,form.className].join(' '));
+      };
+      let usernamePrepared=false,done=false,observer=null,delayed=0;
+      const stop=()=>{
+        done=true;
+        if(observer)observer.disconnect();
+        document.removeEventListener('focusin',onFocus,true);
+        window.removeEventListener('pageshow',attempt);
+        window.removeEventListener('popstate',attempt);
+        window.removeEventListener('hashchange',attempt);
+        if(delayed)clearTimeout(delayed);
+        // Avoid retaining the password in a long-lived page closure.
+        credential.password='';
+      };
+      function tryFill(){
+        if(done)return true;
+        if(location.origin!==credential.origin||!safeRoute()){stop();return true;}
+        const inputs=fields(),passwords=inputs.filter(el=>el.type==='password');
+        const current=passwords.filter(el=>token(el).includes('current-password'));
+        // A register/reset form can expose multiple new password inputs:
+        // never choose an arbitrary field.
+        const newPasswords=passwords.filter(el=>token(el).includes('new-password')||
+          token(el).includes('one-time-code'));
+        if(newPasswords.length && current.length===0)return false;
+        const password=current.length===1?current[0]:
+          (passwords.length===1&&newPasswords.length===0?passwords[0]:null);
+        if(password){
+          if(dangerousForm(password)){stop();return true;}
+          const form=password.form;
+          const local=form?inputs.filter(el=>el.form===form):inputs;
+          const account=local.find(userCandidate)||inputs.find(userCandidate);
+          // Never replace anything the person has already entered.
+          if(password.value || (account?.value&&account.value!==credential.username)){
+            stop();return true;
+          }
+          if(account)put(account,credential.username);
+          if(put(password,credential.password)){stop();return true;}
+          return false;
+        }
+        // Username-first providers (Google, Microsoft and many SPAs) show
+        // the email field before creating a password input.
+        const username=inputs.find(el=>token(el).includes('username'))||
+          inputs.find(el=>userCandidate(el)&&
+            (signin.test(location.pathname)||signin.test(
+              (el.form?.getAttribute('action')||'')+' '+
+              (el.form?.id||'')+' '+(el.form?.className||''))));
+        if(username&&!dangerousForm(username) &&
+           !usernamePrepared && !username.value){
+          usernamePrepared=put(username,credential.username);
+        }
+        // Retain the bounded observer until the password step mounts.
+        return false;
+      }
+      let last=0;
+      function attempt(){
+        if(done)return;
+        const now=Date.now();
+        if(now-last<70){
+          if(!delayed)delayed=setTimeout(()=>{delayed=0;attempt();},75);
+          return;
+        }
+        last=now;
+        tryFill();
+      }
+      function onFocus(event){
+        if(!event.target || event.target.tagName!=='INPUT')return;
+        attempt();
+      }
+      attempt();
+      if(done||!document.documentElement)return;
+      observer=new MutationObserver(attempt);
+      observer.observe(document.documentElement,
+        {childList:true,subtree:true,attributes:true,attributeFilter:['type','autocomplete','style','class']});
+      document.addEventListener('focusin',onFocus,true);
+      window.addEventListener('pageshow',attempt);
+      window.addEventListener('popstate',attempt);
+      window.addEventListener('hashchange',attempt);
+      setTimeout(stop,90000);
     })()"###;
     let mut payload=data.to_string();
     let mut script=LOGIN_FILL_JS.replace("__MINTERNET_LOGIN_PAYLOAD__",&payload);
@@ -4393,6 +4525,9 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             vault.put(origin,username.to_string(),password.to_string(),autofill)?;
             vault.save(&password_vault::file(&app)?)?;
             let _=app.emit_to("chrome","minternet:vault-changed",());
+            let active=app.state::<Mutex<Browser>>().lock()
+                .map_err(|e|e.to_string())?.active_id;
+            let _=fill_saved_credential(&app,active,false,None);
             return Ok(json!({"ok":true}));
         }
         "vault-remove" => {
