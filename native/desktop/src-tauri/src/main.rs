@@ -339,6 +339,8 @@ struct RecentDownload {
     path:String,
     status:String,
     private:bool,
+    #[serde(default)]
+    unread:bool,
 }
 #[derive(Default)]
 struct DownloadsState(Mutex<VecDeque<RecentDownload>>);
@@ -405,6 +407,8 @@ fn restore_recent_downloads(app:&tauri::AppHandle){
             || !real_file.is_file(){continue;}
         if entry.status=="downloading"{entry.status="interrupted".into();}
         if !matches!(entry.status.as_str(),"completed"|"failed"|"interrupted"){continue;}
+        // A restart must not make already-reviewed downloads unread again.
+        entry.unread=false;
         history.push_back(entry);
     }
 }
@@ -613,12 +617,13 @@ fn download_update(app:&tauri::AppHandle,url:&tauri::Url,path:Option<&std::path:
         let next=history.back().map(|d|d.id+1).unwrap_or(1);
         history.push_back(RecentDownload{
             id:next,name:file.file_name().and_then(|n|n.to_str()).unwrap_or("Download").to_string(),
-            source,path:file.to_string_lossy().to_string(),status:"downloading".into(),private
+            source,path:file.to_string_lossy().to_string(),status:"downloading".into(),private,unread:true
         });
         while history.len()>50 {history.pop_front();}
     }
     let summary=history.iter().rev().map(|d|json!({
-        "id":d.id,"name":d.name,"status":d.status,"private":d.private
+        "id":d.id,"name":d.name,"status":d.status,"private":d.private,
+        "unread":d.unread
     })).collect::<Vec<_>>();
     drop(history);
     let _=app.emit_to("chrome","minternet:downloads",summary);
@@ -3567,6 +3572,29 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         });
         return Ok(json!({"viewport":viewport}));
     }
+    if name=="media-player-subtitle-pick" {
+        let picked=tauri::async_runtime::spawn_blocking({
+            let handle=app.clone();
+            move||{
+                let picker=handle.dialog().file().set_title("Open Subtitles")
+                    .add_filter("Subtitle Files",&["srt","vtt","ass","ssa"]);
+                if let Some(main)=handle.get_window("main"){
+                    picker.set_parent(&main).blocking_pick_file()
+                }else{picker.blocking_pick_file()}
+            }
+        }).await.map_err(|e|format!("Subtitle picker failed: {e}"))?;
+        let Some(selected)=picked else{return Ok(json!({"cancelled":true}));};
+        let path=selected.into_path().map_err(|e|e.to_string())?;
+        let metadata=std::fs::metadata(&path).map_err(|e|e.to_string())?;
+        if !metadata.is_file()||metadata.len()>4_000_000{
+            return Err("Subtitle file must be smaller than 4 MB".into());
+        }
+        let source=std::fs::read(&path).map_err(|e|e.to_string())?;
+        let data=String::from_utf8(source).map_err(|_|
+            "Subtitle file must use UTF-8 encoding")?;
+        let name=path.file_name().and_then(|x|x.to_str()).unwrap_or("Subtitles");
+        return Ok(json!({"cancelled":false,"name":name,"content":data}));
+    }
     if name=="media-player-codec-available" {
         let cache=app.path().app_data_dir().map_err(|e|e.to_string())?.join("codec-engine");
         let path=app.state::<LocalMediaPath>().0.lock().map_err(|e|e.to_string())?.clone();
@@ -4507,6 +4535,44 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             return Ok(json!({"ok":true,"downloadFolder":current.to_string_lossy(),
                 "usingSystemDownloads":system}));
         }
+        "downloads-folder-open" => {
+            let directory=configured_download_folder(&app)?;
+            // Only an approved configured directory, never an arbitrary JS path.
+            open_download_file(&directory)?;
+            return Ok(json!({"ok":true}));
+        }
+        "downloads-folder-choose" => {
+            let picked=tauri::async_runtime::spawn_blocking({
+                let handle=app.clone();
+                move||{
+                    let picker=handle.dialog().file().set_title("Choose Downloads Folder");
+                    if let Some(main)=handle.get_window("main"){
+                        picker.set_parent(&main).blocking_pick_folder()
+                    }else{picker.blocking_pick_folder()}
+                }
+            }).await.map_err(|e|format!("Folder picker failed: {e}"))?;
+            let Some(folder)=picked else{return Ok(json!({"ok":true,"cancelled":true}));};
+            let selected=folder.into_path().map_err(|e|e.to_string())?;
+            if !selected.is_dir(){return Err("Please select an existing folder".into());}
+            let state=app.state::<BrowserPreferenceState>();
+            let mut prefs=state.0.lock().map_err(|e|e.to_string())?;
+            let mut updated=prefs.clone();
+            let target=selected.to_string_lossy().to_string();
+            if updated.download_folder.as_deref()!=Some(target.as_str()){
+                if let Some(previous)=updated.download_folder.take(){
+                    updated.previous_download_folders.retain(|s|s!=&previous);
+                    updated.previous_download_folders.push(previous);
+                    if updated.previous_download_folders.len()>8{
+                        updated.previous_download_folders.remove(0);
+                    }
+                }
+                updated.download_folder=Some(target.clone());
+            }
+            persist_preferences(&app,&updated)?;
+            *prefs=updated;
+            return Ok(json!({"ok":true,"cancelled":false,"downloadFolder":target,
+                "usingSystemDownloads":false}));
+        }
         "session-refresh-urls" => {
             let count=refresh_session_urls(&app);
             return Ok(json!({"ok":true,"updated":count}));
@@ -4521,8 +4587,17 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                     std::fs::metadata(&d.path).ok().map(|m|m.len()).unwrap_or(0)
                 }else{0};
                 json!({"id":d.id,"name":d.name,"status":d.status,
-                       "private":d.private,"receivedBytes":received})
+                       "private":d.private,"receivedBytes":received,
+                       "unread":d.unread})
             }).collect::<Vec<_>>()));
+        }
+        "downloads-acknowledge" => {
+            let state=app.state::<DownloadsState>();
+            let mut entries=state.0.lock().map_err(|e|e.to_string())?;
+            for download in entries.iter_mut(){download.unread=false;}
+            drop(entries);
+            save_recent_downloads(&app);
+            return Ok(json!({"ok":true}));
         }
         "downloads-clear" => {
             let state=app.state::<DownloadsState>();
