@@ -35,6 +35,7 @@ async function simulate({unlocked=true,logins=[{origin:'https://site.example',us
   const document={
     body:{append(...children){items.push(...children);}},
     visibilityState:'visible',
+    createElement(tag){return new Element(tag);},
     querySelector(){return null;},
     getElementById(){return null;}
   };
