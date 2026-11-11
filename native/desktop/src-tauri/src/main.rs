@@ -3302,11 +3302,27 @@ fn minternet_needs_audio_normalization(ffmpeg:&std::ffi::OsStr,path:&std::path::
         // Probe only declared audio stream metadata, not the full file.
         if let Some(codec)=line.split("Audio: ").nth(1){
             let codec=codec.split(|c:char|c==','||c.is_whitespace()).next().unwrap_or("");
-            return !matches!(codec,"aac"|"mp3"|"opus"|"vorbis"|"flac"|
-                "pcm_s16le"|"pcm_s24le"|"pcm_f32le");
+            return !codec.starts_with("pcm_")
+                && !matches!(codec,"aac"|"mp3"|"opus"|"vorbis"|"flac");
         }
     }
     false
+}
+
+fn minternet_video_copy_compatible(ffmpeg:&std::ffi::OsStr,path:&std::path::Path)->bool{
+    use std::process::{Command,Stdio};
+    let mut cmd=Command::new(ffmpeg);
+    cmd.args(["-nostdin","-hide_banner","-i"]);
+    cmd.arg(path);
+    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+    #[cfg(windows)]{
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    let Ok(output)=cmd.output()else{return false;};
+    let details=String::from_utf8_lossy(&output.stderr);
+    details.lines().filter_map(|line|line.split("Video: ").nth(1))
+        .any(|stream|stream.starts_with("h264 ") || stream.starts_with("h264,"))
 }
 
 fn minternet_cached_ffmpeg(cache:&std::path::Path)->Option<std::ffi::OsString>{
@@ -3395,13 +3411,28 @@ fn minternet_transcode_file(ffmpeg:std::ffi::OsString,path:&std::path::Path,
     let id=NEXT.fetch_add(1,Ordering::Relaxed);
     let dir=std::env::temp_dir().join("minternet-local-codec");
     std::fs::create_dir_all(&dir).map_err(|e|e.to_string())?;
+    // Keep failed/old transcodes from accumulating across sessions.
+    if let Ok(entries)=std::fs::read_dir(&dir){
+        for entry in entries.flatten(){
+            let file=entry.path();
+            let old=entry.metadata().and_then(|m|m.modified()).ok()
+                .and_then(|t|t.elapsed().ok())
+                .is_some_and(|age|age>std::time::Duration::from_secs(86400));
+            if old && file.file_name().and_then(|s|s.to_str())
+                .is_some_and(|s|s.starts_with("decoded-")){
+                std::fs::remove_file(file).ok();
+            }
+        }
+    }
     let out=dir.join(format!("decoded-{}-{}.{}",std::process::id(),id,
         if kind=="audio"{"m4a"}else{"mp4"}));
-    // First remux video losslessly (fast), while converting *any* supported
-    // source audio stream to AAC. If its video codec is incompatible with MP4,
-    // re-encode H.264 as a fallback rather than silently dropping the audio.
+    // Copy already-compatible H.264 without a costly video re-encode.
+    // HEVC/VP9/AV1/etc must become H.264, because a valid MP4 container
+    // alone does not guarantee WebView2 can decode the video track.
+    let video_can_copy=kind=="audio" || minternet_video_copy_compatible(&ffmpeg,path);
     for reencode_video in [false,true]{
         if reencode_video && kind=="audio"{break;}
+        if kind=="video" && !reencode_video && !video_can_copy{continue;}
         let mut cmd=Command::new(&ffmpeg);
         cmd.args(["-nostdin","-hide_banner","-loglevel","error","-y","-i"]);
         cmd.arg(path);
