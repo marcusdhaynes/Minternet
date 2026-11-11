@@ -72,6 +72,30 @@ jobs:
           "Minternet standalone EXE: $bytes bytes" >> $env:GITHUB_STEP_SUMMARY
           if ($bytes -ge 50000000) { throw "Portable executable exceeds 50,000,000 bytes" }
           Copy-Item $files[0].FullName "Minternet-Portable-x64.exe"
+      - name: Verify native media asset playback in actual Windows WebView2
+        shell: pwsh
+        run: |
+          $exe = "$env:RUNNER_TEMP\minternet-portable\Minternet-Portable-x64.exe"
+          $p = Start-Process -FilePath $exe -ArgumentList "--minternet-media-smoke" -PassThru
+          $marker = Join-Path $env:TEMP "minternet-media-$($p.Id).ok"
+          try {
+            $passed = $false
+            for ($i = 0; $i -lt 35; $i++) {
+              Start-Sleep -Seconds 2
+              $p.Refresh()
+              if ($p.HasExited) { throw "Minternet exited during local audio player smoke test" }
+              if (Test-Path $marker) { $passed = $true; break }
+            }
+            if (!$passed) { throw "Native media player failed to load a local WAV through Tauri asset streaming" }
+            $proof = Get-Content $marker -Raw
+            if ($proof -notmatch "Native local media player loaded WAV") {
+              throw "Incorrect media metadata proof: $proof"
+            }
+            "PASS: floating media WebView2 played local WAV through scoped native asset protocol." >> $env:GITHUB_STEP_SUMMARY
+          } finally {
+            if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
+            Remove-Item $marker -Force -ErrorAction SilentlyContinue
+          }
       - name: Test real website navigation INSIDE native WebView2 via chrome IPC
         shell: pwsh
         run: |
