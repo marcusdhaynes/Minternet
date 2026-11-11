@@ -39,7 +39,7 @@ test('Native WebView2 allows popups while preserving separate page policies',()=
   const shield=source('native/desktop/src-tauri/src/privacy_shield.rs');
   assert.match(main,/mod privacy_shield;/);
   assert.match(main,/\.initialization_script\(privacy_shield::script/);
-  assert.match(main,/if auth_target \{/);
+  assert.match(main,/WebviewWindowBuilder::new/);
   assert.match(main,/NEXT_POPUP_ID\.fetch_add\(1,Ordering::Relaxed\)/);
   assert.match(main,/NewWindowResponse::Create\{window\}/);
   assert.doesNotMatch(main,/privacy_shield::block_popup|privacy_shield::block_blank_popup/);
