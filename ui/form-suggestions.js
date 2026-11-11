@@ -57,27 +57,56 @@
     else if(kind==='payment')await window.minternetPayment?.open();
     else document.getElementById('passwordManagerOpen')?.click();
   }
+  // The trusted chrome WebView is only 52-96px tall when its overlay is
+  // closed. Measuring a popup against that tiny viewport used to produce
+  // a NEGATIVE top and draw a giant purple rectangle over the tab strip.
+  // This function is only called after native chrome-overlay has expanded.
+  function positionPanel(ctx){
+    const chromeTop=Number.isFinite(ctx.top)?Math.max(0,ctx.top):52;
+    const width=window.innerWidth,height=window.innerHeight;
+    if(width<160||height<=chromeTop+64)return false;
+    const popupWidth=Math.min(280,Math.max(176,Number(ctx.width)||176),width-16);
+    panel.style.width=popupWidth+'px';
+    panel.style.maxHeight=Math.max(64,height-chromeTop-12)+'px';
+    panel.style.left=Math.max(8,Math.min(Number(ctx.x)||8,width-popupWidth-8))+'px';
+    // Measure actual content, not an assumed 170px. A short list must not
+    // jump to the top of the browser when the page is near the viewport end.
+    const ideal=chromeTop+Math.max(5,Number(ctx.y)||0)+3;
+    panel.style.top=Math.max(chromeTop+4,
+      Math.min(ideal,height-panel.offsetHeight-8))+'px';
+    return true;
+  }
   async function render(ctx){
+    // Do not open a toolbar-obscuring dialog merely because a site has a
+    // login or email field. Show it only when there is something useful.
+    const status=await cmd('vault-status');
+    if(!status?.unlocked)return;
+    let logins=[],cards=[],identities=[];
+    if(ctx.kind==='login'){
+      const all=await cmd('vault-list');
+      logins=(Array.isArray(all)?all:[]).filter(item=>
+        item.origin===ctx.origin&&item.autofill!==false);
+      if(!logins.length&&!ctx.saveReady)return;
+    }else if(ctx.kind==='payment'){
+      const all=await cmd('vault-card-list');
+      cards=Array.isArray(all)?all:[];
+      if(!cards.length)return;
+    }else{
+      const all=await cmd('vault-identity-list');
+      identities=Array.isArray(all)?all:[];
+      if(!ctx.hasValue&&!identities.some(item=>
+        Array.isArray(item.fields)&&item.fields.includes(ctx.key)))return;
+    }
+    if(otherDialogs()||document.visibilityState==='hidden')return;
     active=ctx;
-    const width=Math.min(Math.max(ctx.width,160),window.innerWidth-16);
-    panel.style.width=width+'px';
-    panel.style.left=Math.min(Math.max(8,ctx.x),window.innerWidth-width-8)+'px';
-    panel.style.top=Math.min(Math.max(ctx.top+5,ctx.y+ctx.top+3),window.innerHeight-170)+'px';
-    backdrop.hidden=false;panel.hidden=false;
     panel.replaceChildren();
     const head=create('div','form-suggestion-head');
     head.append(create('strong','',ctx.kind==='login'?'Logins':
       ctx.kind==='payment'?'Payment Methods':'Identities'));
     head.append(action('×',()=>hide(true),'form-suggestion-x'));
     panel.append(head);
-    const status=await cmd('vault-status');
-    if(!active||fingerprint(active)!==fingerprint(ctx))return;
-    if(!status?.unlocked){
-      panel.append(create('small','form-suggestion-note','Encrypted vault is locked.'));
-      panel.append(action('Unlock to autofill',()=>openManager(ctx.kind),'form-suggestion-option'));
-    }else if(ctx.kind==='login'){
-      const items=(await cmd('vault-list')||[]).filter(item=>item.origin===ctx.origin&&item.autofill!==false);
-      for(const item of items.slice(0,7)){
+    if(ctx.kind==='login'){
+      for(const item of logins.slice(0,7)){
         panel.append(action('Fill · '+item.username,async()=>{
           const answer=await cmd('vault-fill',item.username);
           if(answer?.filled)hide();
@@ -87,23 +116,18 @@
       if(ctx.saveReady)panel.append(action('＋ Save this login',async()=>{
         await approved('vault-capture-login',null,'Login encrypted and saved.');
       },'form-suggestion-option'));
-      if(!items.length&&!ctx.saveReady)panel.append(
-        create('small','form-suggestion-note','No saved login for this website.'));
       panel.append(action('✎ Edit Logins',()=>openManager('login'),'form-suggestion-option'));
     }else if(ctx.kind==='payment'){
-      const cards=await cmd('vault-card-list')||[];
       for(const card of cards.slice(0,7)){
         panel.append(action('Fill · '+(card.label||card.name)+' ••••'+card.last4,async()=>{
           const response=await cmd('vault-card-fill',card.id);
           if(response?.filled)hide();
         },'form-suggestion-option'));
       }
-      if(!cards.length)panel.append(create('small','form-suggestion-note','No saved payment methods.'));
       panel.append(action('✎ Save or Edit Payment Method',()=>openManager('payment'),'form-suggestion-option'));
     }else{
-      const identities=await cmd('vault-identity-list')||[];
       for(const entry of identities.slice(0,10)){
-        if(entry.fields.includes(ctx.key)){
+        if(Array.isArray(entry.fields)&&entry.fields.includes(ctx.key)){
           panel.append(action('Fill · '+entry.label,async()=>{
             const response=await cmd('vault-identity-fill',entry.id);
             if(response?.filled)hide();
@@ -123,8 +147,25 @@
     const footer=create('div','form-suggestion-footer');
     footer.append(action('Ignore',()=>hide(true),'form-suggestion-ignore'));
     panel.append(footer);
-    await cmd('chrome-overlay',true);
+
+    // IMPORTANT: expand the native chrome WebView BEFORE reading innerHeight.
+    const expanded=await cmd('chrome-overlay',true);
+    if(expanded?.message){hide();return;}
+    for(let i=0;i<4&&window.innerHeight<=ctx.top+64;i++){
+      await new Promise(resolve=>requestAnimationFrame(resolve));
+    }
+    if(!active||fingerprint(active)!==fingerprint(ctx)||otherDialogs()){
+      hide();return;
+    }
+    panel.style.visibility='hidden';
+    panel.hidden=false;
+    if(!positionPanel(ctx)){hide();return;}
+    backdrop.hidden=false;
+    panel.style.visibility='';
   }
+  window.addEventListener('resize',()=>{
+    if(active&&isOpen()&&!positionPanel(active))hide();
+  });
   async function probe(){
     if(busy||isOpen()||otherDialogs()||document.visibilityState==='hidden')return;
     busy=true;
