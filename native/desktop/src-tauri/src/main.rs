@@ -2114,6 +2114,10 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
         // third-party Google sign-in. Keep explicit dangerous permissions
         // denied; let WebView2 handle identity permissions normally.
         .on_permission_request(|_view, kind| match kind {
+            // Media sites must reach WebView2's native, origin-scoped consent
+            // prompt. A blanket Deny here permanently breaks getUserMedia.
+            PermissionKind::Microphone | PermissionKind::Camera =>
+                PermissionResponse::Default,
             PermissionKind::Other => PermissionResponse::Default,
             _ => PermissionResponse::Deny,
         })
