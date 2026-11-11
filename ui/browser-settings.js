@@ -10,6 +10,7 @@
   const folder=$('downloadFolderPath'),saveFolder=$('downloadFolderSave');
   const reset=$('downloadFolderDefault'),status=$('browserPreferencesStatus');
   const tabLimit=$('tabLimit'),saveTabLimit=$('tabLimitSave');
+  const miniplayerFade=$('miniplayerFadeSeconds'),miniplayerStatus=$('miniplayerFadeStatus');
   if(!home||!saveHome||!folder||!saveFolder||!reset||!status||!tabLimit||!saveTabLimit)return;
   const defaultHome='https://www.google.com/';
   const newTabMode=$('newTabMode');
@@ -39,6 +40,7 @@
         home.value=result?.homepage||defaultHome;
         if(newTabMode)newTabMode.value=result?.newTabMode==='website'?'website':'dashboard';
         tabLimit.value=String(result?.tabLimit??0);
+        if(miniplayerFade)miniplayerFade.value=String(result?.miniplayerFadeSeconds??5);
       } catch {
         try {
           const result=await invoke('tab-limit-get');
@@ -52,6 +54,7 @@
       home.value=settings.homepage||defaultHome;
       if(newTabMode)newTabMode.value=settings.newTabMode==='website'?'website':'dashboard';
       tabLimit.value=String(settings.tabLimit??0);
+      if(miniplayerFade)miniplayerFade.value=String(settings.miniplayerFadeSeconds??5);
       folder.value=settings.usingSystemDownloads?'':settings.downloadFolder||'';
       folder.placeholder=settings.usingSystemDownloads
         ?settings.downloadFolder||'System Downloads folder'
@@ -98,6 +101,30 @@
     }catch(e){report('Tab Limit was not changed: '+String(e.message||e));}
     finally{setBusy(false);}
   }
+  async function updateMiniplayerFade(){
+    if(!miniplayerFade)return;
+    const raw=miniplayerFade.value.trim(),seconds=Number(raw);
+    if(raw===''||!Number.isSafeInteger(seconds)||seconds<0||seconds>300){
+      report('Mini-player fade delay must be 0–300 whole seconds.');
+      return;
+    }
+    miniplayerFade.disabled=true;
+    try{
+      const result=await invoke('miniplayer-fade-set',seconds);
+      if(!result?.ok)throw Error('Mini-player setting was not saved');
+      miniplayerFade.value=String(result.fadeSeconds);
+      if(miniplayerStatus){
+        miniplayerStatus.hidden=false;
+        miniplayerStatus.textContent=seconds===0
+          ?'Controls Stay Visible':'Controls Hide After '+seconds+' Seconds';
+      }
+    }catch(e){report('Mini-player setting not saved: '+String(e.message||e));}
+    finally{miniplayerFade.disabled=false;}
+  }
+  miniplayerFade?.addEventListener('change',()=>void updateMiniplayerFade());
+  miniplayerFade?.addEventListener('keydown',event=>{
+    if(event.key==='Enter'){event.preventDefault();void updateMiniplayerFade();}
+  });
   for(const [id,url] of [
     ['chromeExtensionStore','https://chromewebstore.google.com/'],
     ['firefoxExtensionStore','https://addons.mozilla.org/en-US/firefox/']
