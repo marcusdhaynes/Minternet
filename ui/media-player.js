@@ -10,7 +10,9 @@
   const volume={level:100,muted:false};
   let current=null,url=null,sourceGeneration=0,normalizing=false,normalizingGeneration=0,usedCodecFallback=false;
   const HIDE_DELAY=5000,DRAG_THRESHOLD=5,MIN_VIDEO_WIDTH=80;
+  const geometry=window.MinternetMediaGeometry;
   let controlsTimer=null,lastVideoRatio=16/9,gesture=null;
+  let pendingVideoSize=null,resizingVideo=false,metadataSizedGeneration=0;
   function showControls(){
     if(current!=='video')return;
     document.body.classList.remove('controls-idle');
@@ -25,8 +27,17 @@
   }
   async function sizeToVideo(width){
     if(!win||current!=='video')return;
-    const w=Math.max(MIN_VIDEO_WIDTH,width);
-    await win.setSize(new tauri.window.LogicalSize(w,w/videoRatio()));
+    pendingVideoSize=geometry.aspectSize(width,videoRatio(),MIN_VIDEO_WIDTH,45);
+    if(resizingVideo)return;
+    resizingVideo=true;
+    try{
+      while(pendingVideoSize&&current==='video'){
+        const size=pendingVideoSize;
+        pendingVideoSize=null;
+        await win.setSize(new tauri.window.LogicalSize(size.width,size.height));
+      }
+    }catch{/* Window may have closed during resize. */}
+    finally{resizingVideo=false;}
   }
   const active=()=>current&&mediaElements[current];
   // The local asset protocol is not the webview page's origin. Passing it through
@@ -105,11 +116,8 @@
   }
   async function resizeWindow(mode){
     if(!win)return;
-    try{
-      await win.setSize(new tauri.window.LogicalSize(
-        mode==='audio'?358:mode==='video'?410:368,
-        mode==='audio'?76:mode==='video'?258:116));
-    }catch{}
+    if(mode==='video')return sizeToVideo(410);
+    try{await win.setSize(new tauri.window.LogicalSize(358,76));}catch{}
   }
   async function selectSource(selection){
     if(!selection || typeof selection.url!=='string' ||
@@ -134,6 +142,7 @@
     controls.hidden=false;resize.hidden=current!=='video';
     document.body.classList.remove('controls-idle');
     clearTimeout(controlsTimer);
+    metadataSizedGeneration=0;
     const media=active();
     media.hidden=false;
     if(selection.smoke){
@@ -199,18 +208,25 @@
     });
   }
   mediaElements.video.addEventListener('loadedmetadata',()=>{
-    lastVideoRatio=videoRatio();
-    void sizeToVideo(Math.max(MIN_VIDEO_WIDTH,Math.round(258*lastVideoRatio)));
+    const ratio=videoRatio();
+    if(Number.isFinite(ratio)&&ratio>0)lastVideoRatio=ratio;
+    const first=metadataSizedGeneration!==sourceGeneration;
+    metadataSizedGeneration=sourceGeneration;
+    // Codec fallback may fire loadedmetadata a second time. Keep chosen size.
+    void sizeToVideo(first?Math.round(258*lastVideoRatio):window.innerWidth);
   });
   const root=document.querySelector('.player-root');
   root.addEventListener('pointermove',showControls);
   root.addEventListener('pointerenter',showControls);
+  root.addEventListener('pointerdown',showControls);
+  controls.addEventListener('focusin',showControls);
+  controls.addEventListener('input',showControls);
   function startGesture(event,isResize=false){
     if(event.button!==0||!win||current!=='video')return;
     event.preventDefault();
     event.stopPropagation();
     gesture={x:event.screenX,y:event.screenY,resize:isResize,
-      width:window.innerWidth,dragged:false,pending:false};
+      width:window.innerWidth,dragged:false,requestedWidth:window.innerWidth};
     event.currentTarget.setPointerCapture?.(event.pointerId);
     showControls();
   }
@@ -221,10 +237,8 @@
     g.dragged=true;
     if(g.resize){
       const delta=Math.abs(dx)>Math.abs(dy)*videoRatio()?dx:dy*videoRatio();
-      if(!g.pending){
-        g.pending=true;
-        void sizeToVideo(g.width+delta).finally(()=>{g.pending=false;});
-      }
+      g.requestedWidth=g.width+delta;
+      void sizeToVideo(g.requestedWidth);
     }else{
       // Only begin native dragging when the pointer has moved beyond a click.
       gesture=null;
@@ -234,6 +248,7 @@
   function endGesture(event){
     if(!gesture)return;
     const g=gesture;gesture=null;
+    if(g.resize&&g.dragged)void sizeToVideo(g.requestedWidth);
     if(!g.dragged&&!g.resize&&event.type==='pointerup')toggle.click();
     showControls();
   }
@@ -250,34 +265,38 @@
     void win?.close();
   });
   // Resizing is managed above to preserve the selected video's aspect ratio.
-  // Use physical monitor coordinates for DPI-correct snap on every display.
+  // Snap flush to the browser's inner content edges (not just the outer
+  // desktop corners) and to the monitor work area, which excludes taskbars.
+  // Every coordinate in snapPosition is a physical pixel for DPI correctness.
   const SNAP=26;
   let snapTimer=null,snapping=false;
   async function snapToEdge(){
-    if(!win||snapping)return;
+    if(!win||snapping||current!=='video')return;
     snapping=true;
     try{
-      const [monitor,position,size]=await Promise.all([
-        win.currentMonitor(),win.outerPosition(),win.outerSize()]);
+      const [monitor,position,size,targets]=await Promise.all([
+        win.currentMonitor(),win.outerPosition(),win.outerSize(),
+        tauri?.core?.invoke('browser_action',
+          {name:'media-player-snap-targets',value:null}).catch(()=>null)
+      ]);
       if(!monitor)return;
-      const left=monitor.position.x,top=monitor.position.y;
-      const right=left+monitor.size.width-size.width;
-      const bottom=top+monitor.size.height-size.height;
-      let x=position.x,y=position.y;
-      if(Math.abs(x-left)<=SNAP)x=left;
-      else if(Math.abs(x-right)<=SNAP)x=right;
-      if(Math.abs(y-top)<=SNAP)y=top;
-      else if(Math.abs(y-bottom)<=SNAP)y=bottom;
-      if(x!==position.x||y!==position.y){
-        await win.setPosition(new tauri.window.PhysicalPosition(x,y));
+      const area=monitor.workArea||{position:monitor.position,size:monitor.size};
+      const workArea={
+        left:area.position.x,top:area.position.y,
+        right:area.position.x+area.size.width,
+        bottom:area.position.y+area.size.height
+      };
+      const next=geometry.snapPosition(position,size,targets?.viewport,workArea,SNAP);
+      if(next.x!==position.x||next.y!==position.y){
+        await win.setPosition(new tauri.window.PhysicalPosition(next.x,next.y));
       }
     }catch{}finally{snapping=false;}
   }
   if(win){
     void win.onMoved(()=>{
-      if(snapping)return;
+      if(snapping||current!=='video')return;
       if(snapTimer!==null)clearTimeout(snapTimer);
-      snapTimer=setTimeout(()=>{snapTimer=null;void snapToEdge();},230);
+      snapTimer=setTimeout(()=>{snapTimer=null;void snapToEdge();},175);
     }).catch(()=>{});
   }
   if(tauri?.event){
