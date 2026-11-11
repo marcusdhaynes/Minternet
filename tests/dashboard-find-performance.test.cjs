@@ -182,7 +182,7 @@ test('login autofill supports one-time password and delayed sign-in steps safely
     JSON.stringify({origin:'https://accounts.example.com',username:'person',password:'secret'})));
   assert.match(match[1],/current-password/);
   assert.match(match[1],/usernamePrepared=put/);
-  assert.match(match[1],/el\.shadowRoot/);
+  assert.match(match[1],/node\.shadowRoot/);
   assert.match(match[1],/frame\.defaultView\?\.location\.origin===credential\.origin/);
   assert.match(match[1],/register\.test\(location\.pathname\)/);
   assert.match(match[1],/credential\.password=''/);

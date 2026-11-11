@@ -83,8 +83,8 @@ test('Password autofill uses unlocked unique HTTPS-origin logins and does not ov
   assert.match(main,/fill_saved_credential\(&app,active,false,None\)/);
   assert.match(main,/if actual_origin!=tab_origin\{return Ok\(false\);\}/);
   assert.match(main,/tab\.private\|\|tab\.secret_id\.is_some\(\)/);
-  assert.match(main,/password\.autocomplete==='new-password'/);
-  assert.match(main,/if\(password\.value\|\|user\?\.value/);
+  assert.match(main,/token\(el\)\.includes\('new-password'\)/);
+  assert.match(main,/if\(password\.value \|\| \(account\?\.value/);
   assert.match(main,/setTimeout\(stop,90000\)/);
   assert.match(vault,/if matches\.next\(\)\.is_some\(\)\{return None;\}/);
 });
