@@ -72,6 +72,15 @@
   const privacy=section('Privacy & History');
   move(privacy,'shieldSettings');
   move(privacy,'historyManagerOpen');
+  const mediaDevices=section('Media Devices',privacy);
+  const mediaOpen=document.createElement('button');
+  mediaOpen.id='settingsMediaDevicesOpen';mediaOpen.type='button';
+  mediaOpen.className='bookmark-menu-action';
+  mediaOpen.textContent='Manage Speaker, Microphone, Webcam & Site Permissions';
+  mediaOpen.addEventListener('click',()=>{
+    window.minternetMediaDevices?.open?.();
+  });
+  mediaDevices.append(mediaOpen);
   const accounts=section('Accounts & Sync');
   move(accounts,'googleSettings');
   move(general,'browserPreferencesStatus');
