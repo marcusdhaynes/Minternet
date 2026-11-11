@@ -2431,7 +2431,8 @@ fn apply_volume_to_site(app:&tauri::AppHandle,id:u32,label:&str,initialize:bool)
     let (level,mute)={
         let state=app.state::<VolumeState>();
         let Ok(config)=state.0.lock() else{return};
-        (config.level,config.muted||config.level==0||config.manually_muted.contains(&id))
+        (config.level,config.muted||config.level==0||config.manually_muted.contains(&id)
+            ||media_devices::speaker_disabled(app,id))
     };
     let ratio=level as f64/100.0;
     if initialize {
