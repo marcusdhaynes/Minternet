@@ -26,6 +26,8 @@ const FIND_BAR: f64 = 22.0;
 struct FindBarState(Mutex<bool>);
 #[derive(Default)]
 struct LocalMediaSelection(Mutex<Option<Value>>);
+#[derive(Default)]
+struct LocalMediaPath(Mutex<Option<PathBuf>>);
 fn find_visible(app:&tauri::AppHandle)->bool{
     app.state::<FindBarState>().0.lock().map(|v|*v).unwrap_or(false)
 }
@@ -3251,6 +3253,86 @@ fn local_media_mime(path:&std::path::Path)->&'static str {
         _=>"application/octet-stream",
     }
 }
+
+// FFmpeg broadens local codec support when installed. It is never invoked on a
+// path supplied by a renderer: only the canonical native-file-picker selection.
+// Output is normalized to MP4/H.264/AAC or M4A/AAC for the WebView2 decoder.
+// This intentionally retains the <50 MB single-EXE distribution.
+fn minternet_ffmpeg() -> Option<std::ffi::OsString> {
+    use std::process::{Command,Stdio};
+    let mut candidates=vec![std::ffi::OsString::from("ffmpeg")];
+    #[cfg(windows)]
+    {
+        if let Some(root)=std::env::var_os("ProgramFiles"){
+            candidates.push(std::path::PathBuf::from(root).join("ffmpeg").join("bin").join("ffmpeg.exe").into_os_string());
+        }
+        if let Some(root)=std::env::var_os("ProgramData"){
+            candidates.push(std::path::PathBuf::from(root).join("chocolatey").join("bin").join("ffmpeg.exe").into_os_string());
+        }
+        if let Some(root)=std::env::var_os("LOCALAPPDATA"){
+            candidates.push(std::path::PathBuf::from(root).join("Microsoft").join("WinGet").join("Links").join("ffmpeg.exe").into_os_string());
+        }
+    }
+    for candidate in candidates {
+        let mut c=Command::new(&candidate);
+        c.arg("-version").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        #[cfg(windows)]{
+            use std::os::windows::process::CommandExt;
+            c.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
+        if c.status().is_ok_and(|s|s.success()){return Some(candidate);}
+    }
+    None
+}
+fn minternet_transcode_file(ffmpeg:std::ffi::OsString,path:&std::path::Path,
+    kind:&str) -> Result<PathBuf,String> {
+    use std::process::{Command,Stdio};
+    static NEXT:AtomicU64=AtomicU64::new(0);
+    let id=NEXT.fetch_add(1,Ordering::Relaxed);
+    let dir=std::env::temp_dir().join("minternet-local-codec");
+    std::fs::create_dir_all(&dir).map_err(|e|e.to_string())?;
+    let out=dir.join(format!("decoded-{}-{}.{}",std::process::id(),id,
+        if kind=="audio"{"m4a"}else{"mp4"}));
+    // First remux video losslessly (fast), while converting *any* supported
+    // source audio stream to AAC. If its video codec is incompatible with MP4,
+    // re-encode H.264 as a fallback rather than silently dropping the audio.
+    for reencode_video in [false,true]{
+        if reencode_video && kind=="audio"{break;}
+        let mut cmd=Command::new(&ffmpeg);
+        cmd.args(["-nostdin","-hide_banner","-loglevel","error","-y","-i"]);
+        cmd.arg(path);
+        if kind=="audio"{
+            cmd.args(["-map","0:a:0","-vn","-c:a","aac","-b:a","192k",
+                      "-f","ipod"]);
+        }else{
+            cmd.args(["-map","0:v:0","-map","0:a:0?",
+                      "-c:v",if reencode_video{"libx264"}else{"copy"},
+                      "-c:a","aac","-b:a","192k",
+                      "-movflags","+faststart"]);
+            if reencode_video {
+                cmd.args(["-preset","veryfast","-crf","23","-pix_fmt","yuv420p"]);
+            }
+        }
+        cmd.arg(&out);
+        cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+        #[cfg(windows)]{
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000);
+        }
+        let result=cmd.output().map_err(|e|format!("FFmpeg could not start: {e}"))?;
+        if result.status.success() && std::fs::metadata(&out).is_ok_and(|m|m.len()>128){
+            return Ok(out);
+        }
+        std::fs::remove_file(&out).ok();
+        if reencode_video || kind=="audio"{
+            let diagnostic=String::from_utf8_lossy(&result.stderr);
+            return Err(format!("FFmpeg could not decode this file: {}",
+                diagnostic.chars().take(450).collect::<String>()));
+        }
+    }
+    Err("FFmpeg did not produce playable media".into())
+}
+
 fn open_local_media(app:&tauri::AppHandle,selected:&std::path::Path,smoke:bool)
     ->Result<Value,String>{
     let path=std::fs::canonicalize(selected)
@@ -3261,6 +3343,7 @@ fn open_local_media(app:&tauri::AppHandle,selected:&std::path::Path,smoke:bool)
     // Scope starts empty and is expanded only for paths the user picked.
     // Media streams from disk with byte ranges; no multi-GB JS Blob copy.
     app.state::<tauri::scope::Scopes>().allow_file(&path).map_err(|e|e.to_string())?;
+    *app.state::<LocalMediaPath>().0.lock().map_err(|e|e.to_string())?=Some(path.clone());
     let player=if let Some(existing)=app.get_webview_window("minternet-media-player"){
         existing
     }else{
@@ -3312,6 +3395,38 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         let current=app.state::<LocalMediaSelection>().0.lock()
             .map_err(|e|e.to_string())?.clone();
         return Ok(current.unwrap_or(Value::Null));
+    }
+    if name=="media-player-codec-available" {
+        let found=tauri::async_runtime::spawn_blocking(minternet_ffmpeg)
+            .await.map_err(|e|e.to_string())?.is_some();
+        return Ok(json!({"ok":found}));
+    }
+    if name=="media-player-transcode" {
+        let kind=value.get("kind").and_then(Value::as_str)
+            .filter(|s|matches!(*s,"audio"|"video"))
+            .ok_or("Unknown media kind")?.to_string();
+        let path=app.state::<LocalMediaPath>().0.lock()
+            .map_err(|e|e.to_string())?.clone()
+            .ok_or("Select a local media file first")?;
+        let ffmpeg=tauri::async_runtime::spawn_blocking(minternet_ffmpeg)
+            .await.map_err(|e|e.to_string())?
+            .ok_or("FFmpeg is required for this codec. Install FFmpeg to enable broader format support.")?;
+        let original=path.clone();
+        let output=tauri::async_runtime::spawn_blocking(move||
+            minternet_transcode_file(ffmpeg,&original,&kind))
+            .await.map_err(|e|format!("Codec worker failed: {e}"))??;
+        // A late conversion must not expose a previous selection.
+        if app.state::<LocalMediaPath>().0.lock()
+            .map_err(|e|e.to_string())?.as_ref()!=Some(&path){
+            std::fs::remove_file(&output).ok();
+            return Err("The selected media changed".into());
+        }
+        app.state::<tauri::scope::Scopes>().allow_file(&output)
+            .map_err(|e|e.to_string())?;
+        let player=app.get_webview_window("minternet-media-player")
+            .ok_or("Media player was closed")?;
+        let url=player.convert_file_src(&output,None).map_err(|e|e.to_string())?;
+        return Ok(json!({"url":url}));
     }
     if name=="media-player-pick" {
         // This is the OS dialog, parented to the Minternet main window.
@@ -5478,6 +5593,7 @@ fn main() {
         .manage(SurfaceRestoreQueued(AtomicBool::new(false)))
         .manage(FindBarState(Mutex::new(false)))
         .manage(LocalMediaSelection::default())
+        .manage(LocalMediaPath::default())
         .manage(privacy_shield::ShieldState(Mutex::new(privacy_shield::ShieldConfig::default())))
         .invoke_handler(tauri::generate_handler![browser_action, browser_snapshot])
         .setup(|app| {
