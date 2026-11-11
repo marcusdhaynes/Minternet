@@ -3375,7 +3375,7 @@ fn minternet_ensure_ffmpeg(cache:&std::path::Path)->Result<std::ffi::OsString,St
         let temporary=cache.join("ffmpeg.exe.partial");
         for i in 0..zipped.len(){
             let mut file=zipped.by_index(i).map_err(|e|e.to_string())?;
-            let entry=file.name().replace('\\',"/").to_ascii_lowercase();
+            let entry=file.name().map_err(|e|e.to_string())?.replace('\\',"/").to_ascii_lowercase();
             if !entry.ends_with("/bin/ffmpeg.exe") || file.is_dir(){continue;}
             if file.size()>240_000_000{
                 return Err("Decoded FFmpeg binary exceeds safety size limit".into());
