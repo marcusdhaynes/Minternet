@@ -48,6 +48,8 @@
   const audio=section('Audio');
   move(audio,'volumeIncrement10','.volume-increments-setting');
   move(audio,'volumeHoldDelay','.auto-unload-setting');
+  const miniplayer=section('Mini-player');
+  move(miniplayer,'miniplayerSettings');
   const userData=section('User Data');
   move(userData,'identityManagerOpen');
   move(userData,'passwordManagerOpen');
