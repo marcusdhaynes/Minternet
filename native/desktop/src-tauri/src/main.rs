@@ -3488,7 +3488,9 @@ fn open_local_media(app:&tauri::AppHandle,selected:&std::path::Path,smoke:bool)
             .title("Minternet Local Media Player")
             .inner_size(368.0,116.0)
             .min_inner_size(80.0,45.0)
-            .resizable(true)
+            // The custom bottom-right handle changes width and height together.
+            // Disallow OS independent-edge resizing that distorts video.
+            .resizable(false)
             .decorations(false)
             .transparent(true)
             .always_on_top(true)
@@ -3530,6 +3532,28 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         let current=app.state::<LocalMediaSelection>().0.lock()
             .map_err(|e|e.to_string())?.clone();
         return Ok(current.unwrap_or(Value::Null));
+    }
+    if name=="media-player-snap-targets" {
+        // Return physical browser *content* bounds, below the Minternet
+        // chrome, bookmarks bar, and find bar. The local floating media UI
+        // uses this rectangle for DPI-correct inside-edge snapping.
+        let viewport=app.get_window("main").and_then(|main|{
+            if main.is_minimized().unwrap_or(true)
+                || !main.is_visible().unwrap_or(false){return None;}
+            let origin=main.inner_position().ok()?;
+            let extent=main.inner_size().ok()?;
+            let scale=main.scale_factor().ok()?;
+            let find_bar=if find_visible(&app){FIND_BAR}else{0.0};
+            let top_offset=((chrome_top(&app)+find_bar)*scale).round() as i64;
+            if extent.height as i64<=top_offset{return None;}
+            Some(json!({
+                "left":origin.x as i64,
+                "top":origin.y as i64+top_offset,
+                "right":origin.x as i64+extent.width as i64,
+                "bottom":origin.y as i64+extent.height as i64
+            }))
+        });
+        return Ok(json!({"viewport":viewport}));
     }
     if name=="media-player-codec-available" {
         let cache=app.path().app_data_dir().map_err(|e|e.to_string())?.join("codec-engine");
