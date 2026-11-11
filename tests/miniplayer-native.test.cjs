@@ -120,8 +120,8 @@ test('mini-player gestures and controls respect the video surface',()=>{
   const player=read('ui/media-player.js');
   const css=read('ui/media-player.css');
   const native=read('native/desktop/src-tauri/src/main.rs');
-  assert.match(player,/mediaElements\.video,drag/);
-  assert.match(player,/Math\.hypot\(dx,dy\)<DRAG_THRESHOLD/);
+  assert.match(player,/root\.addEventListener\('pointerdown',startGesture,true\)/);
+  assert.match(player,/Math\.hypot\(g\.deltaX,g\.deltaY\)<DRAG_THRESHOLD/);
   assert.match(player,/toggle\.click\(\)/);
   assert.match(player,/geometry\.aspectSize/);
   assert.match(player,/media-player-snap-targets/);
@@ -140,4 +140,45 @@ test('local audio never routes a cross-origin asset through WebAudio and falls b
   assert.match(rust,/\-map","0:a:0\?"/);
   assert.match(rust,/LocalMediaPath/);
   assert.match(rust,/\.min_inner_size\(80\.0,45\.0\)/);
+});
+
+test('mini-player settings persist in browser profile and apply live',()=>{
+  const native=read('native/desktop/src-tauri/src/main.rs');
+  const settings=read('ui/browser-settings.js');
+  const sections=read('ui/settings-sections.js');
+  const html=read('ui/index.html');
+  const player=read('ui/media-player.js');
+  assert.match(native,/miniplayer_fade_seconds:u16/);
+  assert.match(native,/fn default_miniplayer_fade_seconds\(\)->u16\{5\}/);
+  assert.match(native,/"miniplayer-fade-set"/);
+  assert.match(native,/persist_preferences\(&app,&updated\)/);
+  assert.match(native,/"media-player-settings-get"/);
+  assert.match(native,/"minternet:miniplayer-settings"/);
+  assert.match(settings,/miniplayerFadeSeconds/);
+  assert.match(settings,/updateMiniplayerFade/);
+  assert.match(sections,/section\('Mini-player'\)/);
+  assert.match(html,/id="miniplayerSettings"/);
+  assert.match(html,/id="miniplayerFadeSeconds"/);
+  assert.match(player,/setFadeSeconds\(event.payload\?\.fadeSeconds\)/);
+  assert.match(player,/if\(controlsDelay>0\)/);
+});
+test('mini-player resizes at every edge, with anywhere-resize gesture',()=>{
+  const player=read('ui/media-player.js');
+  const caps=JSON.parse(read('native/desktop/src-tauri/capabilities/media-player.json'));
+  assert.match(player,/const EDGE_HIT=13/);
+  assert.match(player,/event.shiftKey\|\|event.button===2/);
+  assert.match(player,/side.includes\('l'\)/);
+  assert.match(player,/side.includes\('t'\)/);
+  assert.match(player,/anchoredPosition/);
+  assert.match(player,/win\.outerPosition\(\)/);
+  assert.match(player,/win\.scaleFactor\(\)/);
+  assert.ok(caps.permissions.includes('core:window:allow-outer-position'));
+  assert.ok(caps.permissions.includes('core:window:allow-scale-factor'));
+});
+test('Windows icon generation retains the ring with transparent inset',()=>{
+  const icon=read('native/desktop/scripts/generate_icons.py');
+  assert.match(icon,/ring_side = round\(512 \* 0\.95\)/);
+  assert.match(icon,/Image\.new\("RGBA", \(512, 512\), \(0, 0, 0, 0\)\)/);
+  assert.match(icon,/windows_symbol\.alpha_composite\(ring_artwork, \(inset, inset\)\)/);
+  assert.doesNotMatch(icon,/windows_symbol\.crop\(/);
 });
