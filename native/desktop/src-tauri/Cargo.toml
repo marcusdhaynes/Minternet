@@ -9,7 +9,7 @@ edition = "2021"
 tauri-build = "2"
 
 [dependencies]
-tauri = { version = "2", features = ["unstable"] }
+tauri = { version = "2", features = ["unstable", "protocol-asset"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 argon2 = "0.5"
@@ -23,6 +23,7 @@ hmac = "0.12"
 # Read only the Firefox bookmark-folder subtree explicitly dragged by the user.
 rusqlite = { version = "0.32", features = ["bundled"] }
 tauri-plugin-clipboard-manager = "2"
+tauri-plugin-dialog = "2"
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.39"
