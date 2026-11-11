@@ -43,16 +43,20 @@ struct BrowserPreferences {
     new_tab_mode:String,
     #[serde(default)]
     tab_limit:usize,
+    #[serde(default="default_miniplayer_fade_seconds")]
+    miniplayer_fade_seconds:u16,
     #[serde(default)]
     download_folder:Option<String>,
     #[serde(default)]
     previous_download_folders:Vec<String>,
 }
 fn default_new_tab_mode()->String{"dashboard".into()}
+fn default_miniplayer_fade_seconds()->u16{5}
 fn valid_new_tab_mode(value:&str)->bool{matches!(value,"dashboard"|"website")}
 impl Default for BrowserPreferences{
     fn default()->Self{
         Self{homepage:DEFAULT_HOMEPAGE.into(),new_tab_mode:default_new_tab_mode(),tab_limit:0,
+            miniplayer_fade_seconds:default_miniplayer_fade_seconds(),
             download_folder:None,previous_download_folders:Vec::new()}
     }
 }
@@ -79,6 +83,7 @@ mod tab_limit_tests {
     #[test]
     fn unlimited_and_positive_limits(){
         assert_eq!(BrowserPreferences::default().tab_limit,0);
+        assert_eq!(BrowserPreferences::default().miniplayer_fade_seconds,5);
         assert!(has_tab_capacity(35,1,0));
         assert!(has_tab_capacity(999,1000,0));
         assert!(has_tab_capacity(34,1,35));
@@ -97,6 +102,7 @@ mod tab_limit_tests {
         let old=r#"{"homepage":"https://www.google.com/","downloadFolder":null}"#;
         let prefs:BrowserPreferences=serde_json::from_str(old).unwrap();
         assert_eq!(prefs.tab_limit,0);
+        assert_eq!(prefs.miniplayer_fade_seconds,5);
     }
 }
 fn preferences_file(app:&tauri::AppHandle)->Result<PathBuf,String>{
@@ -116,6 +122,7 @@ fn load_preferences(app:&tauri::AppHandle)->BrowserPreferences{
     }
     saved.previous_download_folders.truncate(8);
     saved.tab_limit=saved.tab_limit.min(1_000_000);
+    saved.miniplayer_fade_seconds=saved.miniplayer_fade_seconds.min(300);
     saved
 }
 fn persist_preferences(app:&tauri::AppHandle,
@@ -3528,6 +3535,11 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
     // OAuth, Drive and Gmail are only available to the trusted local chrome.
     // All remote network calls run on worker threads so they never pause the
     // native browser event loop. No Google token is returned to web content.
+    if name=="media-player-settings-get" {
+        let state=app.state::<BrowserPreferenceState>();
+        let prefs=state.0.lock().map_err(|e|e.to_string())?;
+        return Ok(json!({"fadeSeconds":prefs.miniplayer_fade_seconds}));
+    }
     if name=="media-player-current" {
         let current=app.state::<LocalMediaSelection>().0.lock()
             .map_err(|e|e.to_string())?.clone();
@@ -4388,6 +4400,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             let selected=prefs.homepage.clone();
             let new_tab_mode=prefs.new_tab_mode.clone();
             let tab_limit=prefs.tab_limit;
+            let fade_seconds=prefs.miniplayer_fade_seconds;
             let system=prefs.download_folder.is_none();
             drop(prefs);
             let destination=configured_download_folder(&app)?;
@@ -4395,9 +4408,26 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 "homepage":selected,
                 "newTabMode":new_tab_mode,
                 "tabLimit":tab_limit,
+                "miniplayerFadeSeconds":fade_seconds,
                 "downloadFolder":destination.to_string_lossy(),
                 "usingSystemDownloads":system
             }));
+        }
+        "miniplayer-fade-set" => {
+            let requested=value.as_u64()
+                .ok_or("Mini-player fade delay must be whole seconds")?;
+            if requested>300{return Err("Choose 0 to 300 seconds; 0 means Never".into());}
+            let fade_seconds=requested as u16;
+            let state=app.state::<BrowserPreferenceState>();
+            let mut prefs=state.0.lock().map_err(|e|e.to_string())?;
+            let mut updated=prefs.clone();
+            updated.miniplayer_fade_seconds=fade_seconds;
+            persist_preferences(&app,&updated)?;
+            *prefs=updated;
+            drop(prefs);
+            let _=app.emit_to("minternet-media-player","minternet:miniplayer-settings",
+                json!({"fadeSeconds":fade_seconds}));
+            return Ok(json!({"ok":true,"fadeSeconds":fade_seconds}));
         }
         "tab-limit-set" => {
             let requested=value.as_u64().ok_or("Tab Limit must be a nonnegative whole number")?;
