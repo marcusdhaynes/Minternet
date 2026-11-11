@@ -157,7 +157,12 @@ pub fn action(app:&AppHandle,name:&str,value:&Value,id:u32,
         },
         _=>unreachable!()
     }
-    let ephemeral=private||matches!(requested,"once"|"session");
+    let had_ephemeral=state.ephemeral.contains_key(&(id,origin.clone()));
+    // Changing an input device must not silently turn a session grant into a
+    // permanent grant. A new explicit permission choice replaces the scope.
+    let explicit_rule=matches!(field,"microphone"|"camera");
+    let ephemeral=private||matches!(requested,"once"|"session")||
+        had_ephemeral&&!explicit_rule&&name!="site-media-revoke";
     if ephemeral{
         state.ephemeral.insert((id,origin.clone()),settings.clone());
     }else{
