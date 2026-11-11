@@ -33,10 +33,10 @@
     const v=mediaElements.video;
     return v.videoWidth>0&&v.videoHeight>0?v.videoWidth/v.videoHeight:lastVideoRatio;
   }
-  async function sizeToVideo(width){
+  async function sizeToVideo(width,anchoredPosition=null){
     if(!win||current!=='video')return;
     const dims=geometry.aspectSize(width,videoRatio(),MIN_VIDEO_WIDTH,45);
-    pendingVideoSize=dims;
+    pendingVideoSize={...dims,anchoredPosition};
     if(resizingVideo)return;
     resizingVideo=true;
     try{
@@ -44,9 +44,21 @@
         const size=pendingVideoSize;
         pendingVideoSize=null;
         await win.setSize(new tauri.window.LogicalSize(size.width,size.height));
+        if(size.anchoredPosition){
+          await win.setPosition(new tauri.window.PhysicalPosition(
+            size.anchoredPosition.x,size.anchoredPosition.y));
+        }
       }
     }catch{/* Window may have closed during resize. */}
-    finally{resizingVideo=false;}
+    finally{
+      resizingVideo=false;
+      // Drain a pointer event that arrived during an unsuccessful size request.
+      if(pendingVideoSize&&current==='video'){
+        const pending=pendingVideoSize;
+        pendingVideoSize=null;
+        void sizeToVideo(pending.width,pending.anchoredPosition);
+      }
+    }
   }
   const active=()=>current&&mediaElements[current];
   // The local asset protocol is not the webview page's origin. Passing it through
