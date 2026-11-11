@@ -126,7 +126,7 @@
       const data=await command('site-media-revoke');
       if(data?.message)throw Error(data.message);
       render(data);
-      setMessage('Camera and microphone stopped. Permissions revoked. Select System Default and allow access again to resume.');
+      setMessage('Microphone and webcam capture stopped. Site permissions reset to Ask Every Time.');
     }catch(e){setMessage(String(e.message||e));}
   }
   function build(){
