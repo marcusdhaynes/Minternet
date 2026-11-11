@@ -69,7 +69,7 @@ test('native path picker gives scoped byte-range media URL, without file copies'
   assert.deepEqual(conf.app.security.assetProtocol.scope,[]);
   assert.match(conf.app.security.csp,/media-src 'self' blob: asset: http:\/\/asset\.localhost/);
   assert.match(cargo,/protocol-asset/);
-  assert.match(rust,/asset_protocol_scope\(\)\.allow_file\(&path\)/);
+  assert.match(rust,/state::<tauri::scope::Scopes>\(\)\.allow_file\(&path\)/);
   assert.match(rust,/player\.convert_file_src\(&path,None\)/);
   assert.match(rust,/if name=="media-player-current"/);
   assert.match(rust,/if name=="media-player-pick"/);
