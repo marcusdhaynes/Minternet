@@ -3285,6 +3285,30 @@ fn minternet_ffmpeg() -> Option<std::ffi::OsString> {
     None
 }
 
+
+fn minternet_needs_audio_normalization(ffmpeg:&std::ffi::OsStr,path:&std::path::Path)->bool{
+    use std::process::{Command,Stdio};
+    let mut cmd=Command::new(ffmpeg);
+    cmd.args(["-nostdin","-hide_banner","-i"]);
+    cmd.arg(path);
+    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+    #[cfg(windows)]{
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    let Ok(result)=cmd.output()else{return false;};
+    let metadata=String::from_utf8_lossy(&result.stderr);
+    for line in metadata.lines(){
+        // Probe only declared audio stream metadata, not the full file.
+        if let Some(codec)=line.split("Audio: ").nth(1){
+            let codec=codec.split(|c:char|c==','||c.is_whitespace()).next().unwrap_or("");
+            return !matches!(codec,"aac"|"mp3"|"opus"|"vorbis"|"flac"|
+                "pcm_s16le"|"pcm_s24le"|"pcm_f32le");
+        }
+    }
+    false
+}
+
 fn minternet_cached_ffmpeg(cache:&std::path::Path)->Option<std::ffi::OsString>{
     let executable=cache.join("ffmpeg.exe");
     if executable.is_file(){Some(executable.into_os_string())}
@@ -3478,14 +3502,19 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
     }
     if name=="media-player-codec-available" {
         let cache=app.path().app_data_dir().map_err(|e|e.to_string())?.join("codec-engine");
-        let found=tauri::async_runtime::spawn_blocking(move||
-            minternet_cached_ffmpeg(&cache).is_some())
-            .await.map_err(|e|e.to_string())?;
-        return Ok(json!({"ok":true,"installed":found}));
+        let path=app.state::<LocalMediaPath>().0.lock().map_err(|e|e.to_string())?.clone();
+        let (found,needs)=tauri::async_runtime::spawn_blocking(move||{
+            if let Some(ffmpeg)=minternet_cached_ffmpeg(&cache){
+                let needs=path.as_ref()
+                    .is_some_and(|p|minternet_needs_audio_normalization(&ffmpeg,p));
+                (true,needs)
+            }else{(false,false)}
+        }).await.map_err(|e|e.to_string())?;
+        return Ok(json!({"ok":true,"installed":found,"needsNormalization":needs}));
     }
     if name=="media-player-transcode" {
         let kind=value.get("kind").and_then(Value::as_str)
-            .filter(|s|matches!(s,"audio"|"video"))
+            .filter(|s|matches!(*s,"audio"|"video"))
             .ok_or("Unknown media kind")?.to_string();
         let path=app.state::<LocalMediaPath>().0.lock()
             .map_err(|e|e.to_string())?.clone()
