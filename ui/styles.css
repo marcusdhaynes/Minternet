@@ -2011,3 +2011,9 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { di
    HTML input. Keep the toolbar control keyboard- and mouse-accessible. */
 .toolbar-actions #mediaPlayerButton{position:relative;cursor:pointer;overflow:visible;}
 .toolbar-actions #mediaPlayerButton[aria-busy="true"]{opacity:.7;}
+
+/* Downloads: compact permanent folder actions in the flyout. */
+.downloads-footer{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:7px 4px 3px}
+.downloads-footer span{min-width:0;font-size:8px;color:#a9a0bd}
+.downloads-open-folder{flex:none;border:1px solid #8e7e9e;border-radius:5px;color:#f6e7ce;background:#34303b;padding:4px 6px;font-size:9px;cursor:pointer}
+.downloads-open-folder:hover{background:#55404d}
