@@ -4620,7 +4620,11 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         }
         "downloads-clear" => {
             let state=app.state::<DownloadsState>();
-            state.0.lock().map_err(|e|e.to_string())?.clear();
+            // Clearing the history must never orphan a still-running transfer:
+            // otherwise Finished cannot find its row and the file is lost
+            // from Minternet's Open/Reveal/Drag actions.
+            state.0.lock().map_err(|e|e.to_string())?
+                .retain(|entry|entry.status=="downloading");
             save_recent_downloads(&app);
             return Ok(json!({"ok":true}));
         }
