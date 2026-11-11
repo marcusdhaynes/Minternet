@@ -5,6 +5,7 @@ mod google_account;
 mod firefox_bookmarks;
 mod secret_bookmarks;
 mod privacy_shield;
+mod media_devices;
 use base64::Engine as _;
 use rand::{rngs::OsRng,RngCore};
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -2055,6 +2056,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     let builder = WebviewBuilder::new(label.clone(), url)
         .incognito(private)
         .initialization_script(privacy_shield::script(&shield_preferences))
+        .initialization_script(include_str!("../../../../ui/site-media-bridge.js"))
         // A remote page never receives native commands. This reserved
         // non-loading popup URL is a narrowly scoped Ctrl+F signal that
         // the native new-window handler consumes without navigating.
@@ -2241,7 +2243,11 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                 }
                 if stale{return;}
                 update_from_site(&for_load, id, event.url().as_str());
+                if matches!(event.event(),PageLoadEvent::Started){
+                    media_devices::reset_tab(&for_load,id);
+                }
                 if matches!(event.event(), PageLoadEvent::Finished) {
+                    media_devices::apply(&for_load,id,event.url().as_str(),private);
                     // A completed navigation can still display an unrepainted
                     // WebView2 surface. Restore its bounds without reloading.
                     let is_active=for_load.state::<Mutex<Browser>>().lock().ok()
@@ -2386,6 +2392,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     // instead of guessing /favicon.ico like the old toolbar did.
     #[cfg(windows)]
     attach_browser_favicon(app,id,&created);
+    media_devices::attach(app,id,&created,private);
     let state = app.state::<Mutex<Browser>>();
     let mut browser = state.lock().map_err(|e| e.to_string())?;
     if let Some(tab) = browser.tabs.iter_mut().find(|tab| tab.id == id) {
@@ -3560,6 +3567,19 @@ fn browser_snapshot(app: tauri::AppHandle) -> Result<Snapshot,String> { snapshot
 
 #[tauri::command]
 async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Result<Value, String> {
+    if matches!(name.as_str(),"site-media-get"|"site-media-set"|"site-media-revoke"){
+        let (id,url,private)={
+            let browser=app.state::<Mutex<Browser>>();
+            let b=browser.lock().map_err(|e|e.to_string())?;
+            let tab=b.tabs.iter().find(|t|t.id==b.active_id)
+                .ok_or("Select a website tab first")?;
+            if tab.secret_id.is_some()&&!tab.secret_revealed{
+                return Err("Unlock the concealed tab first".into());
+            }
+            (tab.id,tab.url.clone(),tab.private)
+        };
+        return media_devices::action(&app,&name,&value,id,&url,private);
+    }
     // OAuth, Drive and Gmail are only available to the trusted local chrome.
     // All remote network calls run on worker threads so they never pause the
     // native browser event loop. No Google token is returned to web content.
@@ -5875,6 +5895,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .manage(PopupDeduper(Mutex::new(HashMap::new())))
         .manage(DownloadsState::default())
+        .manage(media_devices::MediaDeviceState::default())
         .manage(Mutex::new(browsing_history::History::default()))
         .manage(ZoomState(Mutex::new(1.0)))
         .manage(VolumeState::default())
@@ -5904,6 +5925,7 @@ fn main() {
             if let Ok(mut state)=app.state::<privacy_shield::ShieldState>().0.lock(){
                 *state=shield;
             }
+            media_devices::load(app.handle());
             let preferences=load_preferences(app.handle());
             if let Ok(mut saved)=app.state::<BrowserPreferenceState>().0.lock(){
                 *saved=preferences.clone();
