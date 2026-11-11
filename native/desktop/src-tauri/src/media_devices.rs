@@ -79,6 +79,18 @@ fn configuration(state:&Store,tab_id:u32,origin:&str,private:bool)->SiteMedia{
 fn inform(app:&AppHandle,tab_id:u32){
     let _=app.emit_to("chrome","minternet:media-devices",json!({"tabId":tab_id}));
 }
+pub fn speaker_disabled(app:&AppHandle,id:u32)->bool{
+    let (address,private)={
+        let browser=app.state::<Mutex<super::Browser>>();
+        let Ok(state)=browser.lock() else{return false};
+        let Some(tab)=state.tabs.iter().find(|t|t.id==id)else{return false};
+        (tab.url.clone(),tab.private)
+    };
+    let Some(origin)=valid_origin(&address)else{return false};
+    let storage=app.state::<MediaDeviceState>();
+    let Ok(state)=storage.0.lock()else{return false};
+    configuration(&state,id,&origin,private).speaker_device=="disabled"
+}
 pub fn reset_tab(app:&AppHandle,id:u32){
     if let Ok(mut store)=app.state::<MediaDeviceState>().0.lock(){
         store.tabs.remove(&id);
@@ -181,6 +193,11 @@ pub fn action(app:&AppHandle,name:&str,value:&Value,id:u32,
         if let Ok(encoded)=serde_json::to_string(&settings){
             let _=webview.eval(&format!("window.__minternetMediaApply?.({encoded});"));
         }
+    }
+    if let Some(view)=app.get_webview(&format!("tab-{id}")){
+        // Native WebView2 mute also covers WebAudio/AudioContexts, not merely
+        // HTMLMediaElement.sinkId used by individual web applications.
+        super::apply_volume_to_site(app,id,view.label(),false);
     }
     #[cfg(windows)]
     if matches!(field,"microphone"|"camera")||name=="site-media-revoke"{
