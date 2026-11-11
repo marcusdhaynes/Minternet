@@ -141,8 +141,8 @@ test('reject site downloads until explicit trusted Windows approval and block po
   assert.match(native,/fn is_disguised_executable/);
   assert.match(native,/if is_disguised_executable\(std::path::Path::new\(&entry\.path\)\)/);
   assert.match(native,/DownloadEvent::Requested\{\.\.\}=>false/);
-  assert.match(shield,/An about:blank popunder can redirect/);
-  assert.match(shield,/Cross-site popups are denied by default/);
+  assert.doesNotMatch(shield,/pub fn block_popup|pub fn block_blank_popup/);
+  assert.match(native,/NewWindowResponse::Create\{window\}/);
 });
 
 test('official extension catalogs are browsable without misleading install claims',()=>{
@@ -153,12 +153,10 @@ test('official extension catalogs are browsable without misleading install claim
   assert.match(prefs,/https:\/\/addons\.mozilla\.org\/en-US\/firefox\//);
 });
 
-test('unknown OAuth-looking popup URLs cannot bypass cross-site blocker',()=>{
- const native=read('native/desktop/src-tauri/src/main.rs');
- assert.match(native,/fn trusted_auth_destination/);
- assert.match(native,/ads\.example\/oauth\/authorize/);
- assert.match(native,/intentional_new_tab_shortcut/);
- assert.match(native,/trusted_auth_destination\(&url\)\|\|same_origin_auth/);
+test('No fake-OAuth popup exceptions or cross-site popup blocking remain',()=>{
+  const native=read('native/desktop/src-tauri/src/main.rs');
+  assert.doesNotMatch(native,/fn trusted_auth_destination|fn intentional_new_tab_shortcut|privacy_shield::block_popup/);
+  assert.match(native,/NEXT_POPUP_ID/);
 });
 
 test('Windows tabs consume actual WebView2 favicon bytes, not root guesses',()=>{
