@@ -9,6 +9,25 @@
   const close=$('playerClose'),resize=$('resizeCorner'),drag=$('dragZone');
   const volume={level:100,muted:false};
   let current=null,url=null,audioContext=null,gainNode=null;
+  const HIDE_DELAY=5000,DRAG_THRESHOLD=5,MIN_VIDEO_WIDTH=80;
+  let controlsTimer=null,lastVideoRatio=16/9,gesture=null;
+  function showControls(){
+    if(current!=='video')return;
+    document.body.classList.remove('controls-idle');
+    clearTimeout(controlsTimer);
+    controlsTimer=setTimeout(()=>{
+      if(!gesture)document.body.classList.add('controls-idle');
+    },HIDE_DELAY);
+  }
+  function videoRatio(){
+    const v=mediaElements.video;
+    return v.videoWidth>0&&v.videoHeight>0?v.videoWidth/v.videoHeight:lastVideoRatio;
+  }
+  async function sizeToVideo(width){
+    if(!win||current!=='video')return;
+    const w=Math.max(MIN_VIDEO_WIDTH,width);
+    await win.setSize(new tauri.window.LogicalSize(w,w/videoRatio()));
+  }
   const active=()=>current&&mediaElements[current];
   async function applyVolume(){
     const value=volume.muted?0:Math.max(0,Math.min(3,volume.level/100));
@@ -74,6 +93,8 @@
     current=kindFor({name:selection.name||'',type:selection.mime||''});
     document.body.dataset.mode=current;
     controls.hidden=false;resize.hidden=current!=='video';
+    document.body.classList.remove('controls-idle');
+    clearTimeout(controlsTimer);
     const media=active();
     media.hidden=false;
     if(selection.smoke){
@@ -86,6 +107,7 @@
     media.src=url;media.load();
     ensureGain(media);
     await resizeWindow(current);
+    if(current==='video')showControls();
     await win?.show(); // the native file picker has already finished
     updateControls();
     try{await media.play();}catch{}
@@ -127,20 +149,58 @@
     media.addEventListener('error',()=>fail(
       'This file uses a codec unavailable in the installed Windows media runtime. Select another format; files are never uploaded.'));
   }
+  mediaElements.video.addEventListener('loadedmetadata',()=>{
+    lastVideoRatio=videoRatio();
+    void sizeToVideo(Math.max(MIN_VIDEO_WIDTH,Math.round(258*lastVideoRatio)));
+  });
+  const root=document.querySelector('.player-root');
+  root.addEventListener('pointermove',showControls);
+  root.addEventListener('pointerenter',showControls);
+  function startGesture(event,isResize=false){
+    if(event.button!==0||!win||current!=='video')return;
+    event.preventDefault();
+    event.stopPropagation();
+    gesture={x:event.screenX,y:event.screenY,resize:isResize,
+      width:window.innerWidth,dragged:false,pending:false};
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    showControls();
+  }
+  function moveGesture(event){
+    if(!gesture)return;
+    const g=gesture,dx=event.screenX-g.x,dy=event.screenY-g.y;
+    if(!g.dragged&&Math.hypot(dx,dy)<DRAG_THRESHOLD)return;
+    g.dragged=true;
+    if(g.resize){
+      const delta=Math.abs(dx)>Math.abs(dy)*videoRatio()?dx:dy*videoRatio();
+      if(!g.pending){
+        g.pending=true;
+        void sizeToVideo(g.width+delta).finally(()=>{g.pending=false;});
+      }
+    }else{
+      // Only begin native dragging when the pointer has moved beyond a click.
+      gesture=null;
+      void win.startDragging().catch(()=>{});
+    }
+  }
+  function endGesture(event){
+    if(!gesture)return;
+    const g=gesture;gesture=null;
+    if(!g.dragged&&!g.resize&&event.type==='pointerup')toggle.click();
+    showControls();
+  }
+  for(const surface of [mediaElements.video,drag]){
+    surface.addEventListener('pointerdown',event=>startGesture(event));
+  }
+  resize.addEventListener('pointerdown',event=>startGesture(event,true));
+  window.addEventListener('pointermove',moveGesture);
+  window.addEventListener('pointerup',endGesture);
+  window.addEventListener('pointercancel',()=>{gesture=null;});
   close.addEventListener('click',()=>{
     for(const media of Object.values(mediaElements))media.pause();
     // Native scope grants live only for the media selected in this session.
     void win?.close();
   });
-  drag.addEventListener('pointerdown',event=>{
-    if(event.button!==0||!win)return;
-    void win.startDragging().catch(()=>{});
-  });
-  resize.addEventListener('pointerdown',event=>{
-    if(event.button!==0||!win)return;
-    event.preventDefault();
-    void win.startResizeDragging('SouthEast').catch(()=>{});
-  });
+  // Resizing is managed above to preserve the selected video's aspect ratio.
   // Use physical monitor coordinates for DPI-correct snap on every display.
   const SNAP=26;
   let snapTimer=null,snapping=false;
