@@ -4,7 +4,7 @@
   const tauri=window.__TAURI__;
   const win=tauri?.window?.getCurrentWindow?.();
   const mediaElements={video:$('localVideo'),audio:$('localAudio')};
-  const picker=$('mediaFile'),chooser=$('chooseSection'),error=$('mediaError');
+  const error=$('mediaError');
   const controls=$('playerControls'),toggle=$('togglePlayback'),scrubber=$('playbackPosition');
   const close=$('playerClose'),resize=$('resizeCorner'),drag=$('dragZone');
   const volume={level:100,muted:false};
@@ -59,12 +59,13 @@
   }
   async function selectSource(selection){
     if(!selection || typeof selection.url!=='string' ||
-       !selection.url.startsWith('blob:')){
+       !(['http://asset.localhost/','https://asset.localhost/','asset://localhost/']
+            .some(prefix=>selection.url.startsWith(prefix)))){
       fail('Cannot open the selected local file.');
       return;
     }
-    // The file was picked by the trusted chrome WebView; its Blob stays
-    // alive in that WebView while the separate floating window plays it.
+    // Only a native OS-selected local file is accessible via Tauri's
+    // single-file scoped, byte-range streaming asset protocol.
     for(const media of Object.values(mediaElements)){
       media.pause();media.removeAttribute('src');media.hidden=true;media.load();
     }
@@ -72,12 +73,20 @@
     error.hidden=true;
     current=kindFor({name:selection.name||'',type:selection.mime||''});
     document.body.dataset.mode=current;
-    chooser.hidden=true;controls.hidden=false;resize.hidden=current!=='video';
+    controls.hidden=false;resize.hidden=current!=='video';
     const media=active();
-    media.hidden=false;media.src=url;media.load();
+    media.hidden=false;
+    if(selection.smoke){
+      media.addEventListener('loadedmetadata',()=>{
+        void tauri?.core?.invoke('browser_action',{
+          name:'media-player-smoke-proof',value:{duration:media.duration}
+        }).catch(()=>{});
+      },{once:true});
+    }
+    media.src=url;media.load();
     ensureGain(media);
     await resizeWindow(current);
-    await win?.show(); // never expose the intermediate chooser screen
+    await win?.show(); // the native file picker has already finished
     updateControls();
     try{await media.play();}catch{}
     updateControls();
@@ -120,7 +129,7 @@
   }
   close.addEventListener('click',()=>{
     for(const media of Object.values(mediaElements))media.pause();
-    // The chrome owns the Blob URL; it revokes it on replacement or exit.
+    // Native scope grants live only for the media selected in this session.
     void win?.close();
   });
   drag.addEventListener('pointerdown',event=>{
