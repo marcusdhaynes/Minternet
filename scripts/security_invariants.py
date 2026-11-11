@@ -46,7 +46,8 @@ assert 'android:exported="false"' in manifest and 'android:process=":minternet_p
 require(private,"extends MainActivity","Android private process entrypoint")
 require(ios,".nonPersistent()", "iOS ephemeral WKWebsiteDataStore")
 require(ios,'scheme != "https"', "iOS HTTPS-only main-frame nav")
-require(ios,"javaScriptCanOpenWindowsAutomatically = false","iOS popup safety")
+require(ios,"javaScriptCanOpenWindowsAutomatically = true","iOS allows site-created windows")
+require(ios,"adoptedView: child","iOS uses a real related popup view")
 assert "NSAllowsArbitraryLoads" not in read("native/ios/project.yml"), "iOS must not disable ATS wholesale"
 
 print("PASS: Minternet native security invariants checked.")
