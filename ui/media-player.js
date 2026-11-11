@@ -8,7 +8,7 @@
   const controls=$('playerControls'),toggle=$('togglePlayback'),scrubber=$('playbackPosition');
   const close=$('playerClose'),resize=$('resizeCorner'),drag=$('dragZone');
   const volume={level:100,muted:false};
-  let current=null,url=null,audioContext=null,gainNode=null;
+  let current=null,url=null,sourceGeneration=0,normalizing=false,usedCodecFallback=false;
   const HIDE_DELAY=5000,DRAG_THRESHOLD=5,MIN_VIDEO_WIDTH=80;
   let controlsTimer=null,lastVideoRatio=16/9,gesture=null;
   function showControls(){
@@ -29,27 +29,59 @@
     await win.setSize(new tauri.window.LogicalSize(w,w/videoRatio()));
   }
   const active=()=>current&&mediaElements[current];
-  async function applyVolume(){
-    const value=volume.muted?0:Math.max(0,Math.min(3,volume.level/100));
+  // The local asset protocol is not the webview page's origin. Passing it through
+  // createMediaElementSource can permanently silence the entire media element
+  // under Web Audio's cross-origin security rules, even for ordinary WAV/MP3.
+  // Use the media element's own native output path for ALL local files.
+  function applyVolume(){
+    const level=volume.muted?0:Math.max(0,Math.min(1,volume.level/100));
     for(const media of Object.values(mediaElements)){
-      // WebAudio is required for Minternet's 100-300% amplification.
       media.muted=volume.muted;
-      media.volume=gainNode?1:Math.min(1,value);
+      media.volume=level;
     }
-    if(gainNode)gainNode.gain.value=value;
   }
-  function ensureGain(media){
-    if(!window.AudioContext&&!window.webkitAudioContext)return;
+  async function codecFallback(generation,quiet=false){
+    if(generation!==sourceGeneration||normalizing||usedCodecFallback)return false;
+    if(!tauri?.core?.invoke)return false;
+    normalizing=true;
+    const media=active();
+    if(!quiet){
+      error.textContent='Preparing this format with the local codec engine…';
+      error.hidden=false;
+    }
     try{
-      if(!audioContext)audioContext=new (window.AudioContext||window.webkitAudioContext)();
-      if(!gainNode){gainNode=audioContext.createGain();gainNode.connect(audioContext.destination);}
-      if(!media.dataset.audioRouted){
-        audioContext.createMediaElementSource(media).connect(gainNode);
-        media.dataset.audioRouted='true';
+      const result=await tauri.core.invoke('browser_action',
+        {name:'media-player-transcode',value:{kind:current}});
+      if(generation!==sourceGeneration)return false;
+      if(typeof result?.url!=='string')throw Error('Codec engine returned no playable media');
+      usedCodecFallback=true;
+      media.pause();
+      media.src=result.url;
+      media.load();
+      error.hidden=true;
+      try{await media.play();}catch{/* User can play explicitly. */}
+      updateControls();
+      return true;
+    }catch(e){
+      if(generation===sourceGeneration&&!quiet){
+        fail('This codec could not be decoded: '+String(e?.message||e));
       }
-      void audioContext.resume().catch(()=>{});
-    }catch{/* Normal 0-100% HTMLMediaElement volume remains available. */}
-    void applyVolume();
+      return false;
+    }finally{
+      normalizing=false;
+    }
+  }
+  async function maybeNormalize(selection,generation){
+    const name=(selection.name||'').toLowerCase();
+    // These containers commonly carry audio codecs absent from WebView2.
+    if(!/\.(mkv|mka|avi|wmv|wma|flv|ape|ac3|eac3|dts|amr|aif|aiff)$/i.test(name))return;
+    try{
+      const available=await tauri?.core?.invoke('browser_action',
+        {name:'media-player-codec-available',value:null});
+      if(available?.ok&&generation===sourceGeneration){
+        await codecFallback(generation,false);
+      }
+    }catch{/* Native playback still works for supported tracks. */}
   }
   function fail(message){
     error.textContent=message;error.hidden=false;
@@ -89,6 +121,9 @@
       media.pause();media.removeAttribute('src');media.hidden=true;media.load();
     }
     url=selection.url;
+    const generation=++sourceGeneration;
+    usedCodecFallback=false;
+    normalizing=false;
     error.hidden=true;
     current=kindFor({name:selection.name||'',type:selection.mime||''});
     document.body.dataset.mode=current;
@@ -105,13 +140,15 @@
       },{once:true});
     }
     media.src=url;media.load();
-    ensureGain(media);
+    // Native audio delivery avoids the Web Audio cross-origin silence bug.
+    applyVolume();
     await resizeWindow(current);
     if(current==='video')showControls();
     await win?.show(); // the native file picker has already finished
     updateControls();
-    try{await media.play();}catch{}
+    try{await media.play();}catch{/* A codec fallback may still succeed. */}
     updateControls();
+    void maybeNormalize(selection,generation);
   }
   // Query the latest selection after initial load, eliminating the race
   // where the window opens before the event listener is installed.
@@ -132,8 +169,9 @@
   toggle.addEventListener('click',async()=>{
     const media=active();if(!media)return;
     if(media.paused){
-      if(audioContext)void audioContext.resume().catch(()=>{});
-      try{await media.play();}catch{fail('Playback could not start. Try a supported codec.');}
+      try{await media.play();}catch{
+        void codecFallback(sourceGeneration);
+      }
     }else media.pause();
     updateControls();
   });
@@ -146,8 +184,14 @@
   for(const media of Object.values(mediaElements)){
     for(const name of ['durationchange','loadedmetadata','timeupdate','play','pause','ended','seeked'])
       media.addEventListener(name,updateControls);
-    media.addEventListener('error',()=>fail(
-      'This file uses a codec unavailable in the installed Windows media runtime. Select another format; files are never uploaded.'));
+    media.addEventListener('error',()=>{
+      if(media!==active())return;
+      if(usedCodecFallback){
+        fail('The local codec engine could not play this file.');
+      }else if(!normalizing){
+        void codecFallback(sourceGeneration);
+      }
+    });
   }
   mediaElements.video.addEventListener('loadedmetadata',()=>{
     lastVideoRatio=videoRatio();
