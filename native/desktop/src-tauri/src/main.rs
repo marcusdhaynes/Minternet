@@ -6021,8 +6021,9 @@ fn main() {
         .manage(privacy_shield::ShieldState(Mutex::new(privacy_shield::ShieldConfig::default())))
         .invoke_handler(tauri::generate_handler![browser_action, browser_snapshot])
         .setup(|app| {
-            let real_launch=!std::env::args().any(|arg|
-                arg.starts_with("--minternet-")&&(arg.ends_with("-smoke")||arg.ends_with("-reopen")));
+            let real_launch=new_window_startup().is_none()&&
+                !std::env::args().any(|arg|
+                    arg.starts_with("--minternet-")&&(arg.ends_with("-smoke")||arg.ends_with("-reopen")));
             if real_launch {install_panic_diagnostics(app.handle());}
             let previous_crash=real_launch&&start_crash_guard(app.handle());
             let shield=privacy_shield::load(app.handle());
@@ -6530,7 +6531,9 @@ fn main() {
                         if !std::env::args().any(|a|a=="--minternet-open-window"){
                             let _=save_session(&handle);
                         }
-                        clear_crash_guard(&handle);
+                        if !std::env::args().any(|a|a=="--minternet-open-window"){
+                            clear_crash_guard(&handle);
+                        }
                     },
                     tauri::WindowEvent::Focused(true) => {
                         // Force a compositor refresh on restore/focus even when
