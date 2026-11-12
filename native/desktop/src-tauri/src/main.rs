@@ -6486,7 +6486,7 @@ fn main() {
             // Fresh secondary windows start at the explicitly requested URL,
             // never duplicating the original window's restored session.
             if let Some(address)=new_window_target{
-                let id=app.state::<Mutex<Browser>>().0.lock()
+                let id=app.state::<Mutex<Browser>>().lock()
                     .map_err(std::io::Error::other)?.active_id;
                 navigate_tab(app.handle(),id,Some(address),true)
                     .map_err(std::io::Error::other)?;
