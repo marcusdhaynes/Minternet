@@ -535,6 +535,17 @@
     event.stopPropagation();
     handlers.chrome(event);
   },false);
+  // WebView2 consumes the native context request and forwards the validated
+  // link, selection, and click point here. All menus remain Minternet-owned.
+  if(window.__TAURI__?.event?.listen){
+    void window.__TAURI__.event.listen('minternet:site-context',event=>{
+      const detail=event.payload;
+      if(!detail||!Number.isSafeInteger(detail.tabId))return;
+      // Ignore a late context request from a background or closed tab.
+      if(!groups()?.getLatest().tabs.some(t=>t.id===detail.tabId))return;
+      void handlers.site(detail);
+    }).catch(()=>{});
+  }
   const bar=$('bookmarkBar');
   // Capturing phase ensures right-click on a folder receives the browser-style
   // context menu instead of immediately opening the old edit form.
