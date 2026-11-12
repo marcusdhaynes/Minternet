@@ -105,7 +105,7 @@
       ...(belonging?[item('↙  Remove From '+g.displayName(belonging),()=>g.ungroup(tabId))]:[]),
       ...(tab.url?.startsWith('https://')?[item('☆  Bookmark Page',()=>window.minternet?.command('activate',tabId).then(()=>b?.toggleBookmark()))]:[]),
       ...(tab.url?.startsWith('http')&&!tab.secretTab?
-        [item('▣  Open in New Window',()=>window.minternet?.command('open-new-browser-window',tab.url))]:[]),
+        [item('▣  Open in New Window',()=>window.minternet?.command('open-new-browser-window',{url:tab.url,sourceTabId:tabId}))]:[]),
       sub('▣  Split View',[
         item('Snap This Tab Into Split',()=>window.minternet?.command('split-add',tabId)),
         item('Return This Tab To Single View',()=>window.minternet?.command('split-remove',tabId)),
@@ -463,13 +463,13 @@
       const items=[];
       if(href){
         items.push(item('↗  Open Link in New Tab',()=>window.minternet?.command('site-link-new-tab',{tabId:payload.tabId,url:href})));
-        items.push(item('▣  Open Link in New Window',()=>window.minternet?.command('open-new-browser-window',href)));
+        items.push(item('▣  Open Link in New Window',()=>window.minternet?.command('open-new-browser-window',{url:href,sourceTabId:payload.tabId})));
         items.push(item('⧉  Copy Link Address',()=>window.minternet?.command('site-context-copy',href)));
         items.push(sep());
       }
       if(media){
         items.push(item('↗  Open Media in New Tab',()=>window.minternet?.command('site-link-new-tab',{tabId:payload.tabId,url:media})));
-        items.push(item('▣  Open Media in New Window',()=>window.minternet?.command('open-new-browser-window',media)));
+        items.push(item('▣  Open Media in New Window',()=>window.minternet?.command('open-new-browser-window',{url:media,sourceTabId:payload.tabId})));
         items.push(item('⧉  Copy Media Address',()=>window.minternet?.command('site-context-copy',media)));
         items.push(sep());
       }
@@ -485,7 +485,7 @@
         items.push(sep());
       }
       if(page){
-        items.push(item('▣  Open Page in New Window',()=>window.minternet?.command('open-new-browser-window',page)));
+        items.push(item('▣  Open Page in New Window',()=>window.minternet?.command('open-new-browser-window',{url:page,sourceTabId:payload.tabId})));
         items.push(item('⧉  Copy Page Address',()=>window.minternet?.command('site-context-copy',page)));
       }
       items.push(item('←  Back',()=>window.minternet?.command('back')));
