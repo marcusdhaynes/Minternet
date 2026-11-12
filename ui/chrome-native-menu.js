@@ -529,7 +529,7 @@
   });
   // Every remaining chrome surface gets a Minternet-owned context menu.
   // Specialized tabs, folders, and bookmarks retain their own handlers.
-  document.addEventListener('contextmenu',event=>{
+  document.addEventListener?.('contextmenu',event=>{
     if(event.defaultPrevented)return;
     event.preventDefault();
     event.stopPropagation();
