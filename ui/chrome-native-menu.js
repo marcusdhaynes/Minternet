@@ -477,7 +477,10 @@
         items.push(item('▤  Select All',()=>window.minternet?.command('site-context-edit',{tabId:payload.tabId,action:'selectAll'})));
         items.push(sep());
       }
-      if(page)items.push(item('⧉  Copy Page Address',()=>window.minternet?.command('site-context-copy',page)));
+      if(page){
+        items.push(item('▣  Open Page in New Window',()=>window.minternet?.command('open-new-browser-window',page)));
+        items.push(item('⧉  Copy Page Address',()=>window.minternet?.command('site-context-copy',page)));
+      }
       items.push(item('←  Back',()=>window.minternet?.command('back')));
       items.push(item('→  Forward',()=>window.minternet?.command('forward')));
       items.push(item('↻  Reload',()=>window.minternet?.command('reload')));
