@@ -1058,7 +1058,7 @@ struct SessionSaveQueued(AtomicBool);
 fn schedule_session_save(app:&tauri::AppHandle){
     // Secondary browser windows must not overwrite the original window's
     // pinned/restored session file when they close or switch tabs.
-    if std::env::args().any(|a|a=="--minternet-open-window"){return;}
+    if is_spawned_browser_window(){return;}
     // Saving session URLs queries native WebView controllers. Doing it inside
     // every tab-state notification/COM callback causes redundant main-thread
     // work and can destabilize WebView2 during rapid navigation.
@@ -3068,18 +3068,25 @@ fn open_site_popup_tab(app:&tauri::AppHandle,opener:u32,target:tauri::Url)
 // Right-click "Open in New Window" creates a fresh Minternet instance with
 // full chrome (not a bare WebView2 popup). Sessions remain isolated: secondary
 // instances do not write over the main window's restored tabs.
-fn spawn_browser_window(address:&str)->Result<(),String>{
+fn spawn_browser_window(address:&str,private:bool)->Result<(),String>{
     let target=valid_browser_window_url(address)?;
     let exe=std::env::current_exe().map_err(|e|e.to_string())?;
     std::process::Command::new(exe)
-        .arg("--minternet-open-window").arg(target.as_str())
+        .arg(if private{"--minternet-open-private-window"}else{"--minternet-open-window"})
+        .arg(target.as_str())
         .spawn().map_err(|e|format!("Could not open new Minternet window: {e}"))?;
     Ok(())
 }
-fn new_window_startup()->Option<tauri::Url>{
+fn is_spawned_browser_window()->bool{
+    std::env::args().any(|a|matches!(a.as_str(),
+        "--minternet-open-window"|"--minternet-open-private-window"))
+}
+fn new_window_startup()->Option<(tauri::Url,bool)>{
     let args=std::env::args().collect::<Vec<_>>();
-    args.windows(2).find(|a|a[0]=="--minternet-open-window")
-        .and_then(|a|valid_browser_window_url(&a[1]).ok())
+    args.windows(2).find(|a|matches!(a[0].as_str(),
+        "--minternet-open-window"|"--minternet-open-private-window"))
+        .and_then(|a|valid_browser_window_url(&a[1]).ok()
+            .map(|url|(url,a[0]=="--minternet-open-private-window")))
 }
 
 fn navigate_tab(app: &tauri::AppHandle, id: u32, url: Option<tauri::Url>, append: bool) -> Result<(), String> {
@@ -3626,8 +3633,17 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
     // All browser context actions are made by the trusted local chrome
     // only. Never accept a tab ID or arbitrary eval script from a webpage.
     if name=="open-new-browser-window"{
-        let address=value.as_str().ok_or("Select a website to open")?;
-        spawn_browser_window(address)?;
+        let address=value.as_str().or_else(||value.get("url").and_then(Value::as_str))
+            .ok_or("Select a website to open")?;
+        let private={
+            let browser=app.state::<Mutex<Browser>>();
+            let state=browser.lock().map_err(|e|e.to_string())?;
+            let source=value.get("sourceTabId").and_then(Value::as_u64)
+                .and_then(|id|state.tabs.iter().find(|tab|tab.id as u64==id))
+                .or_else(||state.tabs.iter().find(|tab|tab.id==state.active_id));
+            source.is_some_and(|tab|tab.private||tab.secret_id.is_some())
+        };
+        spawn_browser_window(address,private)?;
         return Ok(json!({"ok":true}));
     }
     if name=="site-link-new-tab"{
@@ -6046,9 +6062,9 @@ fn main() {
             // restore their pinned pages or start with a tabless home.
             let smoke=std::env::args().any(|a|a.starts_with("--minternet-")&&a.ends_with("-smoke"));
             let new_window_target=new_window_startup();
-            if new_window_target.is_some(){
+            if let Some((_,private))=new_window_target.as_ref(){
                 let state=app.state::<Mutex<Browser>>();
-                state.lock().map_err(|e|e.to_string())?.add(false)?;
+                state.lock().map_err(|e|e.to_string())?.add(*private)?;
             }else if smoke && !std::env::args().any(|a|a=="--minternet-pin-reopen-smoke") {
                 let store=app.state::<Mutex<Browser>>();
                 let mut b=store.lock().map_err(|e|e.to_string())?;
@@ -6485,7 +6501,7 @@ fn main() {
             )?;
             // Fresh secondary windows start at the explicitly requested URL,
             // never duplicating the original window's restored session.
-            if let Some(address)=new_window_target{
+            if let Some((address,_private))=new_window_target{
                 let id=app.state::<Mutex<Browser>>().lock()
                     .map_err(|e|std::io::Error::other(e.to_string()))?.active_id;
                 navigate_tab(app.handle(),id,Some(address),true)
@@ -6528,10 +6544,10 @@ fn main() {
                         // before the WebView2 controllers and their URLs vanish.
                         // Ordinary browser state is retained; private URLs are excluded.
                         refresh_session_urls(&handle);
-                        if !std::env::args().any(|a|a=="--minternet-open-window"){
+                        if !is_spawned_browser_window(){
                             let _=save_session(&handle);
                         }
-                        if !std::env::args().any(|a|a=="--minternet-open-window"){
+                        if !is_spawned_browser_window(){
                             clear_crash_guard(&handle);
                         }
                     },
