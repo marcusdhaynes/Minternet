@@ -6487,7 +6487,7 @@ fn main() {
             // never duplicating the original window's restored session.
             if let Some(address)=new_window_target{
                 let id=app.state::<Mutex<Browser>>().lock()
-                    .map_err(std::io::Error::other)?.active_id;
+                    .map_err(|e|std::io::Error::other(e.to_string()))?.active_id;
                 navigate_tab(app.handle(),id,Some(address),true)
                     .map_err(std::io::Error::other)?;
             }else{
