@@ -3624,6 +3624,67 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         };
         return media_devices::action(&app,&name,&value,id,&url,private);
     }
+    // All browser context actions are made by the trusted local chrome
+    // only. Never accept a tab ID or arbitrary eval script from a webpage.
+    if name=="open-new-browser-window"{
+        let address=value.as_str().ok_or("Select a website to open")?;
+        spawn_browser_window(address)?;
+        return Ok(json!({"ok":true}));
+    }
+    if name=="site-link-new-tab"{
+        let tab_id=value.get("tabId").and_then(Value::as_u64)
+            .ok_or("Missing source tab")? as u32;
+        let url=value.get("url").and_then(Value::as_str)
+            .ok_or("Missing link address")?;
+        let target=valid_browser_window_url(url)?;
+        {
+            let state=app.state::<Mutex<Browser>>();
+            let browser=state.lock().map_err(|e|e.to_string())?;
+            let tab=browser.tabs.iter().find(|t|t.id==tab_id)
+                .ok_or("Source tab was closed")?;
+            if tab.secret_id.is_some()&&!tab.secret_revealed{
+                return Err("Concealed tabs cannot open website links".into());
+            }
+        }
+        // Right-click link actions use a background tab beside the opener.
+        let new_id={
+            let state=app.state::<Mutex<Browser>>();
+            let mut browser=state.lock().map_err(|e|e.to_string())?;
+            let private=browser.tabs.iter().find(|t|t.id==tab_id)
+                .is_some_and(|t|t.private||t.secret_id.is_some());
+            browser.add_after(private,tab_id,true)?
+        };
+        navigate_tab(&app,new_id,Some(target),true)?;
+        notify(&app);
+        return Ok(json!({"ok":true,"tabId":new_id}));
+    }
+    if name=="site-context-copy" {
+        let copy=value.as_str().ok_or("No text to copy")?;
+        if copy.len()>10000{return Err("Text exceeds clipboard limit".into());}
+        app.clipboard().write_text(copy.to_string()).map_err(|e|e.to_string())?;
+        return Ok(json!({"ok":true}));
+    }
+    if name=="site-context-edit"{
+        let action=value.get("action").and_then(Value::as_str).unwrap_or("");
+        let tab_id=value.get("tabId").and_then(Value::as_u64).unwrap_or(0) as u32;
+        let script=match action{
+            "copy"=>"document.execCommand('copy');",
+            "cut"=>"document.execCommand('cut');",
+            "selectAll"=>"document.execCommand('selectAll');",
+            "paste"=>"(async()=>{try{const c=await navigator.clipboard.readText();document.execCommand('insertText',false,c)}catch{}})();",
+            _=>return Err("Invalid editing action".into())
+        };
+        {
+            let state=app.state::<Mutex<Browser>>();
+            let browser=state.lock().map_err(|e|e.to_string())?;
+            if !browser.tabs.iter().any(|t|t.id==tab_id&&t.view.is_some()){
+                return Err("Site tab is unavailable".into());
+            }
+        }
+        let view=app.get_webview(&format!("tab-{tab_id}")).ok_or("Tab is closed")?;
+        view.eval(script).map_err(|e|e.to_string())?;
+        return Ok(json!({"ok":true}));
+    }
     // OAuth, Drive and Gmail are only available to the trusted local chrome.
     // All remote network calls run on worker threads so they never pause the
     // native browser event loop. No Google token is returned to web content.
