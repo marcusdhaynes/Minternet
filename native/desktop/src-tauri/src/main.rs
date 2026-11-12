@@ -2299,21 +2299,14 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                     if is_real_page_url(event.url().as_str()) {
                         apply_volume_to_site(&for_load,id,view.label(),true);
                     }
-                    // CI only: open about:blank exactly as OAuth popup libraries
-                    // do, then assert a same-origin opener can write to it.
-                    // No Google account or sign-in secrets are used.
+                    // CI only: a site requesting a separate window must
+                    // create an adjacent native Minternet tab instead.
                     if event.url().host_str()==Some("example.com") &&
                         std::env::args().any(|a|a=="--minternet-auth-popup-smoke") {
                         let _=view.eval(r#"
                             setTimeout(() => {
-                              const popup=window.open('about:blank',
-                                'minternet-auth-popup-smoke','width=480,height=600');
-                              if (!popup) return;
-                              popup.document.open();
-                              popup.document.write('<!doctype html><html><head><title>OAuth popup</title></head><body>Checking opener</body></html>');
-                              popup.document.close();
-                              if (popup.opener===window)
-                                popup.document.title='Minternet OAuth Popup Smoke';
+                              window.open('https://example.org/?minternet-popup-smoke=1',
+                                '_blank','width=480,height=600');
                             }, 250);
                         "#);
                     }
@@ -3063,6 +3056,12 @@ fn open_site_popup_tab(app:&tauri::AppHandle,opener:u32,target:tauri::Url)
         }
     }else {display_active(app);}
     notify(app);
+    if std::env::args().any(|a|a=="--minternet-auth-popup-smoke"){
+        let marker=std::env::temp_dir()
+            .join(format!("minternet-auth-popup-{}.ok",std::process::id()));
+        std::fs::write(marker,
+            format!("Website window request opened Minternet tab {id}; no OS popup")).ok();
+    }
     let _=selected;
     Ok(id)
 }
