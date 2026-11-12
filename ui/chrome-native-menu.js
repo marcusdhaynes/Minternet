@@ -456,6 +456,7 @@
     site:details=>{
       const payload=details&&typeof details==='object'?details:{};
       const href=/^https?:\/\//i.test(payload.linkUrl||'')?payload.linkUrl:'';
+      const media=/^https?:\/\//i.test(payload.sourceUrl||'')?payload.sourceUrl:'';
       const page=/^https?:\/\//i.test(payload.pageUrl||'')?payload.pageUrl:'';
       const selected=typeof payload.selection==='string'?payload.selection.slice(0,2048):'';
       const point={x:Math.max(0,Number(payload.x)||0),y:Math.max(0,Number(payload.y)||0)};
@@ -464,6 +465,12 @@
         items.push(item('↗  Open Link in New Tab',()=>window.minternet?.command('site-link-new-tab',{tabId:payload.tabId,url:href})));
         items.push(item('▣  Open Link in New Window',()=>window.minternet?.command('open-new-browser-window',href)));
         items.push(item('⧉  Copy Link Address',()=>window.minternet?.command('site-context-copy',href)));
+        items.push(sep());
+      }
+      if(media){
+        items.push(item('↗  Open Media in New Tab',()=>window.minternet?.command('site-link-new-tab',{tabId:payload.tabId,url:media})));
+        items.push(item('▣  Open Media in New Window',()=>window.minternet?.command('open-new-browser-window',media)));
+        items.push(item('⧉  Copy Media Address',()=>window.minternet?.command('site-context-copy',media)));
         items.push(sep());
       }
       if(selected){
