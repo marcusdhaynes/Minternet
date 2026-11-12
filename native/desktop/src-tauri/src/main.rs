@@ -6,6 +6,7 @@ mod firefox_bookmarks;
 mod secret_bookmarks;
 mod privacy_shield;
 mod media_devices;
+mod site_context_menu;
 use base64::Engine as _;
 use rand::{rngs::OsRng,RngCore};
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -1055,6 +1056,9 @@ fn snapshot(app: &tauri::AppHandle) -> Result<Snapshot, String> {
 
 struct SessionSaveQueued(AtomicBool);
 fn schedule_session_save(app:&tauri::AppHandle){
+    // Secondary browser windows must not overwrite the original window's
+    // pinned/restored session file when they close or switch tabs.
+    if std::env::args().any(|a|a=="--minternet-open-window"){return;}
     // Saving session URLs queries native WebView controllers. Doing it inside
     // every tab-state notification/COM callback causes redundant main-thread
     // work and can destabilize WebView2 during rapid navigation.
@@ -2151,7 +2155,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                 _=>true
             }
         })
-        .on_new_window(move |url, features| {
+        .on_new_window(move |url, _features| {
             if url.as_str()=="https://minternet-find.invalid/__open" {
                 let _=for_popup.emit_to("chrome","minternet:find-open",json!({}));
                 return NewWindowResponse::Deny;
@@ -2180,48 +2184,24 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                 }
                 return NewWindowResponse::Deny;
             }
-            // All site-created popup windows are allowed. No origin policy,
-            // host list, user-gesture check, rate limit or window cap.
-            let label=format!("site-popup-{}",
-                NEXT_POPUP_ID.fetch_add(1,Ordering::Relaxed));
-            let builder=WebviewWindowBuilder::new(
-                    &for_popup,label,WebviewUrl::External(
-                        tauri::Url::parse("about:blank").expect("valid blank URL")))
-                .window_features(features)
-                .title("Minternet Popup")
-                // Site popup windows cannot silently download files.
-                .on_download(|_view,event|match event{
-                    DownloadEvent::Requested{..}=>false,
-                    _=>true
-                })
-                .inner_size(540.0,680.0)
-                .resizable(true)
-                .on_navigation(|destination| {
-                    (matches!(destination.scheme(),"https"|"http")
-                        && destination.host_str().is_some())
-                    || destination.as_str()=="about:blank"
-                    || (destination.scheme()=="blob"
-                        && (destination.as_str().starts_with("blob:https://")
-                            || destination.as_str().starts_with("blob:http://")))
-                })
-                .on_document_title_changed(|window,title| {
-                    let safe=title.chars().take(100).collect::<String>();
-                    if !safe.is_empty(){let _=window.set_title(&safe);}
-                    if safe=="Minternet OAuth Popup Smoke" &&
-                        std::env::args().any(|a|a=="--minternet-auth-popup-smoke") {
-                        let marker=std::env::temp_dir().join(format!(
-                            "minternet-auth-popup-{}.ok",std::process::id()));
-                        let _=std::fs::write(marker,
-                            "Native WebView2 popup retained opener and rendered title");
-                    }
+            // Websites may request target=_blank or window.open(), but must
+            // not create new desktop windows. Ordinary HTTP(S) targets
+            // become Minternet tabs beside their opener. A blank request
+            // creates a normal blank tab, not an OS popup window.
+            if url.as_str()=="about:blank" ||
+                (matches!(url.scheme(),"https"|"http")&&url.host_str().is_some()
+                    &&url.username().is_empty()&&url.password().is_none()){
+                let worker=for_popup.clone();
+                let target=url.clone();
+                std::thread::spawn(move||{
+                    std::thread::sleep(Duration::from_millis(12));
+                    let main=worker.clone();
+                    let _=worker.run_on_main_thread(move||{
+                        let _=open_site_popup_tab(&main,id,target);
+                    });
                 });
-            match builder.build(){
-                Ok(window)=>NewWindowResponse::Create{window},
-                Err(error)=>{
-                    eprintln!("Cannot open related Minternet popup: {error}");
-                    NewWindowResponse::Deny
-                }
             }
+            NewWindowResponse::Deny
         })
         .on_page_load(move |view, event| {
             if matches!(event.event(), PageLoadEvent::Started | PageLoadEvent::Finished) {
@@ -2404,6 +2384,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     #[cfg(windows)]
     attach_browser_favicon(app,id,&created);
     media_devices::attach(app,id,&created,private);
+    site_context_menu::attach(app,id,&created);
     #[cfg(windows)]
     if let Ok(page)=created.url(){
         media_devices::reset_old_denials(app,id,page.as_str());
@@ -3053,6 +3034,53 @@ fn prepare_active(app: &tauri::AppHandle) -> Result<(), String> {
         let _ = std::fs::write(marker, "WebView2 tab created before navigation");
     }
     Ok(())
+}
+
+
+fn valid_browser_window_url(address:&str)->Result<tauri::Url,String>{
+    let target=tauri::Url::parse(address).map_err(|_|"Invalid website address")?;
+    if !matches!(target.scheme(),"http"|"https") || target.host_str().is_none() ||
+       !target.username().is_empty()||target.password().is_some(){
+        return Err("A new browser window requires a public HTTP(S) address".into());
+    }
+    Ok(target)
+}
+// Respect the user's default: every regular site-created new window is an
+// adjacent tab, retaining the source tab's private mode and browser styling.
+fn open_site_popup_tab(app:&tauri::AppHandle,opener:u32,target:tauri::Url)
+  ->Result<u32,String>{
+    let (selected,id)={
+        let state=app.state::<Mutex<Browser>>();
+        let mut b=state.lock().map_err(|e|e.to_string())?;
+        let original=b.tabs.iter().find(|t|t.id==opener).ok_or("Opener tab closed")?;
+        let private=original.private||original.secret_id.is_some();
+        (b.active_id,b.add_after(private,opener,false)?)
+    };
+    if target.as_str()!="about:blank"{
+        if let Err(err)=navigate_tab(app,id,Some(target),true){
+            // Do not leave a non-navigable tab when WebView2 rejects a URL.
+            return Err(err);
+        }
+    }else {display_active(app);}
+    notify(app);
+    let _=selected;
+    Ok(id)
+}
+// Right-click "Open in New Window" creates a fresh Minternet instance with
+// full chrome (not a bare WebView2 popup). Sessions remain isolated: secondary
+// instances do not write over the main window's restored tabs.
+fn spawn_browser_window(address:&str)->Result<(),String>{
+    let target=valid_browser_window_url(address)?;
+    let exe=std::env::current_exe().map_err(|e|e.to_string())?;
+    std::process::Command::new(exe)
+        .arg("--minternet-open-window").arg(target.as_str())
+        .spawn().map_err(|e|format!("Could not open new Minternet window: {e}"))?;
+    Ok(())
+}
+fn new_window_startup()->Option<tauri::Url>{
+    let args=std::env::args().collect::<Vec<_>>();
+    args.windows(2).find(|a|a[0]=="--minternet-open-window")
+        .and_then(|a|valid_browser_window_url(&a[1]).ok())
 }
 
 fn navigate_tab(app: &tauri::AppHandle, id: u32, url: Option<tauri::Url>, append: bool) -> Result<(), String> {
@@ -5163,12 +5191,12 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             // Bookmark context menus intentionally do not contain Tab Groups.
             // Verify the native folder submenu still opens and group state is
             // unaffected by the bookmark menu.
-            if folders < 2 || native < 1 || group_visible != Some(false) || group_rows != 0 {
-                return Err("Native cascading folder menu or bookmark context isolation check failed".into());
+            if folders < 2 || native != 0 || group_visible != Some(false) || group_rows != 0 {
+                return Err("Custom Minternet folder menu or context isolation check failed".into());
             }
             let marker = std::env::temp_dir()
                 .join(format!("minternet-menus-{}.ok",std::process::id()));
-            std::fs::write(marker,"Native folder popup and no Tab Groups in bookmark context verified")
+            std::fs::write(marker,"Minternet-owned folder popup; zero OS menus and isolated bookmark context verified")
                 .map_err(|e| e.to_string())?;
             return Ok(json!({"ok":true}));
         }
@@ -5956,7 +5984,11 @@ fn main() {
             // Automated tests use a deterministic fresh session. Real users
             // restore their pinned pages or start with a tabless home.
             let smoke=std::env::args().any(|a|a.starts_with("--minternet-")&&a.ends_with("-smoke"));
-            if smoke && !std::env::args().any(|a|a=="--minternet-pin-reopen-smoke") {
+            let new_window_target=new_window_startup();
+            if new_window_target.is_some(){
+                let state=app.state::<Mutex<Browser>>();
+                state.lock().map_err(|e|e.to_string())?.add(false)?;
+            }else if smoke && !std::env::args().any(|a|a=="--minternet-pin-reopen-smoke") {
                 let store=app.state::<Mutex<Browser>>();
                 let mut b=store.lock().map_err(|e|e.to_string())?;
                 b.add(false)?;
@@ -6390,9 +6422,17 @@ fn main() {
                 LogicalPosition::new(0.0,0.0),
                 LogicalSize::new(width,height)
             )?;
-            // Restored pinned URLs need their real WebView2 on first launch;
-            // without pins, activated displays the true tabless home view.
-            activated(app.handle()).map_err(std::io::Error::other)?;
+            // Fresh secondary windows start at the explicitly requested URL,
+            // never duplicating the original window's restored session.
+            if let Some(address)=new_window_target{
+                let id=app.state::<Mutex<Browser>>().0.lock()
+                    .map_err(std::io::Error::other)?.active_id;
+                navigate_tab(app.handle(),id,Some(address),true)
+                    .map_err(std::io::Error::other)?;
+            }else{
+                // Restored pinned URLs need their real WebView2 on launch.
+                activated(app.handle()).map_err(std::io::Error::other)?;
+            }
             let handle = app.handle().clone();
             // Coalesce Windows resize storms to at most one native WebView2
             // bounds pass per display frame. Do not block the UI event handler
@@ -6427,7 +6467,9 @@ fn main() {
                         // before the WebView2 controllers and their URLs vanish.
                         // Ordinary browser state is retained; private URLs are excluded.
                         refresh_session_urls(&handle);
-                        let _=save_session(&handle);
+                        if !std::env::args().any(|a|a=="--minternet-open-window"){
+                            let _=save_session(&handle);
+                        }
                         clear_crash_guard(&handle);
                     },
                     tauri::WindowEvent::Focused(true) => {
