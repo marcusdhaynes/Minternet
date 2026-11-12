@@ -1,11 +1,10 @@
 'use strict';
-// Browser-style native context menus. On Windows this is an OS-owned popup:
-// it is anchored precisely to the clicked folder, keeps the page WebView2
-// visible, follows system DPI and automatically cascades on submenu hover.
+// Minternet-owned context menus for all browser surfaces. Never ask Windows,
+// Tauri, or WebView2 to show a generic system context menu. All menus use the
+// same compact DOM renderer, including folders and deeply nested submenus.
 (() => {
   const $=id=>document.getElementById(id);
-  let lastMenus=[];
-  let nativePopupCount=0;
+  let nativePopupCount=0; // Legacy diagnostic: OS menu usage must remain zero.
   const cleanLabel=(value,fallback)=>String(value||fallback).replace(/[\r\n\t]/g,' ').slice(0,80);
   const sep=()=>({item:'Separator'});
   const disabled=text=>({text,enabled:false});
@@ -105,6 +104,8 @@
       sub('▣  Move To Group',assignOptions.slice(1)),
       ...(belonging?[item('↙  Remove From '+g.displayName(belonging),()=>g.ungroup(tabId))]:[]),
       ...(tab.url?.startsWith('https://')?[item('☆  Bookmark Page',()=>window.minternet?.command('activate',tabId).then(()=>b?.toggleBookmark()))]:[]),
+      ...(tab.url?.startsWith('http')&&!tab.secretTab?
+        [item('▣  Open in New Window',()=>window.minternet?.command('open-new-browser-window',tab.url))]:[]),
       sub('▣  Split View',[
         item('Snap This Tab Into Split',()=>window.minternet?.command('split-add',tabId)),
         item('Return This Tab To Single View',()=>window.minternet?.command('split-remove',tabId)),
@@ -156,6 +157,7 @@
     }
     return [
       item('↗  Open in New Tab',()=>b?.openInNewTab(bookmarkId)),
+      item('▣  Open in New Window',()=>window.minternet?.command('open-new-browser-window',node.url)),
       item('◈  Move to Secret Bookmarks…',()=>window.minternetSecrets?.addFromNormal(bookmarkId)),
       sep(),
       item('✎  Edit Name…',()=>b?.edit(bookmarkId)),
@@ -223,20 +225,9 @@
   }
   async function popup(items,point,options={}){
     const x=Math.max(0,Math.round(point.x||0)), y=Math.max(0,Math.round(point.y||0));
-    if(!options.custom&&window.__TAURI__?.menu?.Menu){
-      const api=window.__TAURI__;
-      try {
-        const native=await api.menu.Menu.new({items});
-        lastMenus.push(native);
-        if(lastMenus.length>6)lastMenus.shift();
-        await native.popup(new api.dpi.LogicalPosition(x,y));
-        nativePopupCount++;
-        return true;
-      }catch(error){
-        console.warn('Native menu unavailable:',error);
-        window.minternetToast?.('Native menu unavailable; using compact menu.');
-      }
-    }
+    // Intentionally no native Menu.new/Popup path, even in smoke tests.
+    // DOM context menus remain visually consistent throughout Minternet.
+    options={...options,custom:true};
     closeFallback();
     const host=document.createElement('div');
     host.className='system-popup-root'+(options.custom?' minternet-context-menu':'')+(options.compactTab?' compact-tab-menu':'');
@@ -440,7 +431,7 @@
     folder:(id,button)=>{
       closeFallback();
       return popup(folderItems(id),fromElement(button),
-        window.__minternetMenuSmoke?{}:{custom:true,heading:'FOLDER'}).then(result=>{
+        {custom:true,heading:'FOLDER'}).then(result=>{
         // popup() builds the fallback after clearing the previous menu.
         // Apply the active-folder color only while its menu is displayed.
         if(result&&fallback&&button){
@@ -461,6 +452,59 @@
       if(!groups()?.getLatest().tabs.some(tab=>tab.id===chosen))
         return popup([disabled('Tab no longer exists')],point,{custom:true,compactTab:true,heading:'TAB'});
       return popup(tabMenu(chosen),point,{custom:true,compactTab:true,heading:'TAB',tabId:chosen,quickActions:tabQuickActions(chosen)});
+    },
+    site:details=>{
+      const payload=details&&typeof details==='object'?details:{};
+      const href=/^https?:\/\//i.test(payload.linkUrl||'')?payload.linkUrl:'';
+      const page=/^https?:\/\//i.test(payload.pageUrl||'')?payload.pageUrl:'';
+      const selected=typeof payload.selection==='string'?payload.selection.slice(0,2048):'';
+      const point={x:Math.max(0,Number(payload.x)||0),y:Math.max(0,Number(payload.y)||0)};
+      const items=[];
+      if(href){
+        items.push(item('↗  Open Link in New Tab',()=>window.minternet?.command('site-link-new-tab',{tabId:payload.tabId,url:href})));
+        items.push(item('▣  Open Link in New Window',()=>window.minternet?.command('open-new-browser-window',href)));
+        items.push(item('⧉  Copy Link Address',()=>window.minternet?.command('site-context-copy',href)));
+        items.push(sep());
+      }
+      if(selected){
+        items.push(item('⧉  Copy Selected Text',()=>window.minternet?.command('site-context-copy',selected)));
+        items.push(sep());
+      }
+      if(payload.editable){
+        items.push(item('✂  Cut',()=>window.minternet?.command('site-context-edit',{tabId:payload.tabId,action:'cut'})));
+        items.push(item('⧉  Copy',()=>window.minternet?.command('site-context-edit',{tabId:payload.tabId,action:'copy'})));
+        items.push(item('▣  Paste',()=>window.minternet?.command('site-context-edit',{tabId:payload.tabId,action:'paste'})));
+        items.push(item('▤  Select All',()=>window.minternet?.command('site-context-edit',{tabId:payload.tabId,action:'selectAll'})));
+        items.push(sep());
+      }
+      if(page)items.push(item('⧉  Copy Page Address',()=>window.minternet?.command('site-context-copy',page)));
+      items.push(item('←  Back',()=>window.minternet?.command('back')));
+      items.push(item('→  Forward',()=>window.minternet?.command('forward')));
+      items.push(item('↻  Reload',()=>window.minternet?.command('reload')));
+      return popup(items,point,{custom:true,heading:href?'LINK':payload.editable?'EDIT':'PAGE'});
+    },
+    chrome:event=>{
+      const target=event?.target;
+      const editable=Boolean(target?.closest?.('input,textarea,[contenteditable="true"]'));
+      const at={x:event.clientX,y:event.clientY};
+      const items=[];
+      if(editable){
+        items.push(item('✂  Cut',()=>document.execCommand('cut')));
+        items.push(item('⧉  Copy',()=>document.execCommand('copy')));
+        items.push(item('▣  Paste',async()=>{
+          try{
+            const text=await navigator.clipboard.readText();
+            document.execCommand('insertText',false,text);
+          }catch{window.minternetToast?.('Clipboard access is unavailable');}
+        }));
+        items.push(item('▤  Select All',()=>document.execCommand('selectAll')));
+        items.push(sep());
+      }
+      items.push(item('＋  New Tab',()=>window.minternet?.command('new')));
+      items.push(item('＋  New Private Tab',()=>window.minternet?.command('new-private')));
+      items.push(item('↻  Reload',()=>window.minternet?.command('reload')));
+      items.push(item('⚙  Settings',()=>$('settings')?.click()));
+      return popup(items,at,{custom:true,heading:editable?'EDIT':'MINTERNET'});
     },
     inspectTab:id=>tabMenu(id),
     inspectEmptyTabBar:emptyTabBarMenu,
@@ -483,6 +527,14 @@
     event.preventDefault();
     handlers.tab(null,{x:event.clientX,y:event.clientY});
   });
+  // Every remaining chrome surface gets a Minternet-owned context menu.
+  // Specialized tabs, folders, and bookmarks retain their own handlers.
+  document.addEventListener('contextmenu',event=>{
+    if(event.defaultPrevented)return;
+    event.preventDefault();
+    event.stopPropagation();
+    handlers.chrome(event);
+  },false);
   const bar=$('bookmarkBar');
   // Capturing phase ensures right-click on a folder receives the browser-style
   // context menu instead of immediately opening the old edit form.
