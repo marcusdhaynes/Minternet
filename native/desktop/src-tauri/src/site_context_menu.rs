@@ -21,6 +21,7 @@ pub fn attach(app:&tauri::AppHandle,id:u32,view:&tauri::Webview){
             let mut point=POINT::default();
             let _=unsafe{args.Location(&mut point)};
             let mut href=String::new();
+            let mut source_uri=String::new();
             let mut selection=String::new();
             let mut page=String::new();
             let mut editable=false;
@@ -30,6 +31,16 @@ pub fn attach(app:&tauri::AppHandle,id:u32,view:&tauri::Webview){
                     let mut value=PWSTR::null();
                     if unsafe{target.LinkUri(&mut value)}.is_ok(){
                         href=unsafe{value.to_string().unwrap_or_default()};
+                        if !value.is_null(){
+                            unsafe{CoTaskMemFree(Some(value.0 as *const _));}
+                        }
+                    }
+                }
+                bool_flag=BOOL::default();
+                if unsafe{target.HasSourceUri(&mut bool_flag)}.is_ok()&&bool_flag.as_bool(){
+                    let mut value=PWSTR::null();
+                    if unsafe{target.SourceUri(&mut value)}.is_ok(){
+                        source_uri=unsafe{value.to_string().unwrap_or_default()};
                         if !value.is_null(){
                             unsafe{CoTaskMemFree(Some(value.0 as *const _));}
                         }
@@ -67,6 +78,7 @@ pub fn attach(app:&tauri::AppHandle,id:u32,view:&tauri::Webview){
                 "x":(point.x as f64/scale).max(0.0),
                 "y":(super::chrome_top(&handle)+point.y as f64/scale).max(0.0),
                 "linkUrl":href.chars().take(4000).collect::<String>(),
+                "sourceUrl":source_uri.chars().take(4000).collect::<String>(),
                 "selection":selection.chars().take(2048).collect::<String>(),
                 "pageUrl":page.chars().take(4000).collect::<String>(),
                 "editable":editable
