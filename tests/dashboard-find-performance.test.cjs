@@ -133,16 +133,17 @@ test('compact Find, toolbar order, and branded new tabs',()=>{
   assert.match(css,/\.address-wrap\{flex:1 1 auto!important/);
 });
 
-test('reject site downloads until explicit trusted Windows approval and block popunders',()=>{
+test('Downloads remain guarded while site-created windows open as tabs',()=>{
   const native=read('native/desktop/src-tauri/src/main.rs');
   const shield=read('native/desktop/src-tauri/src/privacy_shield.rs');
   assert.match(native,/if !explicit_download_approval\(id,&url,&path\)/);
   assert.match(native,/MB_YESNO\|MB_ICONWARNING\|MB_DEFBUTTON2/);
   assert.match(native,/fn is_disguised_executable/);
   assert.match(native,/if is_disguised_executable\(std::path::Path::new\(&entry\.path\)\)/);
-  assert.match(native,/DownloadEvent::Requested\{\.\.\}=>false/);
+  assert.match(native,/if !download_source_allowed\(&for_download,id,&url\)/);
   assert.doesNotMatch(shield,/pub fn block_popup|pub fn block_blank_popup/);
-  assert.match(native,/NewWindowResponse::Create\{window\}/);
+  assert.match(native,/open_site_popup_tab/);
+  assert.match(native,/NewWindowResponse::Deny/);
 });
 
 test('official extension catalogs are browsable without misleading install claims',()=>{
@@ -156,7 +157,8 @@ test('official extension catalogs are browsable without misleading install claim
 test('No fake-OAuth popup exceptions or cross-site popup blocking remain',()=>{
   const native=read('native/desktop/src-tauri/src/main.rs');
   assert.doesNotMatch(native,/fn trusted_auth_destination|fn intentional_new_tab_shortcut|privacy_shield::block_popup/);
-  assert.match(native,/NEXT_POPUP_ID/);
+  assert.match(native,/spawn_browser_window/);
+  assert.match(native,/open-new-browser-window/);
 });
 
 test('Windows tabs consume actual WebView2 favicon bytes, not root guesses',()=>{
