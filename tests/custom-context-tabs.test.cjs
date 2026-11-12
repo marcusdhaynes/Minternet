@@ -42,6 +42,8 @@ test('site new windows always go through a Minternet tab, explicit right-click o
   assert.doesNotMatch(route,/WebviewWindowBuilder::new|NewWindowResponse::Create/);
   assert.match(main,/fn spawn_browser_window/);
   assert.match(main,/--minternet-open-window/);
+  assert.match(main,/--minternet-open-private-window/);
+  assert.match(main,/if let Some\(\(_,private\)\)=new_window_target\.as_ref\(\)/);
   assert.match(main,/fn new_window_startup/);
   assert.match(main,/schedule_session_save/);
   assert.match(main,/fn open_site_popup_tab/);
