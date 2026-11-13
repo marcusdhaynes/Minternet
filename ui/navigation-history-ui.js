@@ -66,7 +66,64 @@
     document.addEventListener('keydown',escape,true);
     if(window.__TAURI__)void api.command('chrome-overlay',true).catch(()=>{});
   }
-  back.addEventListener('click',()=>void open('back'));
-  forward.addEventListener('click',()=>void open('forward'));
+  // Short click behaves like a conventional browser navigation button.
+  // Holding a button opens its scrollable history instead.
+  const DELAY_KEY='minternet.navigationHoldSeconds.v1';
+  const setting=document.getElementById('navigationHistoryHoldDelay');
+  let holdSeconds=0.25;
+  try{
+    const saved=Number(localStorage.getItem(DELAY_KEY));
+    if(Number.isFinite(saved)&&saved>=0.1&&saved<=2)holdSeconds=saved;
+  }catch{}
+  if(setting){
+    setting.value=String(holdSeconds);
+    const save=()=>{
+      const value=Number(setting.value);
+      if(!Number.isFinite(value)||value<0.1||value>2)return;
+      holdSeconds=Math.round(value*100)/100;
+      try{localStorage.setItem(DELAY_KEY,String(holdSeconds));}catch{}
+    };
+    setting.addEventListener('change',save);
+  }
+  function bindNavigation(button,side){
+    let timer=null,held=false,suppressNextClick=false,startX=0,startY=0;
+    const cancel=()=>{if(timer!==null)clearTimeout(timer);timer=null;};
+    button.addEventListener('pointerdown',event=>{
+      if(event.button!==0 || button.disabled)return;
+      cancel();held=false;suppressNextClick=false;
+      startX=event.clientX;startY=event.clientY;
+      timer=setTimeout(()=>{
+        timer=null;
+        if(button.disabled)return;
+        held=true;
+        suppressNextClick=true;
+        void open(side);
+      },Math.round(holdSeconds*1000));
+    });
+    button.addEventListener('pointermove',event=>{
+      if(timer!==null&&(Math.abs(event.clientX-startX)>10||
+                          Math.abs(event.clientY-startY)>10))cancel();
+    });
+    button.addEventListener('pointerup',cancel);
+    button.addEventListener('pointercancel',()=>{cancel();held=false;suppressNextClick=false;});
+    button.addEventListener('pointerleave',cancel);
+    button.addEventListener('click',event=>{
+      if(held||suppressNextClick){
+        held=false;suppressNextClick=false;
+        event.preventDefault();return;
+      }
+      cancel();
+      close();
+      void api.command(side).catch(()=>{});
+    });
+    // Native browser convention: right-click shows the same history list.
+    button.addEventListener('contextmenu',event=>{
+      event.preventDefault();
+      cancel();held=false;suppressNextClick=true;
+      if(!button.disabled)void open(side);
+    });
+  }
+  bindNavigation(back,'back');
+  bindNavigation(forward,'forward');
   window.minternetNavigationHistory={close};
 })();
