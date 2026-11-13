@@ -113,6 +113,7 @@
     document.addEventListener('pointerdown',outside,true);
     document.addEventListener('keydown',onKey,true);
   }
+  window.addEventListener('blur',()=>{if(popup)close();});
   if(select){
     select.addEventListener('change',()=>setEngine(select.value));
   }
