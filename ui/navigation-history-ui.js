@@ -125,5 +125,6 @@
   }
   bindNavigation(back,'back');
   bindNavigation(forward,'forward');
+  window.addEventListener('blur',()=>{if(panel)close();});
   window.minternetNavigationHistory={close};
 })();
