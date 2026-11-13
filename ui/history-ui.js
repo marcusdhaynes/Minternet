@@ -238,6 +238,7 @@
     document.addEventListener('keydown',escape,true);
     await renderHistory();
   }
+  window.addEventListener?.('blur',()=>{if(manager)closeHistory();});
   historyButton.addEventListener('click',()=>void openHistory());
   window.addEventListener('keydown',event=>{
     if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='h'){
