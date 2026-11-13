@@ -9,7 +9,7 @@
   const list=document.getElementById('extensionsInstalled');
   const status=document.getElementById('extensionsStatus');
   if(!api||!trigger||!panel||!closeButton||!list||!status)return;
-  let loading=false,active=false;
+  let loading=false;
   function say(message){
     status.textContent=String(message||'');
     if(message&&panel.hidden)window.minternetToast?.(message);
@@ -29,8 +29,10 @@
   function position(){
     if(panel.hidden)return;
     const rect=trigger.getBoundingClientRect();
-    const width=panel.offsetWidth||486;
-    panel.style.left=Math.max(5,Math.min(window.innerWidth-width-5,rect.left-width/2+rect.width/2))+'px';
+    const width=panel.getBoundingClientRect().width||306;
+    // Anchor the narrow panel to the toolbar button's right edge; never
+    // exceed the available window width or cover the browser controls.
+    panel.style.left=Math.max(5,Math.min(window.innerWidth-width-5,rect.right-width))+'px';
     panel.style.top=Math.max(4,Math.min(window.innerHeight-35,rect.bottom+5))+'px';
     const maxHeight=Math.max(180,window.innerHeight-(rect.bottom+13));
     panel.style.maxHeight=maxHeight+'px';
@@ -114,7 +116,6 @@
   }
   async function open(){
     if(!panel.hidden){close();return;}
-    active=true;
     panel.hidden=false;
     trigger.setAttribute('aria-expanded','true');
     if(window.__TAURI__)void api.command('chrome-overlay',true).catch(()=>{});
