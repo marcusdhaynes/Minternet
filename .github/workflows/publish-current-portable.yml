@@ -72,7 +72,30 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Detect an already published, complete build release
+        id: already
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_RUN_ID: ${{ inputs.run_id }}
+          TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          RUN_ID="${INPUT_RUN_ID:-${TRIGGER_RUN_ID:-}}"
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]] || exit 1
+          TAG="minternet-build-$RUN_ID"
+          if published=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" 2>/dev/null); then
+            info=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID")
+            release_sha=$(jq -r '.target_commitish' <<<"$published")
+            run_sha=$(jq -r '.head_sha' <<<"$info")
+            test "$release_sha" = "$run_sha" || { echo "Release commit mismatch"; exit 1; }
+            complete=$(jq -r '(.draft==false) and ([.assets[].name] | index("SHA256SUMS.txt") != null) and ([.assets[].name] | length >= 2)' <<<"$published")
+            if [ "$complete" = "true" ]; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "Verified existing release: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
       - name: Validate successful first-party run and extract all native build assets
+        if: steps.already.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           INPUT_RUN_ID: ${{ inputs.run_id }}
@@ -110,7 +133,7 @@ jobs:
           count=0
           for artifact in "${ARTIFACTS[@]}"; do
             case "$PLATFORM:$artifact" in
-              Windows:Minternet-Portable-Windows-x64|Unix:minternet-native-*|Android:minternet-android-debug-apk|iOS-Simulator:minternet-ios-simulator) ;;
+              Windows:Minternet-Portable-Windows-x64|Windows:Minternet-Windows-Portable-v*|Unix:minternet-native-*|Android:minternet-android-debug-apk|iOS-Simulator:minternet-ios-simulator) ;;
               *) continue ;;
             esac
             echo "Retrieving: $artifact"
@@ -124,7 +147,10 @@ jobs:
               esac
               base=$(basename "$candidate")
               if [ "$PLATFORM" = "Windows" ]; then
-                filename="Minternet-Portable-x64.exe"
+                case "$base" in
+                  Minternet-Windows-Portable-v*.exe) filename="$base" ;;
+                  *) filename="Minternet-Portable-x64.exe" ;;
+                esac
               else
                 filename="Minternet-${artifact}-${base}"
               fi
@@ -158,6 +184,7 @@ jobs:
           from the EXE; back up your profile before downgrading across schema changes.
           EOF
       - name: Publish new per-build release without replacing earlier builds
+        if: steps.already.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
