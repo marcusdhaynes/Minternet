@@ -31,7 +31,7 @@
     if(selector)el=el.closest(selector)||el;
     body.append(el);
   }
-  const general=section('General',sections,true);
+  const general=section('General');
   const dashboard=section('Dashboard',sections);
   move(dashboard,'dashboardSettings');
   move(general,'homePageUrl','.browser-path-setting');
@@ -85,7 +85,12 @@
   mediaDevices.append(mediaOpen);
   const accounts=section('Accounts & Sync');
   move(accounts,'googleSettings');
+  // The updater mounts once into this existing node. Keep it within the
+  // same collapsed accordion styling as every other Settings category.
+  const updates=section('Updates');
+  move(updates,'updatesSection');
   move(general,'browserPreferencesStatus');
-  // Initial state opens General; retain user expansion during the same run.
+  // All top-level categories start collapsed; each retains expansion state
+  // while Settings remains mounted during this browser session.
   // All moving targets retain their original IDs and listener objects.
 })();
