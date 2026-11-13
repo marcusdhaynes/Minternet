@@ -43,10 +43,12 @@
   const tabs=section('Tabs & Performance');
   move(tabs,'tabLimit','.browser-path-setting');
   move(tabs,'autoUnloadMinutes','.auto-unload-setting');
+  move(tabs,'navigationHistoryHoldDelay','.auto-unload-setting');
   const downloads=section('Downloads');
   move(downloads,'downloadFolderPath','.browser-path-setting');
   const audio=section('Audio');
   move(audio,'volumeIncrement10','.volume-increments-setting');
+  move(audio,'volumeMax','.auto-unload-setting');
   move(audio,'volumeHoldDelay','.auto-unload-setting');
   const miniplayer=section('Mini-player');
   move(miniplayer,'miniplayerSettings');
