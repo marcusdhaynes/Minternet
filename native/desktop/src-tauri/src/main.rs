@@ -5925,6 +5925,39 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 (tab.id,tab.url.clone(),tab.view.clone())
             };
             if url==HOME{return Ok(json!({"ok":true}));}
+            // A second Refresh within five seconds rebuilds the child WebView.
+            // This recovers a stuck/white WebView2 controller that reports a
+            // successful reload yet displays no content. The normal first
+            // Refresh still preserves live page state whenever possible.
+            static RELOAD_ATTEMPTS: std::sync::OnceLock<Mutex<HashMap<u32,Instant>>> =
+                std::sync::OnceLock::new();
+            let force_recreate={
+                let attempts=RELOAD_ATTEMPTS.get_or_init(||Mutex::new(HashMap::new()));
+                let mut guard=attempts.lock().map_err(|e|e.to_string())?;
+                guard.retain(|_,when|when.elapsed()<Duration::from_secs(5));
+                let retry=guard.get(&id).is_some();
+                if retry{guard.remove(&id);}
+                else{guard.insert(id,Instant::now());}
+                retry
+            };
+            if force_recreate {
+                if let Some(label)=label.as_ref() {
+                    if let Some(view)=app.get_webview(label){let _=view.close();}
+                }
+                {
+                    let state=app.state::<Mutex<Browser>>();
+                    let mut browser=state.lock().map_err(|e|e.to_string())?;
+                    if let Some(tab)=browser.tabs.iter_mut().find(|tab|tab.id==id){
+                        tab.view=None;
+                    }
+                }
+                let target=tauri::Url::parse(&url).map_err(|e|e.to_string())?;
+                if !matches!(target.scheme(),"http"|"https"){
+                    return Err("This page cannot be reloaded".into());
+                }
+                navigate_tab(&app,id,Some(target),false)?;
+                return Ok(json!({"ok":true,"recovered":true}));
+            }
             // Reload a live renderer; suspended tabs must recreate the
             // WebView rather than silently doing nothing.
             let mut reloaded=false;
