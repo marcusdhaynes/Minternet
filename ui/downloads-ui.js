@@ -220,6 +220,7 @@
     position();
   }
   button.addEventListener('click',()=>{void open();});
+  window.addEventListener('blur',()=>{if(panel)close();});
   if(window.__TAURI__?.event?.listen){
     window.__TAURI__.event.listen('minternet:download-blocked',event=>{
       // Make silent native failures visible without showing approval dialogs.
