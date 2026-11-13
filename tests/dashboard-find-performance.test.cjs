@@ -147,11 +147,13 @@ test('Downloads keep native source checks and signature validation while popups 
 });
 
 test('official extension catalogs are browsable without misleading install claims',()=>{
-  const html=read('ui/index.html'),prefs=read('ui/browser-settings.js');
+  const html=read('ui/index.html'),manager=read('ui/extensions-ui.js');
+  assert.match(html,/id="extensionsButton"/);
   assert.match(html,/id="chromeExtensionStore"/);
   assert.match(html,/id="firefoxExtensionStore"/);
-  assert.match(prefs,/https:\/\/chromewebstore\.google\.com\//);
-  assert.match(prefs,/https:\/\/addons\.mozilla\.org\/en-US\/firefox\//);
+  assert.match(manager,/https:\/\/chromewebstore\.google\.com\//);
+  assert.match(manager,/https:\/\/addons\.mozilla\.org\/en-US\/firefox\//);
+  assert.match(html,/installing from the store's own button is not currently supported/);
 });
 
 test('No fake-OAuth popup exceptions or cross-site popup blocking remain',()=>{
