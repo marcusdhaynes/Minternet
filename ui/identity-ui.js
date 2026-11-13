@@ -231,7 +231,7 @@
     (unlocked?labelInput:master).focus();
   }
   document.addEventListener('pointerdown',event=>{
-    if(screen&&!screen.querySelector('.identity-panel')?.contains(event.target))close();
+    if(screen&&!screen.querySelector('.identity-panel')?.contains(event.target)&&!trigger.contains(event.target))close();
   },true);
   window.addEventListener?.('blur',()=>{if(screen)close();});
   trigger.addEventListener('click',()=>void open());
