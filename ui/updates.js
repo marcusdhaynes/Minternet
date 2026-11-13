@@ -53,34 +53,72 @@
     window.location.reload();
   }
 
-  function renderSection(el, info, status) {
-    el.innerHTML = '';
-    var title = document.createElement('h2'); title.textContent = 'Updates'; el.appendChild(title);
-    var cur = document.createElement('p'); cur.textContent = 'Current version: v' + CURRENT_VERSION; el.appendChild(cur);
-    var avail = document.createElement('p');
-    avail.textContent = 'Available version: ' + (info ? 'v' + info.version : '—'); el.appendChild(avail);
+  // Render using the same small, native-style rows as other Settings
+  // accordions. No standalone headers or unbounded raw release-note blocks.
+  function renderSection(el, info, status, checking) {
+    el.replaceChildren();
+    var infoGrid = document.createElement('div');
+    infoGrid.className = 'updates-versions';
+    function versionRow(label, value) {
+      var row = document.createElement('div');
+      row.className = 'updates-version-row';
+      var caption = document.createElement('span');
+      caption.textContent = label;
+      var number = document.createElement('strong');
+      number.textContent = value;
+      row.append(caption, number);
+      return row;
+    }
+    infoGrid.appendChild(versionRow('Installed Version', 'v' + CURRENT_VERSION));
+    if (info) infoGrid.appendChild(versionRow('Available Version', 'v' + info.version));
+    el.appendChild(infoGrid);
+
+    var updateStatus = document.createElement('div');
+    updateStatus.className = 'updates-current-status';
+    updateStatus.setAttribute('role', 'status');
+    updateStatus.setAttribute('aria-live', 'polite');
+    updateStatus.textContent = status ||
+      (info ? 'A newer version is available.' : 'No newer version found.');
+    updateStatus.dataset.state = checking ? 'checking' : (info ? 'available' :
+      (status && status.toLowerCase().includes('could not') ? 'error' : 'current'));
+    el.appendChild(updateStatus);
+
     if (info && info.notes) {
-      var h = document.createElement('h3'); h.textContent = "What's New"; el.appendChild(h);
-      var pre = document.createElement('pre'); pre.style.whiteSpace = 'pre-wrap'; pre.textContent = info.notes; el.appendChild(pre);
+      var notes = document.createElement('details');
+      notes.className = 'updates-release-notes';
+      var summary = document.createElement('summary');
+      summary.textContent = "What's New";
+      var text = document.createElement('p');
+      text.textContent = info.notes;
+      notes.append(summary, text);
+      el.appendChild(notes);
     }
-    if (status) { var s = document.createElement('p'); s.setAttribute('role', 'status'); s.textContent = status; el.appendChild(s); }
-    var row = document.createElement('div');
-    var check = document.createElement('button'); check.type = 'button'; check.textContent = 'Check for updates';
+    var actions = document.createElement('div');
+    actions.className = 'updates-actions';
+    var check = document.createElement('button');
+    check.type = 'button';
+    check.className = 'updates-check-button';
+    check.textContent = checking ? 'Checking…' : 'Check for Updates';
+    check.disabled = Boolean(checking);
     check.addEventListener('click', function () { mountSection(el); });
-    row.appendChild(check);
+    actions.appendChild(check);
     if (info) {
-      var upd = document.createElement('button'); upd.type = 'button';
-      upd.textContent = 'Update to v' + info.version;
-      upd.addEventListener('click', function () { applyUpdate(info); });
-      row.appendChild(upd);
+      var update = document.createElement('button');
+      update.type = 'button';
+      update.className = 'updates-install-button';
+      update.textContent = 'Get v' + info.version;
+      update.addEventListener('click', function () { applyUpdate(info); });
+      actions.appendChild(update);
     }
-    el.appendChild(row);
+    el.appendChild(actions);
   }
   function mountSection(el) {
-    renderSection(el, null, 'Checking…');
+    renderSection(el, null, 'Checking for updates…', true);
     checkForUpdate().then(function (info) {
-      renderSection(el, info, info ? '' : 'You are up to date.');
-    }).catch(function () { renderSection(el, null, 'Could not check for updates.'); });
+      renderSection(el, info, info ? 'A newer version is available.' : 'No newer release found.', false);
+    }).catch(function () {
+      renderSection(el, null, 'Could not check for updates.', false);
+    });
   }
 
   function mountRibbon(info) {
