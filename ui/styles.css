@@ -2232,7 +2232,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { di
 .bookmark-settings .updates-actions button{
   flex:1;min-width:0;padding:6px 5px;border-radius:5px;
   border:1px solid #5c537d;background:#29263e;color:#eae2ff;
-  font:600 10px/1.15 inherit;cursor:pointer
+  font-family:inherit;font-weight:600;font-size:10px;line-height:1.15;cursor:pointer
 }
 .bookmark-settings .updates-actions button:hover:not(:disabled){background:#44385d}
 .bookmark-settings .updates-actions button:disabled{opacity:.65;cursor:default}
