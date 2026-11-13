@@ -7,6 +7,7 @@ mod secret_bookmarks;
 mod privacy_shield;
 mod media_devices;
 mod site_context_menu;
+mod extensions;
 use base64::Engine as _;
 use rand::{rngs::OsRng,RngCore};
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -2069,8 +2070,18 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     let for_download=app.clone();
     let shield_preferences=app.state::<privacy_shield::ShieldState>().0.lock()
         .map(|s|s.clone()).unwrap_or_default();
-    let builder = WebviewBuilder::new(label.clone(), url)
-        .incognito(private)
+    let builder=WebviewBuilder::new(label.clone(),url).incognito(private);
+    // Opt in to a separate WebView2 site profile only after a user imports
+    // an enabled extension. Keeps trusted browser chrome, credentials and
+    // its existing profile outside third-party extension scope. Without an
+    // imported extension existing cookies and sessions stay untouched.
+    #[cfg(windows)]
+    let builder=if !private && extensions::any_enabled(app){
+        builder.browser_extensions_enabled(true)
+            .data_directory(extensions::isolated_site_dir(app)?)
+            .extensions_path(extensions::active_dir(app)?)
+    }else{builder};
+    let builder = builder
         .initialization_script(privacy_shield::script(&shield_preferences))
         .initialization_script(include_str!("../../../../ui/site-media-bridge.js"))
         .initialization_script(include_str!("../../../../ui/site-download-links.js"))
@@ -4602,6 +4613,52 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         remember_undo(&app,None);
     }
     match name.as_str() {
+        "extensions-list" => {
+            return extensions::list(&app);
+        }
+        "extensions-import" => {
+            let source=value.as_str().ok_or("Choose a source to import an extension")?.to_string();
+            if !matches!(source.as_str(),"minternet"|"firefox"|"chrome"){
+                return Err("Unsupported extension source".into());
+            }
+            #[cfg(not(windows))]
+            return Err("Local browser extension installation is available only on Windows WebView2".into());
+            #[cfg(windows)]
+            {
+                let handle=app.clone();
+                let source_for_picker=source.clone();
+                let picked=tauri::async_runtime::spawn_blocking(move||{
+                    let picker=handle.dialog().file().set_title("Import Browser Extension")
+                        .add_filter("WebExtensions",&["mext","zip","xpi","crx"]);
+                    let picked=if let Some(main)=handle.get_window("main"){
+                        picker.set_parent(&main).blocking_pick_file()
+                    }else{picker.blocking_pick_file()};
+                    picked.and_then(|file|file.into_path().ok())
+                }).await.map_err(|e|format!("Extension picker failed: {e}"))?;
+                let Some(path)=picked else{return Ok(json!({"cancelled":true}));};
+                let handle=app.clone();
+                let result=tauri::async_runtime::spawn_blocking(move||
+                    extensions::import(&handle,&source_for_picker,&path))
+                    .await.map_err(|e|format!("Extension import task failed: {e}"))??;
+                return Ok(json!({"ok":true,"extension":result,"restartRequired":true}));
+            }
+        }
+        "extensions-toggle" => {
+            let source=value.get("source").and_then(Value::as_str)
+                .ok_or("Extension source is missing")?;
+            let id=value.get("id").and_then(Value::as_str)
+                .ok_or("Extension ID is missing")?;
+            let enabled=value.get("enabled").and_then(Value::as_bool)
+                .ok_or("Extension state is missing")?;
+            return extensions::set_enabled(&app,source,id,enabled);
+        }
+        "extensions-remove" => {
+            let source=value.get("source").and_then(Value::as_str)
+                .ok_or("Extension source is missing")?;
+            let id=value.get("id").and_then(Value::as_str)
+                .ok_or("Extension ID is missing")?;
+            return extensions::remove(&app,source,id);
+        }
         "browser-preferences" => {
             let state=app.state::<BrowserPreferenceState>();
             let prefs=state.0.lock().map_err(|e|e.to_string())?;
