@@ -42,6 +42,7 @@ jobs:
           node --check ../../ui/browser-settings.js
           node --check ../../ui/tab-blank-zones.js
           node --check ../../ui/downloads-ui.js
+          node --check ../../ui/site-download-links.js
           node --check ../../ui/bookmark-model.js
           node --check ../../ui/bookmark-import.js
           node --check ../../ui/bookmark-ui.js
