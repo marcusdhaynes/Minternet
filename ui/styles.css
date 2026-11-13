@@ -2092,3 +2092,84 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { di
  display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .navigation-history-entry strong{font-size:11px;}
 .navigation-history-entry small{font-size:9px;color:#aaa5c2;}
+
+
+/* Extensions — compact 3-source manager, anchored before Downloads. */
+.extensions-btn svg{display:block}
+.extensions-popup{
+  position:fixed;z-index:480!important;
+  width:min(490px,calc(100vw - 12px));box-sizing:border-box;
+  padding:10px;overflow:auto;overscroll-behavior:contain;
+  background:var(--panel,#181d2d);border:1px solid var(--line,#515472);
+  box-shadow:0 15px 42px #060815bb;border-radius:12px;
+  color:var(--text,#f1edff);
+}
+.extensions-popup[hidden]{display:none!important}
+.extensions-panel-head{display:flex;gap:8px;align-items:center;padding:1px 2px 9px}
+.extensions-panel-head strong{font-size:13px}
+.extensions-panel-subtitle{font-size:10px;color:#aaa4bf;flex:1}
+.extensions-close{width:22px;height:22px;padding:0;border:0;border-radius:5px;background:#ffffff12;color:inherit;font-size:17px;cursor:pointer}
+.extensions-close:hover,.extensions-action:hover{background:#ffffff26}
+.extensions-sources{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.extensions-source-card{
+  aspect-ratio:1;min-width:0;overflow:hidden;
+  border:1px solid #71668a;background:linear-gradient(155deg,#29273c,#1a1e30);
+  border-radius:9px;box-sizing:border-box;
+}
+.extensions-minternet-card{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:9px 4px
+}
+.extensions-brand{display:flex;flex-direction:column;align-items:center;gap:5px}
+.extensions-brand img{height:35px;width:35px;object-fit:contain}
+.extensions-brand strong,.extensions-import-half strong{font-size:11px}
+.extensions-card-hint,.extensions-source-card small{font-size:9px;color:#a8a4bd;text-align:center}
+.extensions-import{
+  padding:5px 12px;border-radius:6px;border:1px solid #8f7ac7;background:#5f4b8b;
+  color:#fff;font-size:10px;font-weight:600;cursor:pointer;
+}
+.extensions-import:hover{background:#7460a4}
+.extensions-import:disabled,.extensions-action:disabled{opacity:.5;cursor:default}
+.extensions-split-card{display:flex;flex-direction:column}
+.extensions-card-half{
+  flex:1 1 50%;min-height:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:5px;box-sizing:border-box;
+}
+.extensions-import-half{padding:6px 4px;border-bottom:1px solid #71668a}
+.extensions-store-half{
+  border:0;padding:5px 3px;background:#101523;color:inherit;cursor:pointer;
+  text-decoration:none;
+}
+.extensions-store-half:hover{background:#2b2942}
+.extensions-store-half span{font-size:9px;color:#dad3f1}
+.extensions-store-logo{width:27px;height:27px;display:block}
+.extensions-explainer{
+  margin:9px 2px;color:#aaa5c1;font-size:10px;line-height:1.5;
+}
+.extensions-installed-head{
+  display:flex;justify-content:space-between;gap:9px;align-items:baseline;
+  border-top:1px solid #71668a66;padding:8px 2px 5px;
+}
+.extensions-installed-head strong{font-size:11px}
+.extensions-installed-head small{font-size:9px;color:#a69fbc;text-align:right}
+.extensions-installed{display:flex;flex-direction:column;gap:3px;max-height:170px;overflow:auto}
+.extensions-empty{padding:10px 5px;font-size:10px;color:#9d9ab1;margin:0;text-align:center}
+.extensions-installed-row{
+  display:flex;align-items:center;gap:6px;background:#ffffff08;
+  border:1px solid #8376aa33;border-radius:6px;padding:6px;
+}
+.extensions-installed-detail{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.extensions-installed-detail strong{font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.extensions-installed-detail small{font-size:9px;color:#aba4c2;overflow-wrap:anywhere}
+.extensions-action{
+  border:1px solid #71668a88;background:#ffffff10;color:inherit;
+  border-radius:5px;cursor:pointer;padding:4px 6px;font-size:9px;
+}
+.extensions-remove{color:#edb5b8}
+.extensions-status{font-size:10px;color:#b7d5c2;line-height:1.4;margin:5px 2px 0;min-height:12px}
+@media(max-width:415px){
+ .extensions-sources{gap:5px}
+ .extensions-popup{padding:7px}
+ .extensions-import{padding:4px 8px}
+ .extensions-store-logo{width:23px;height:23px}
+ .extensions-brand img{width:28px;height:28px}
+}
