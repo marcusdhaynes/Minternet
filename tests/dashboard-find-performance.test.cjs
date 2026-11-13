@@ -153,7 +153,7 @@ test('official extension catalogs are browsable without misleading install claim
   assert.match(html,/id="firefoxExtensionStore"/);
   assert.match(manager,/https:\/\/chromewebstore\.google\.com\//);
   assert.match(manager,/https:\/\/addons\.mozilla\.org\/en-US\/firefox\//);
-  assert.match(html,/installing from the store's own button is not currently supported/);
+  assert.match(html,/their Add buttons do not install directly/);
 });
 
 test('No fake-OAuth popup exceptions or cross-site popup blocking remain',()=>{
