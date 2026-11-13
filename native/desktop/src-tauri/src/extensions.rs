@@ -104,7 +104,11 @@ fn import_package(app:&AppHandle,source:&str,path:&Path)->Result<Value,String>{
     if active.join(&folder).exists()||disabled.join(&folder).exists(){
         return Err("This extension is already imported".into());
     }
-    let staging=active.join(format!(".import-{folder}"));
+    // Never expose half-extracted extensions to Wry while a user opens a
+    // new tab. Stage outside the directory WebView2 scans.
+    let staging_root=active.parent().ok_or("Invalid extension root")?.join("staging");
+    fs::create_dir_all(&staging_root).map_err(|e|e.to_string())?;
+    let staging=staging_root.join(format!(".import-{folder}"));
     if staging.exists(){return Err("An import is already in progress".into());}
     fs::create_dir(&staging).map_err(|e|e.to_string())?;
     let result=(||{
