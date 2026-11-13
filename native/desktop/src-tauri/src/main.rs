@@ -5750,6 +5750,48 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             save_pinned(&app)?;
             activated(&app)?;
         }
+        "navigation-history-list" => {
+            let direction=value.as_str().ok_or("History direction missing")?;
+            if direction!="back" && direction!="forward"{return Err("Invalid history direction".into());}
+            let state=app.state::<Mutex<Browser>>();
+            let b=state.lock().map_err(|e|e.to_string())?;
+            let tab=b.active().ok_or("No active tab")?;
+            if tab.secret_id.is_some(){return Ok(json!([]));}
+            let indices:Vec<usize>=if direction=="back"{
+                (0..tab.at).rev().take(50).collect()
+            }else{
+                ((tab.at+1)..tab.history.len()).take(50).collect()
+            };
+            return Ok(json!(indices.into_iter().filter_map(|index|{
+                let url=tab.history.get(index)?;
+                if !is_real_page_url(url){return None;}
+                Some(json!({"index":index,"url":url,"title":title_for(url)}))
+            }).collect::<Vec<_>>()));
+        }
+        "navigation-history-jump" => {
+            let target=value.as_u64().ok_or("Invalid history index")? as usize;
+            let (id,url,label,delta)={
+                let state=app.state::<Mutex<Browser>>();
+                let mut b=state.lock().map_err(|e|e.to_string())?;
+                let tab=b.active_mut().ok_or("No active tab")?;
+                if tab.secret_id.is_some()||target>=tab.history.len()||target==tab.at{
+                    return Err("History entry is unavailable".into());
+                }
+                let url=tab.history[target].clone();
+                if !is_real_page_url(&url){return Err("History URL is unavailable".into());}
+                let delta=target as isize-tab.at as isize;
+                tab.at=target;tab.url=url.clone();tab.title=title_for(&url);
+                (tab.id,url,tab.view.clone(),delta)
+            };
+            let native=label.and_then(|label|app.get_webview(&label))
+                .map(|view|view.eval(&format!("history.go({delta})")).is_ok())
+                .unwrap_or(false);
+            if native{notify(&app);}
+            else {
+                let dest=tauri::Url::parse(&url).map_err(|e|e.to_string())?;
+                navigate_tab(&app,id,Some(dest),false)?;
+            }
+        }
         "back" | "forward" => {
             // Let WebView2 use its own BFCache/history instead of reloading the URL.
             // This preserves scroll position, page state, and avoids repeat requests.
