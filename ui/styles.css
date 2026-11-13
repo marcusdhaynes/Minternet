@@ -2094,82 +2094,148 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { di
 .navigation-history-entry small{font-size:9px;color:#aaa5c2;}
 
 
-/* Extensions — compact 3-source manager, anchored before Downloads. */
+/* Dedicated Extensions — deliberately narrow, dense, three equal cards. */
 .extensions-btn svg{display:block}
 .extensions-popup{
   position:fixed;z-index:480!important;
-  width:min(490px,calc(100vw - 12px));box-sizing:border-box;
-  padding:10px;overflow:auto;overscroll-behavior:contain;
-  background:var(--panel,#181d2d);border:1px solid var(--line,#515472);
-  box-shadow:0 15px 42px #060815bb;border-radius:12px;
-  color:var(--text,#f1edff);
+  width:min(306px,calc(100vw - 10px));box-sizing:border-box;
+  padding:7px;overflow-y:auto;overscroll-behavior:contain;
+  background:#191a2c;border:1px solid #55506f;
+  border-radius:8px;box-shadow:0 11px 28px #050716b8;
+  color:#eee9ff;
 }
 .extensions-popup[hidden]{display:none!important}
-.extensions-panel-head{display:flex;gap:8px;align-items:center;padding:1px 2px 9px}
-.extensions-panel-head strong{font-size:13px}
-.extensions-panel-subtitle{font-size:10px;color:#aaa4bf;flex:1}
-.extensions-close{width:22px;height:22px;padding:0;border:0;border-radius:5px;background:#ffffff12;color:inherit;font-size:17px;cursor:pointer}
-.extensions-close:hover,.extensions-action:hover{background:#ffffff26}
-.extensions-sources{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.extensions-panel-head{display:flex;align-items:center;gap:5px;padding:0 1px 6px}
+.extensions-panel-head strong{font-size:11px;font-weight:700;flex:1}
+.extensions-panel-subtitle{display:none}
+.extensions-close{
+  flex:0 0 18px;width:18px;height:18px;padding:0;
+  border:0;border-radius:4px;background:#ffffff12;
+  color:inherit;font-size:15px;line-height:18px;cursor:pointer
+}
+.extensions-close:hover,.extensions-action:hover{background:#ffffff25}
+.extensions-sources{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px}
 .extensions-source-card{
-  aspect-ratio:1;min-width:0;overflow:hidden;
-  border:1px solid #71668a;background:linear-gradient(155deg,#29273c,#1a1e30);
-  border-radius:9px;box-sizing:border-box;
+  aspect-ratio:1;min-width:0;overflow:hidden;box-sizing:border-box;
+  border:1px solid #696184;border-radius:6px;
+  background:linear-gradient(160deg,#28263a,#1a1d2c)
 }
 .extensions-minternet-card{
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:9px 4px
+  display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:4px;padding:4px 2px
 }
-.extensions-brand{display:flex;flex-direction:column;align-items:center;gap:5px}
-.extensions-brand img{height:35px;width:35px;object-fit:contain}
-.extensions-brand strong,.extensions-import-half strong{font-size:11px}
-.extensions-card-hint,.extensions-source-card small{font-size:9px;color:#a8a4bd;text-align:center}
+.extensions-brand{display:flex;flex-direction:column;align-items:center;gap:2px}
+.extensions-brand img{height:24px;width:24px;object-fit:contain}
+.extensions-brand strong,.extensions-import-half strong{font-size:9px;line-height:1.1}
+.extensions-card-hint,.extensions-source-card small{display:none}
 .extensions-import{
-  padding:5px 12px;border-radius:6px;border:1px solid #8f7ac7;background:#5f4b8b;
-  color:#fff;font-size:10px;font-weight:600;cursor:pointer;
+  padding:3px 7px;min-height:19px;border-radius:4px;
+  border:1px solid #8b78b4;background:#594778;color:#fff;
+  font-size:9px;font-weight:600;line-height:1;cursor:pointer
 }
-.extensions-import:hover{background:#7460a4}
+.extensions-import:hover{background:#715a96}
 .extensions-import:disabled,.extensions-action:disabled{opacity:.5;cursor:default}
 .extensions-split-card{display:flex;flex-direction:column}
 .extensions-card-half{
   flex:1 1 50%;min-height:0;display:flex;flex-direction:column;
-  align-items:center;justify-content:center;gap:5px;box-sizing:border-box;
+  align-items:center;justify-content:center;gap:3px;box-sizing:border-box
 }
-.extensions-import-half{padding:6px 4px;border-bottom:1px solid #71668a}
+.extensions-import-half{padding:3px 2px;border-bottom:1px solid #696184}
 .extensions-store-half{
-  border:0;padding:5px 3px;background:#101523;color:inherit;cursor:pointer;
-  text-decoration:none;
+  border:0;padding:2px;background:#111426;color:inherit;
+  cursor:pointer;text-decoration:none;gap:2px
 }
-.extensions-store-half:hover{background:#2b2942}
-.extensions-store-half span{font-size:9px;color:#dad3f1}
-.extensions-store-logo{width:27px;height:27px;display:block}
+.extensions-store-half:hover{background:#2c2942}
+.extensions-store-half span{font-size:8px;line-height:1.05;color:#dcd4ec}
+.extensions-store-logo{width:20px;height:20px;display:block}
 .extensions-explainer{
-  margin:9px 2px;color:#aaa5c1;font-size:10px;line-height:1.5;
+  margin:5px 1px;padding:0 1px;color:#a9a3bc;
+  font-size:9px;line-height:1.35
 }
+.extensions-explainer summary{
+  cursor:pointer;list-style:none;font-size:9px;color:#aba4c3;
+  padding:2px 1px
+}
+.extensions-explainer summary::-webkit-details-marker{display:none}
+.extensions-explainer summary::before{content:'ⓘ ';color:#b49eda}
+.extensions-explainer summary::after{content:' ›'}
+.extensions-explainer[open] summary::after{content:' ⌄'}
+.extensions-explainer p{margin:3px 0 2px;overflow-wrap:anywhere}
 .extensions-installed-head{
-  display:flex;justify-content:space-between;gap:9px;align-items:baseline;
-  border-top:1px solid #71668a66;padding:8px 2px 5px;
+  display:flex;justify-content:space-between;gap:5px;align-items:center;
+  border-top:1px solid #71668a55;padding:6px 2px 3px
 }
-.extensions-installed-head strong{font-size:11px}
-.extensions-installed-head small{font-size:9px;color:#a69fbc;text-align:right}
-.extensions-installed{display:flex;flex-direction:column;gap:3px;max-height:170px;overflow:auto}
-.extensions-empty{padding:10px 5px;font-size:10px;color:#9d9ab1;margin:0;text-align:center}
+.extensions-installed-head strong{font-size:10px}
+.extensions-installed-head small{font-size:8px;line-height:1.2;color:#a8a0bd;text-align:right;max-width:130px}
+.extensions-installed{display:flex;flex-direction:column;gap:3px;max-height:110px;overflow-y:auto}
+.extensions-empty{padding:4px 2px;font-size:9px;color:#9a94ae;margin:0}
 .extensions-installed-row{
-  display:flex;align-items:center;gap:6px;background:#ffffff08;
-  border:1px solid #8376aa33;border-radius:6px;padding:6px;
+  display:flex;align-items:center;gap:3px;background:#ffffff08;
+  border:1px solid #8376aa33;border-radius:5px;padding:4px
 }
 .extensions-installed-detail{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
-.extensions-installed-detail strong{font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.extensions-installed-detail small{font-size:9px;color:#aba4c2;overflow-wrap:anywhere}
+.extensions-installed-detail strong{font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.extensions-installed-detail small{font-size:8px;color:#aaa4c0;overflow-wrap:anywhere}
 .extensions-action{
-  border:1px solid #71668a88;background:#ffffff10;color:inherit;
-  border-radius:5px;cursor:pointer;padding:4px 6px;font-size:9px;
+  border:1px solid #71668a88;background:#ffffff10;
+  color:inherit;border-radius:4px;cursor:pointer;padding:3px 4px;font-size:8px
 }
-.extensions-remove{color:#edb5b8}
-.extensions-status{font-size:10px;color:#b7d5c2;line-height:1.4;margin:5px 2px 0;min-height:12px}
-@media(max-width:415px){
- .extensions-sources{gap:5px}
- .extensions-popup{padding:7px}
- .extensions-import{padding:4px 8px}
- .extensions-store-logo{width:23px;height:23px}
- .extensions-brand img{width:28px;height:28px}
+.extensions-remove{color:#ecafba}
+.extensions-status{font-size:9px;color:#b6d5bd;line-height:1.35;margin:4px 1px 0}
+.extensions-status:empty{display:none}
+@media(max-width:325px){
+ .extensions-popup{padding:5px}
+ .extensions-sources{gap:3px}
+ .extensions-store-logo{width:17px;height:17px}
+ .extensions-brand img{width:21px;height:21px}
+}
+
+/* Updates use the same density and visual vocabulary as Settings accordions. */
+.bookmark-settings .updates-settings{
+  display:flex;flex-direction:column;gap:5px;
+  padding:2px 3px 1px;color:#e7e2f8;font-size:10px
+}
+.bookmark-settings .updates-versions{
+  border:1px solid #45415f;border-radius:5px;
+  background:#141728;overflow:hidden
+}
+.bookmark-settings .updates-version-row{
+  display:flex;justify-content:space-between;align-items:center;gap:8px;
+  min-height:26px;padding:5px 7px
+}
+.bookmark-settings .updates-version-row+.updates-version-row{border-top:1px solid #45415f66}
+.bookmark-settings .updates-version-row span{font-size:10px;color:#a9a2c1}
+.bookmark-settings .updates-version-row strong{font-size:10px;color:#f0e9ff;font-weight:600}
+.bookmark-settings .updates-current-status{
+  display:flex;align-items:center;gap:6px;
+  padding:3px 4px;color:#aaa9bf;font-size:9px;line-height:1.45
+}
+.bookmark-settings .updates-current-status::before{
+  content:'';width:5px;height:5px;flex:0 0 5px;
+  border-radius:50%;background:#87849a
+}
+.bookmark-settings .updates-current-status[data-state="available"]{color:#d4c5ed}
+.bookmark-settings .updates-current-status[data-state="available"]::before{background:#bc9cf6}
+.bookmark-settings .updates-current-status[data-state="current"]::before{background:#8aaf9f}
+.bookmark-settings .updates-current-status[data-state="error"]::before{background:#cb9f9f}
+.bookmark-settings .updates-release-notes{
+  border:1px solid #4b4668;border-radius:5px;
+  background:#141727;color:#bdb5cf;font-size:9px
+}
+.bookmark-settings .updates-release-notes summary{cursor:pointer;padding:5px 7px}
+.bookmark-settings .updates-release-notes p{
+  white-space:pre-wrap;overflow-wrap:anywhere;
+  max-height:124px;overflow-y:auto;
+  margin:0;padding:7px;border-top:1px solid #4b4668
+}
+.bookmark-settings .updates-actions{display:flex;gap:5px;align-items:center}
+.bookmark-settings .updates-actions button{
+  flex:1;min-width:0;padding:6px 5px;border-radius:5px;
+  border:1px solid #5c537d;background:#29263e;color:#eae2ff;
+  font:600 10px/1.15 inherit;cursor:pointer
+}
+.bookmark-settings .updates-actions button:hover:not(:disabled){background:#44385d}
+.bookmark-settings .updates-actions button:disabled{opacity:.65;cursor:default}
+.bookmark-settings .updates-actions .updates-install-button{
+  background:#625087;border-color:#957ec5;color:#fff
 }
