@@ -98,3 +98,48 @@ test('Download Location offers automatic and Save As without custom approval pro
   assert.doesNotMatch(native,/Minternet — Verify Download/);
   assert.doesNotMatch(native,/explicit_download_approval\(/);
 });
+
+test('download links stay in the originating WebView and native failures are visible',()=>{
+  const linkBridge=read('ui/site-download-links.js');
+  const downloads=read('ui/downloads-ui.js');
+  assert.match(native,/initialization_script\(include_str!\("\.\.\/\.\.\/\.\.\/\.\.\/ui\/site-download-links\.js"\)\)/);
+  assert.match(linkBridge,/generated\(uri\)/);
+  assert.match(linkBridge,/link\.target='_self'/);
+  assert.match(linkBridge,/oaiusercontent/);
+  assert.match(native,/minternet:download-blocked/);
+  assert.match(downloads,/minternet:download-blocked/);
+});
+test('back and forward use click to navigate and configurable hold to show history',()=>{
+  const nav=read('ui/navigation-history-ui.js');
+  const settings=read('ui/settings-sections.js');
+  assert.match(nav,/api\.command\(side\)/);
+  assert.match(nav,/holdSeconds\*1000/);
+  assert.match(nav,/void open\(side\)/);
+  assert.match(nav,/pointercancel/);
+  assert.match(index,/id="navigationHistoryHoldDelay"/);
+  assert.match(settings,/move\(tabs,'navigationHistoryHoldDelay'/);
+});
+test('Maximum Volume sits inside Audio accordion without losing volume preferences',()=>{
+  const settings=read('ui/settings-sections.js');
+  const volume=read('ui/volume-ui.js');
+  assert.match(settings,/move\(audio,'volumeMax'/);
+  assert.match(settings,/move\(audio,'volumeIncrement10'/);
+  assert.match(settings,/move\(audio,'volumeHoldDelay'/);
+  assert.match(volume,/maxSelect=\$\('volumeMax'\)/);
+  assert.match(volume,/maxVolume/);
+});
+test('Settings and context panels close on outside pointer-down or window blur',()=>{
+  const bookmarks=read('ui/bookmark-ui.js');
+  const secrets=read('ui/secret-bookmarks.js');
+  const navigation=read('ui/navigation-history-ui.js');
+  for(const code of [bookmarks,secrets]){
+    assert.match(code,/document\.addEventListener\('pointerdown'/);
+  }
+  for(const code of [bookmarks,secrets,navigation,
+    read('ui/search-settings.js'),read('ui/downloads-ui.js'),
+    read('ui/media-devices-ui.js'),read('ui/chrome-native-menu.js')]){
+    assert.match(code,/window\.addEventListener\??\('blur'/);
+  }
+  assert.match(bookmarks,/activePanel\?\.contains\(event\.target\)/);
+  assert.match(secrets,/dialog\?\.contains\(event\.target\)/);
+});
