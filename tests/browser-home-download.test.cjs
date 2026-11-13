@@ -138,7 +138,7 @@ test('Settings and context panels close on outside pointer-down or window blur',
   for(const code of [bookmarks,secrets,navigation,
     read('ui/search-settings.js'),read('ui/downloads-ui.js'),
     read('ui/media-devices-ui.js'),read('ui/chrome-native-menu.js')]){
-    assert.match(code,/window\.addEventListener\??\('blur'/);
+    assert.match(code,/window\.addEventListener(?:\?\.)?\('blur'/);
   }
   assert.match(bookmarks,/activePanel\?\.contains\(event\.target\)/);
   assert.match(secrets,/dialog\?\.contains\(event\.target\)/);
