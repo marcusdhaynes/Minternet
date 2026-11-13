@@ -52,6 +52,6 @@ test('Import/enable/disable/remove use trusted native commands and restart seman
 test('Store actions do not misrepresent unsupported one-click installation',()=>{
   assert.match(manager,/https:\/\/addons\.mozilla\.org\/en-US\/firefox\//);
   assert.match(manager,/https:\/\/chromewebstore\.google\.com\//);
-  assert.match(html,/not currently supported/);
+  assert.match(html,/their Add buttons do not install directly/);
   assert.match(html,/Firefox-only APIs may not work/);
 });
