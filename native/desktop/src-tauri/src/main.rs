@@ -51,15 +51,19 @@ struct BrowserPreferences {
     download_folder:Option<String>,
     #[serde(default)]
     previous_download_folders:Vec<String>,
+    #[serde(default="default_download_mode")]
+    download_mode:String,
 }
 fn default_new_tab_mode()->String{"dashboard".into()}
 fn default_miniplayer_fade_seconds()->u16{5}
+fn default_download_mode()->String{"automatic".into()}
+fn valid_download_mode(mode:&str)->bool{matches!(mode,"automatic"|"ask")}
 fn valid_new_tab_mode(value:&str)->bool{matches!(value,"dashboard"|"website")}
 impl Default for BrowserPreferences{
     fn default()->Self{
         Self{homepage:DEFAULT_HOMEPAGE.into(),new_tab_mode:default_new_tab_mode(),tab_limit:0,
             miniplayer_fade_seconds:default_miniplayer_fade_seconds(),
-            download_folder:None,previous_download_folders:Vec::new()}
+            download_folder:None,previous_download_folders:Vec::new(),download_mode:default_download_mode()}
     }
 }
 struct BrowserPreferenceState(Mutex<BrowserPreferences>);
@@ -123,6 +127,7 @@ fn load_preferences(app:&tauri::AppHandle)->BrowserPreferences{
         saved.new_tab_mode=default_new_tab_mode();
     }
     saved.previous_download_folders.truncate(8);
+    if !valid_download_mode(&saved.download_mode){saved.download_mode=default_download_mode();}
     saved.tab_limit=saved.tab_limit.min(1_000_000);
     saved.miniplayer_fade_seconds=saved.miniplayer_fade_seconds.min(300);
     saved
@@ -553,52 +558,59 @@ mod download_format_tests {
     }
 }
 
-#[cfg(windows)]
-fn explicit_download_approval(tab_id:u32,url:&tauri::Url,path:&std::path::Path)->bool {
-    use windows::core::PCWSTR;
-    use windows::Win32::UI::WindowsAndMessaging::{
-        MessageBoxW, MB_YESNO, MB_ICONWARNING, MB_DEFBUTTON2, MB_SETFOREGROUND, IDYES
-    };
-    // Suppress download prompt storms from hostile ad scripts. This is
-    // intentionally a per-tab gate; a denied download is never written.
-    static LAST_PROMPT:std::sync::OnceLock<Mutex<HashMap<u32,Instant>>> =
-        std::sync::OnceLock::new();
-    let lock=LAST_PROMPT.get_or_init(||Mutex::new(HashMap::new()));
-    if let Ok(mut recent)=lock.lock(){
-        let now=Instant::now();
-        if recent.get(&tab_id).is_some_and(|t|now.duration_since(*t)<Duration::from_secs(2)){
-            return false;
+// Download events originate in a native website WebView; no website script can
+// choose the destination. The trusted profile determines automatic vs Save As.
+// Keep WebView2's source validation and completed-file signature checks.
+fn download_destination(app:&tauri::AppHandle,url:&tauri::Url,
+    suggested:&std::path::Path)->Result<Option<PathBuf>,String>{
+    let automatic=download_path(app,url,suggested)?;
+    let ask=app.state::<BrowserPreferenceState>().0.lock()
+        .map_err(|e|e.to_string())?.download_mode=="ask";
+    if !ask{return Ok(Some(automatic));}
+    // The picker blocks only this download's callback, not a global approval
+    // gate. Run the system picker on a worker, not the WebView UI thread.
+    let handle=app.clone();
+    let suggestion=automatic.clone();
+    let picked=std::thread::spawn(move||{
+        let filename=suggestion.file_name()
+            .map(|v|v.to_string_lossy().to_string()).unwrap_or_else(||"download".into());
+        let directory=suggestion.parent().unwrap_or_else(||std::path::Path::new("."));
+        handle.dialog().file().set_title("Save Download")
+            .set_directory(directory)
+            .set_file_name(&filename).blocking_save_file()
+            .and_then(|picked|picked.into_path().ok())
+    }).join().map_err(|_|"Save dialog failed".to_string())?;
+    let Some(path)=picked else{return Ok(None);};
+    if !path.is_absolute() || path.parent().is_none(){
+        return Err("Choose an absolute destination".into());
+    }
+    let parent=path.parent().ok_or("Missing destination folder")?;
+    if !parent.is_dir(){return Err("Destination folder is unavailable".into());}
+    let canonical=std::fs::canonicalize(parent).map_err(|e|e.to_string())?;
+    if !canonical.is_dir(){return Err("Invalid destination folder".into());}
+    let name=path.file_name().and_then(|n|n.to_str())
+        .ok_or("Invalid download filename")?;
+    if name!=safe_download_filename(name){return Err("Invalid download filename".into());}
+    // Never silently overwrite an existing file.
+    if path.exists(){return Err("A file with that name already exists".into());}
+    // Remember the user-selected destination to keep Open/Show in Folder
+    // available after the download completes and after application restart.
+    {
+        let state=app.state::<BrowserPreferenceState>();
+        let mut prefs=state.0.lock().map_err(|e|e.to_string())?;
+        let mut next=prefs.clone();
+        let directory=parent.to_string_lossy().to_string();
+        if next.download_folder.as_deref()!=Some(directory.as_str()){
+            next.previous_download_folders.retain(|p|p!=&directory);
+            next.previous_download_folders.push(directory);
+            if next.previous_download_folders.len()>8{
+                next.previous_download_folders.remove(0);
+            }
         }
-        recent.insert(tab_id,now);
-    }else{return false;}
-    let name=path.file_name().and_then(|s|s.to_str()).unwrap_or("download")
-        .chars().filter(|c|!c.is_control()).take(110).collect::<String>();
-    let host=url.host_str().unwrap_or("generated browser content");
-    let dangerous=matches!(path.extension().and_then(|s|s.to_str())
-        .unwrap_or("").to_ascii_lowercase().as_str(),
-        "exe"|"msi"|"msix"|"appx"|"bat"|"cmd"|"com"|"scr"|"ps1"|
-        "vbs"|"js"|"jar"|"reg"|"lnk"|"dll");
-    let warning=if dangerous {
-        "WARNING: This file could execute code on your computer.\\n\\n"
-    }else{""};
-    let message=format!(
-        "{warning}Allow this website download?\\n\\nFile: {name}\\nWebsite: {host}\\n\\nOnly choose Yes if YOU requested this exact file. Clicking Play on a video does not authorize a download.\\n\\nThe default answer is NO."
-    );
-    let wide=message.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
-    let title="Minternet — Verify Download".encode_utf16()
-        .chain(std::iter::once(0)).collect::<Vec<_>>();
-    let permitted=unsafe {
-        MessageBoxW(None,PCWSTR(wide.as_ptr()),PCWSTR(title.as_ptr()),
-            MB_YESNO|MB_ICONWARNING|MB_DEFBUTTON2|MB_SETFOREGROUND)==IDYES
-    };
-    if let Ok(mut recent)=lock.lock(){recent.insert(tab_id,Instant::now());}
-    permitted
-}
-// Fail closed on non-Windows until an equivalent trusted OS confirmation
-// dialog is implemented; the website itself cannot grant permission.
-#[cfg(not(windows))]
-fn explicit_download_approval(_tab_id:u32,_url:&tauri::Url,_path:&std::path::Path)->bool{
-    false
+        persist_preferences(app,&next)?;
+        *prefs=next;
+    }
+    Ok(Some(path))
 }
 fn is_disguised_executable(path:&std::path::Path)->bool{
     download_signature(path)==Some("exe") &&
@@ -2134,17 +2146,13 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                     // media) or download. Don't reject ordinary HTTP, blob:
                     // exports, data: attachments, or user-clicked .exe files.
                     if !download_source_allowed(&for_download,id,&url){return false;}
-                    match download_path(&for_download,&url,destination.as_path()){
-                        Ok(path)=>{
-                            if !explicit_download_approval(id,&url,&path){
-                                let _=for_download.emit_to("chrome","minternet:download-blocked",
-                                    json!({"kind":"unapproved-download"}));
-                                return false;
-                            }
+                    match download_destination(&for_download,&url,destination.as_path()){
+                        Ok(Some(path))=>{
                             *destination=path.clone();
                             download_update(&for_download,&url,Some(&path),private,None);
                             true
                         },
+                        Ok(None)=>false,
                         Err(_)=>false
                     }
                 },
@@ -4593,6 +4601,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             let tab_limit=prefs.tab_limit;
             let fade_seconds=prefs.miniplayer_fade_seconds;
             let system=prefs.download_folder.is_none();
+            let download_mode=prefs.download_mode.clone();
             drop(prefs);
             let destination=configured_download_folder(&app)?;
             return Ok(json!({
@@ -4601,7 +4610,8 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 "tabLimit":tab_limit,
                 "miniplayerFadeSeconds":fade_seconds,
                 "downloadFolder":destination.to_string_lossy(),
-                "usingSystemDownloads":system
+                "usingSystemDownloads":system,
+                "downloadMode":download_mode
             }));
         }
         "miniplayer-fade-set" => {
@@ -4655,6 +4665,17 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             persist_preferences(&app,&updated)?;
             *prefs=updated;
             return Ok(json!({"ok":true,"homepage":selected}));
+        }
+        "downloads-mode-set" => {
+            let mode=value.as_str().ok_or("Select download behavior")?;
+            if !valid_download_mode(mode){return Err("Choose Automatic or Ask Every Time".into());}
+            let state=app.state::<BrowserPreferenceState>();
+            let mut prefs=state.0.lock().map_err(|e|e.to_string())?;
+            let mut updated=prefs.clone();
+            updated.download_mode=mode.into();
+            persist_preferences(&app,&updated)?;
+            *prefs=updated;
+            return Ok(json!({"ok":true,"downloadMode":mode}));
         }
         "downloads-folder-set" => {
             let raw=value.as_str().ok_or("Enter an absolute Downloads folder path")?.trim();
