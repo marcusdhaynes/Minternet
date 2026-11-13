@@ -244,7 +244,13 @@
         <span id="dashboardStatus" aria-live="polite"></span>
       </section>
       <section class="browser-path-setting" aria-label="Downloads Folder">
-        <label for="downloadFolderPath"><strong>Downloads Folder</strong><small>Every website download requires your explicit approval on Windows. Unrequested files are blocked, including executables.</small></label>
+        <label for="downloadFolderPath"><strong>Downloads Folder</strong><small>Used for Automatic downloads and as the initial folder when choosing where to save.</small></label>
+        <label class="auto-unload-setting" for="downloadMode"><span><strong>Download Location</strong><small>Save directly to your Downloads Folder, or choose where each file is saved.</small></span>
+          <select id="downloadMode" aria-label="Download Location Behavior">
+            <option value="automatic" selected>Automatic</option>
+            <option value="ask">Ask Where to Save</option>
+          </select>
+        </label>
         <div class="browser-path-actions">
           <input id="downloadFolderPath" type="text" autocomplete="off" spellcheck="false" placeholder="System Downloads folder" aria-label="Folder path for downloads">
           <button id="downloadFolderBrowse" type="button" title="Choose a download folder in Explorer">Browse…</button>
