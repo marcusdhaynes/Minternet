@@ -591,6 +591,14 @@
   $('groupEditorCancel').addEventListener('click',closeEditor);
   $('groupEditorClose').addEventListener('click',closeEditor);
   $('groupEditorBackdrop').addEventListener('click',closeEditor);
+  document.addEventListener('pointerdown',event=>{
+    if($('groupEditorScreen').hidden)return;
+    if($('groupEditorForm').contains(event.target))return;
+    closeEditor();
+  },true);
+  window.addEventListener?.('blur',()=>{
+    if(!$('groupEditorScreen').hidden)closeEditor();
+  });
   $('tabGroups').addEventListener('click',event=>window.minternetMenus?.groups({x:event.currentTarget.getBoundingClientRect().left,y:event.currentTarget.getBoundingClientRect().bottom}));
   $('tabGroups').addEventListener('contextmenu',event=>{event.preventDefault();window.minternetMenus?.groups({x:event.clientX,y:event.clientY});});
   window.addEventListener('keydown',event=>{if(event.key==='Escape'&&!$('groupEditorScreen').hidden){event.preventDefault();closeEditor();}});
