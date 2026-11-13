@@ -1,5 +1,7 @@
 name: Minternet Windows portable single EXE (under 50 MB)
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
     paths:
