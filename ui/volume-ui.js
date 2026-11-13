@@ -63,7 +63,7 @@
     input.max=String(maxVolume);
     slider.setAttribute('aria-label','Browser Volume from 0 to '+maxVolume+' Percent');
     if(maxSelect)maxSelect.value=String(maxVolume);
-    const wrap=slider.closest('.volume-slider-wrap');
+    const wrap=typeof slider.closest==='function'?slider.closest('.volume-slider-wrap'):null;
     if(wrap){
       wrap.querySelectorAll('.volume-tick').forEach(tick=>tick.remove());
       for(let pct=100;pct<maxVolume;pct+=100){
