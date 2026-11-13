@@ -25,7 +25,7 @@
     return fetch('https://api.github.com/repos/' + REPO + '/releases/latest', {
       headers: { Accept: 'application/vnd.github+json' },
     }).then(function (res) {
-      if (!res.ok) return null;
+      if (!res.ok) throw new Error('Update release check failed: HTTP ' + res.status);
       return res.json();
     }).then(function (data) {
       if (!data || !data.tag_name || !isNewer(data.tag_name, CURRENT_VERSION)) return null;
