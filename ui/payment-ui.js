@@ -202,6 +202,10 @@
     await refresh();
     (locked?master:name.input).focus();
   }
+  document.addEventListener('pointerdown',event=>{
+    if(screen && !panel?.contains(event.target))close();
+  },true);
+  window.addEventListener?.('blur',()=>{if(screen)close();});
   trigger.addEventListener('click',()=>void open());
   toolbar?.addEventListener('click',()=>void open());
   window.addEventListener('keydown',event=>{
