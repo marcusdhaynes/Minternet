@@ -48,6 +48,7 @@ jobs:
           node --check ../../ui/tab-group-ui.js
           node --check ../../ui/chrome-native-menu.js
           node --check ../../ui/search-settings.js
+          node --check ../../ui/navigation-history-ui.js
           node --check ../../ui/volume-ui.js
           node --check ../../ui/audio-gain.js
           node --check ../../ui/credential-import.js
