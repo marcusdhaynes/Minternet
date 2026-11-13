@@ -1,21 +1,21 @@
 name: Minternet Windows portable single EXE (under 50 MB)
 on:
+  # Every repository push creates a Windows build, including development
+  # branches and configuration-only changes. Tags are also supported.
+  push:
+    branches: ['**']
+    tags: ['v*']
   pull_request:
     branches: [main]
-  push:
-    branches: [main, 'fix/**', 'feature/**']
-    paths:
-      - 'native/desktop/**'
-      - 'ui/**'
-      - 'tests/**'
-      - 'docs/preview-bridge.js'
-      - '.github/workflows/native-windows.yml'
-      - '.github/workflows/publish-current-portable.yml'
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   portable:
+    outputs:
+      version_label: ${{ steps.package.outputs.version_label }}
+      exe_name: ${{ steps.package.outputs.exe_name }}
+      artifact_name: ${{ steps.package.outputs.artifact_name }}
     runs-on: windows-latest
     timeout-minutes: 65
     defaults:
@@ -383,9 +383,119 @@ jobs:
             if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
             Remove-Item $pass,$fail -Force -ErrorAction SilentlyContinue
           }
-      - uses: actions/upload-artifact@v4
+      # Publish only after the full node, Rust and native Windows smoke suites.
+      - name: Package verified and versioned portable EXE
+        id: package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $config = Get-Content "src-tauri/tauri.conf.json" -Raw | ConvertFrom-Json
+          $version = [string]$config.version
+          if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') {
+            throw "The Tauri application version is not valid SemVer: $version"
+          }
+          if ($env:GITHUB_SHA.Length -lt 8) { throw "Missing commit SHA" }
+          $short = $env:GITHUB_SHA.Substring(0, 8)
+          $label = ('v{0}-build.{1}-g{2}' -f $version, $env:GITHUB_RUN_NUMBER, $short)
+          $artifactName = "Minternet-Windows-Portable-$label"
+          $exeName = "$artifactName.exe"
+          $source = "Minternet-Portable-x64.exe"
+          $destinationDir = "versioned-release"
+          New-Item -ItemType Directory -Path $destinationDir -Force | Out-Null
+          $destination = Join-Path $destinationDir $exeName
+          Copy-Item -LiteralPath $source -Destination $destination -Force
+          $size = (Get-Item -LiteralPath $destination).Length
+          if ($size -lt 100000 -or $size -ge 50000000) {
+            throw "Portable EXE size outside the 100 KB to 50 MB bounds: $size"
+          }
+          $hash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $exeName" | Set-Content -Encoding ascii (Join-Path $destinationDir "SHA256SUMS.txt")
+          "version_label=$label" >> $env:GITHUB_OUTPUT
+          "artifact_name=$artifactName" >> $env:GITHUB_OUTPUT
+          "exe_name=$exeName" >> $env:GITHUB_OUTPUT
+          "## Minternet Windows Portable $label" >> $env:GITHUB_STEP_SUMMARY
+          "- Source commit: $env:GITHUB_SHA" >> $env:GITHUB_STEP_SUMMARY
+          "- Versioned EXE: $exeName ($size bytes)" >> $env:GITHUB_STEP_SUMMARY
+          "- SHA-256: $hash" >> $env:GITHUB_STEP_SUMMARY
+      - name: Upload uniquely versioned Windows portable artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: Minternet-Portable-Windows-x64
-          path: native/desktop/Minternet-Portable-x64.exe
+          name: ${{ steps.package.outputs.artifact_name }}
+          path: native/desktop/versioned-release/
           if-no-files-found: error
-          retention-days: 21
+          retention-days: 90
+          compression-level: 6
+
+  publish-windows-release:
+    name: Publish verified Windows build to GitHub Releases
+    needs: portable
+    if: >-
+      github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Download this run's verified Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.portable.outputs.artifact_name }}
+          path: release
+      - name: Verify executable SHA-256 before publishing
+        env:
+          EXE_NAME: ${{ needs.portable.outputs.exe_name }}
+        run: |
+          set -euo pipefail
+          test -s "release/$EXE_NAME"
+          test -s "release/SHA256SUMS.txt"
+          (cd release && sha256sum -c SHA256SUMS.txt)
+          test "$(stat -c%s "release/$EXE_NAME")" -lt 50000000
+      - name: Publish immutable-by-policy versioned prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXE_NAME: ${{ needs.portable.outputs.exe_name }}
+          VERSION_LABEL: ${{ needs.portable.outputs.version_label }}
+          ARTIFACT_NAME: ${{ needs.portable.outputs.artifact_name }}
+        run: |
+          set -euo pipefail
+          TAG="minternet-build-$GITHUB_RUN_ID"
+          cat > release-notes.md <<EOF
+          ## Minternet Windows Portable $VERSION_LABEL
+
+          - Platform: Windows x64 (single portable EXE; unsigned development preview)
+          - Source branch or tag: $GITHUB_REF_NAME
+          - Exact commit: $GITHUB_SHA
+          - Tested build: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+          - Versioned file: $EXE_NAME
+          - Actions artifact: $ARTIFACT_NAME
+          - Integrity: SHA256SUMS.txt
+
+          Every code update builds and tests automatically. This prerelease is
+          retained for direct downloads and rollback without replacing any
+          earlier build. It is not an automatically installed browser update.
+          EOF
+          # The run ID is globally unique; retries never overwrite another build.
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" --prerelease \
+              --title "Minternet Windows $VERSION_LABEL" --notes-file release-notes.md
+          fi
+          release_json=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG")
+          test "$(jq -r '.target_commitish' <<<"$release_json")" = "$GITHUB_SHA"
+          for file in "release/$EXE_NAME" "release/SHA256SUMS.txt"; do
+            name=$(basename "$file")
+            expected_size=$(stat -c%s "$file")
+            remote_size=$(jq -r --arg name "$name" \
+              '.assets[] | select(.name==$name) | .size' <<<"$release_json" | head -n 1)
+            if [ -n "$remote_size" ]; then
+              test "$remote_size" = "$expected_size" || {
+                echo "Conflicting published asset: $name"; exit 1;
+              }
+            else
+              gh release upload "$TAG" "$file" --repo "$GITHUB_REPOSITORY"
+            fi
+            release_json=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG")
+          done
+          test "$(jq '[.assets[]] | length' <<<"$release_json")" -ge 2
+          echo "Published Windows EXE: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
