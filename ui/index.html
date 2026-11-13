@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://*.supabase.co wss://*.supabase.co; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; font-src 'self'; connect-src 'self' https://api.github.com ipc: http://ipc.localhost https://*.supabase.co wss://*.supabase.co; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
   <title>Minternet</title>
   <link rel="icon" type="image/png" href="./minternet-brand.png">
   <link rel="stylesheet" href="./styles.css">
@@ -41,6 +41,7 @@
   <script src="./live-sync-transport.js" defer></script>
   <script src="./google-sync-ui.js" defer></script>
   <script src="./settings-sections.js" defer></script>
+  <script src="./updates.js" defer></script>
 </head>
 <body>
   <header class="chrome">
@@ -316,6 +317,7 @@
         <div id="credentialImportSummary" class="credential-import-summary" role="status" aria-live="polite" hidden></div>
       </section>
       <div class="bookmark-settings-foot">Stored locally by default · Google sync is optional</div>
+      <section id="updatesSection" class="updates-settings" aria-label="Updates"></section>
     </aside>
     <aside id="bookmarkFolderMenu" class="bookmark-panel bookmark-folder-menu" hidden aria-label="Bookmark Folder">
       <div class="bookmark-panel-head"><button class="bookmark-mini" id="bookmarkFolderBack" aria-label="Parent Folder">‹</button><strong id="bookmarkFolderTitle">Bookmarks</strong><button class="bookmark-close" id="bookmarkFolderClose" aria-label="Close Folder">×</button></div>
