@@ -142,15 +142,6 @@
   miniplayerFade?.addEventListener('keydown',event=>{
     if(event.key==='Enter'){event.preventDefault();void updateMiniplayerFade();}
   });
-  for(const [id,url] of [
-    ['chromeExtensionStore','https://chromewebstore.google.com/'],
-    ['firefoxExtensionStore','https://addons.mozilla.org/en-US/firefox/']
-  ]){
-    $(id)?.addEventListener('click',async()=>{
-      const result=await api.command('new-url',url);
-      if(result?.message)report(result.message);
-    });
-  }
   downloadMode?.addEventListener('change',async()=>{
     const selected=downloadMode.value;
     downloadMode.disabled=true;
