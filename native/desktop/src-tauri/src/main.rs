@@ -2073,6 +2073,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
         .incognito(private)
         .initialization_script(privacy_shield::script(&shield_preferences))
         .initialization_script(include_str!("../../../../ui/site-media-bridge.js"))
+        .initialization_script(include_str!("../../../../ui/site-download-links.js"))
         // A remote page never receives native commands. This reserved
         // non-loading popup URL is a narrowly scoped Ctrl+F signal that
         // the native new-window handler consumes without navigating.
@@ -2145,15 +2146,23 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                     // WebView2 decides whether to render inline (PDFs, images,
                     // media) or download. Don't reject ordinary HTTP, blob:
                     // exports, data: attachments, or user-clicked .exe files.
-                    if !download_source_allowed(&for_download,id,&url){return false;}
+                    if !download_source_allowed(&for_download,id,&url){
+                        let _=for_download.emit_to("chrome","minternet:download-blocked",
+                            json!({"reason":"This download URL was rejected by browser safety checks."}));
+                        return false;
+                    }
                     match download_destination(&for_download,&url,destination.as_path()){
                         Ok(Some(path))=>{
                             *destination=path.clone();
                             download_update(&for_download,&url,Some(&path),private,None);
                             true
                         },
-                        Ok(None)=>false,
-                        Err(_)=>false
+                        Ok(None)=>false, // User cancelled the Save As dialog.
+                        Err(error)=>{
+                            let _=for_download.emit_to("chrome","minternet:download-blocked",
+                                json!({"reason":format!("Download could not begin: {error}")}));
+                            false
+                        }
                     }
                 },
                 DownloadEvent::Finished{url,path,success}=>{
