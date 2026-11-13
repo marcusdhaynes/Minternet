@@ -392,7 +392,7 @@ api.onState(render);
 api.onFocusAddress(() => byId('address').focus());
 const bind = (id, name) => byId(id).addEventListener('click', () => {if(name==='reload')byId('reload').classList.add('refresh-spinning');void command(name);});
 for (const [id, name] of [
-  ['newTab','new'],['newPrivate','new-private'],['dashboardButton','deselect'],['back','back'],['forward','forward'],
+  ['newTab','new'],['newPrivate','new-private'],['dashboardButton','deselect'],
   ['reload','reload'],['tor','tor'],
   ['minimize','minimize'],['maximize','maximize'],['quit','quit']
 ]) bind(id,name);
