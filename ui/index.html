@@ -516,13 +516,13 @@
       <div class="extensions-source-card extensions-minternet-card">
         <div class="extensions-brand"><img src="./minternet-brand.png" alt="" width="35" height="35"><strong>Minternet</strong></div>
         <span class="extensions-card-hint">Local WebExtensions</span>
-        <button class="extensions-import" type="button" data-extension-import="minternet">Import</button>
+        <button class="extensions-import" type="button" data-extension-import="minternet" title="Import Minternet Extension (.mext or .zip)">Import</button>
         <small>.mext or .zip</small>
       </div>
       <div class="extensions-source-card extensions-split-card">
         <div class="extensions-card-half extensions-import-half">
           <strong>Firefox</strong>
-          <button class="extensions-import" type="button" data-extension-import="firefox">Import</button>
+          <button class="extensions-import" type="button" data-extension-import="firefox" title="Import Firefox Extension (.xpi or .zip)">Import</button>
           <small>.xpi or .zip</small>
         </div>
         <button id="firefoxExtensionStore" class="extensions-card-half extensions-store-half" type="button" aria-label="Browse Firefox Add-ons">
@@ -537,7 +537,7 @@
       <div class="extensions-source-card extensions-split-card">
         <div class="extensions-card-half extensions-import-half">
           <strong>Chrome</strong>
-          <button class="extensions-import" type="button" data-extension-import="chrome">Import</button>
+          <button class="extensions-import" type="button" data-extension-import="chrome" title="Import Chrome Extension (.crx or .zip)">Import</button>
           <small>.crx or .zip</small>
         </div>
         <button id="chromeExtensionStore" class="extensions-card-half extensions-store-half" type="button" aria-label="Browse Chrome Web Store">
@@ -552,7 +552,10 @@
         </button>
       </div>
     </div>
-    <p class="extensions-explainer">Import compatible unpacked WebExtensions. Store buttons open the official catalogs; installing from the store's own button is not currently supported. Firefox-only APIs may not work in WebView2. When enabling extensions, an isolated website profile may require signing in to sites again.</p>
+    <details class="extensions-explainer">
+      <summary>Compatibility &amp; Privacy</summary>
+      <p>Import .mext/.zip, .xpi/.zip, or .crx/.zip packages from the matching source. Store links are for browsing; their Add buttons do not install directly. Some Firefox APIs are incompatible with WebView2. Enabling extensions uses an isolated website profile and may require signing in again.</p>
+    </details>
     <div class="extensions-installed-head">
       <strong>Imported Extensions</strong>
       <small>Changes take effect after restarting Minternet</small>
