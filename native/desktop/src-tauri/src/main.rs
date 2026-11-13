@@ -3864,7 +3864,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
     }
     if name=="volume-set" {
         let level=value.get("level").and_then(Value::as_u64)
-            .filter(|v|*v<=300).ok_or("Volume must be 0–300%")? as u16;
+            .filter(|v|*v<=600).ok_or("Volume must be 0–600%")? as u16;
         let muted=value.get("muted").and_then(Value::as_bool)
             .ok_or("Mute setting must be a boolean")?;
         let changed={
