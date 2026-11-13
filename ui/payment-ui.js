@@ -203,7 +203,7 @@
     (locked?master:name.input).focus();
   }
   document.addEventListener('pointerdown',event=>{
-    if(screen && !panel?.contains(event.target))close();
+    if(screen && !panel?.contains(event.target)&&!trigger.contains(event.target) && !toolbar?.contains(event.target))close();
   },true);
   window.addEventListener?.('blur',()=>{if(screen)close();});
   trigger.addEventListener('click',()=>void open());
