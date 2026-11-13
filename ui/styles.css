@@ -2073,3 +2073,22 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { di
 @media (prefers-reduced-motion:reduce){#reload.refresh-spinning{animation:none;}}
 /* Explicitly align all generated hundred-percent markers, whatever the max. */
 .volume-slider-wrap .volume-tick{height:8px;}
+
+/* Lazy history picker: scrollbar hidden while wheel/touch scrolling remains. */
+.navigation-history-popup{position:fixed!important;z-index:470!important;width:300px;
+ max-width:calc(100vw - 8px);box-sizing:border-box;padding:5px;
+ background:#17172a;color:#f3efff;border:1px solid #44425f;border-radius:8px;
+ box-shadow:0 12px 32px #0008;}
+.navigation-history-title{display:block;padding:6px 8px;font-size:11px;}
+.navigation-history-list{max-height:350px;overflow-y:auto;overscroll-behavior:contain;
+ scrollbar-width:none;}
+.navigation-history-list::-webkit-scrollbar{display:none;}
+.navigation-history-entry{display:flex;flex-direction:column;align-items:stretch;gap:3px;
+ width:100%;padding:7px 8px;border:0;border-radius:5px;background:transparent;
+ color:inherit;text-align:left;cursor:pointer;}
+.navigation-history-entry:hover,.navigation-history-entry:focus-visible{
+ background:#7660a35c;outline:none;}
+.navigation-history-entry strong,.navigation-history-entry small{
+ display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.navigation-history-entry strong{font-size:11px;}
+.navigation-history-entry small{font-size:9px;color:#aaa5c2;}
