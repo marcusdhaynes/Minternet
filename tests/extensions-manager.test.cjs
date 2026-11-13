@@ -53,5 +53,5 @@ test('Store actions do not misrepresent unsupported one-click installation',()=>
   assert.match(manager,/https:\/\/addons\.mozilla\.org\/en-US\/firefox\//);
   assert.match(manager,/https:\/\/chromewebstore\.google\.com\//);
   assert.match(html,/their Add buttons do not install directly/);
-  assert.match(html,/Firefox-only APIs may not work/);
+  assert.match(html,/Some Firefox APIs are incompatible with WebView2/);
 });
