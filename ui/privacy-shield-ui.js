@@ -189,6 +189,7 @@
   button.addEventListener('click',()=>void show().catch(error=>{
     window.minternetToast?.(String(error));
   }));
+  window.addEventListener?.('blur',()=>{if(popup)hide();});
   window.addEventListener('resize',position);
   window.minternet.onState(snapshot=>{
     const active=snapshot.tabs?.find(tab=>tab.id===snapshot.activeId);
