@@ -389,6 +389,22 @@ jobs:
             if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
             Remove-Item $pass,$fail -Force -ErrorAction SilentlyContinue
           }
+      - name: Verify actual EXE build version matches release tag
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = (Resolve-Path "src-tauri/target/release/minternet_native.exe").Path
+          $p = Start-Process -FilePath $exe -ArgumentList "--minternet-build-version-smoke" -PassThru -Wait
+          if ($p.ExitCode -ne 0) { throw "Embedded build-version probe failed." }
+          $marker = Join-Path $env:TEMP "minternet-version-$($p.Id).txt"
+          if (!(Test-Path -LiteralPath $marker)) { throw "EXE did not report its actual compiled version." }
+          $reported = (Get-Content -LiteralPath $marker -Raw).Trim()
+          Remove-Item -LiteralPath $marker -Force
+          $expected = ('{0}-build.{1}-g{2}' -f '0.3.0', $env:GITHUB_RUN_NUMBER, $env:GITHUB_SHA.Substring(0,8))
+          if ($reported -ne $expected) {
+            throw "Embedded build version '$reported' does not match release tag version '$expected'."
+          }
+          "PASS: actual compiled EXE version v$reported matches the GitHub Release tag." >> $env:GITHUB_STEP_SUMMARY
       - name: Test real in-place Windows EXE replacement and restart
         shell: pwsh
         run: |
