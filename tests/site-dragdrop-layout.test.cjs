@@ -47,7 +47,9 @@ test('08 the exact drop quadrant is sent rather than guessed',()=>{
   assert.match(native,/value\.get\("quadrant"\)/);
 });
 test('09 dropping outside the viewport cannot create a surprise split',()=>{
-  assert.match(ui,/event\.clientY<=innerHeight &&\s*event\.clientX>=0&&event\.clientX<=innerWidth/);
+  assert.match(ui,/event\.clientY<=viewport\.height &&\s*event\.clientX>=0&&event\.clientX<=viewport\.width/);
+ assert.match(ui,/const viewport=dropViewport\(\)/);
+ assert.match(ui,/dragViewport=\{width,height\}/);
 });
 test('10 native split tests cover target positions, swapping, and maximum count',()=>{
   for(const name of ['requested_fourth_quadrant_is_exact_and_others_stay_in_place',
