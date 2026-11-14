@@ -55,7 +55,7 @@ test('URL bar drafts survive initial native focus handoffs',()=>{
   assert.match(source,/const addressDrafts=new Map\(\)/);
   assert.match(source,/addressDrafts\.set\(snapshot\.activeId,event\.currentTarget\.value\)/);
   assert.match(source,/addressDrafts\.get\(snapshot\.activeId\)/);
-  assert.match(source,/if\(addressEditedSinceNew\)field\?\.select\(\)/);
+  assert.match(source,/if\(!addressEditedSinceNew\)field\?\.select\(\)/);
   assert.match(source,/document\.activeElement!==byId\('address'\)/);
   assert.match(source,/reloadPending\.sawLoading/);
   assert.match(source,/refresh-spinning/);
