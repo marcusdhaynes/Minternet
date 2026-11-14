@@ -289,7 +289,28 @@ fn run_helper(target:&Path,old_pid:u32,expected:&str)->Result<(),String>{
         return Err("New EXE failed startup confirmation; original version restored".into());
     }
     let _=fs::remove_file(&marker);
-    let _=fs::remove_file(&backup);
+    // Windows can retain an executable section object briefly after its
+    // process has exited. Never assume the first DeleteFile succeeds.
+    let mut removed=false;
+    for _ in 0..100 {
+        match fs::remove_file(&backup) {
+            Ok(())=>{removed=true;break;},
+            Err(error) if error.kind()==std::io::ErrorKind::NotFound=>{
+                removed=true;break;
+            },
+            Err(_)=>std::thread::sleep(Duration::from_millis(200))
+        }
+    }
+    if !removed {
+        // Keep a working updated EXE running; a locked old backup is a
+        // cleanup problem, not a reason to roll back a verified update.
+        // Move it out of the user's executable folder if Windows permits it.
+        let archive=std::env::temp_dir()
+            .join(format!("Minternet-old-version-{old_pid}.exe"));
+        if !archive.exists() && fs::rename(&backup,&archive).is_ok(){
+            let _=fs::remove_file(&archive);
+        }
+    }
     Ok(())
 }
 /// New main process acknowledges startup after the chrome child WebView exists.
