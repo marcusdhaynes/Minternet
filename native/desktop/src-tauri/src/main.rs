@@ -1836,7 +1836,9 @@ fn notify_native_compositor(view:&tauri::Webview){
 #[cfg(not(windows))]
 fn notify_native_compositor(_view:&tauri::Webview){}
 fn restore_visible_surfaces(app:&tauri::AppHandle){
-    invalidate_layout(app);
+    // Normal layout caching prevents a repeated bounds update every ~32ms
+    // while moving/resizing. The compositor notification below is sufficient
+    // when the bounds haven't actually changed.
     refresh_layout(app);
     let labels={
         let split=visible_split(app);
@@ -1851,12 +1853,11 @@ fn restore_visible_surfaces(app:&tauri::AppHandle){
     };
     for label in labels {
         if let Some(view)=app.get_webview(&label){
-            // A visible WebView2 child can retain a stale white surface after
-            // native minimize/resize even with a populated HTML document.
-            // Reattach the same live controller without navigating or
-            // discarding login cookies, page state, or scroll position.
-            let _=view.hide();
-            let _=view.show();
+            // CRITICAL: never hide+show an already-visible site to force a
+            // repaint. This ran on every resize/move/focus and exposed the
+            // blank parent surface repeatedly, causing seizure-risk flashes.
+            // Notify the compositor in place; do not change visibility,
+            // navigation, or the persistent WebView2 website profile.
             notify_native_compositor(&view);
         }
     }
@@ -2170,7 +2171,13 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     let for_download=app.clone();
     let shield_preferences=app.state::<privacy_shield::ShieldState>().0.lock()
         .map(|s|s.clone()).unwrap_or_default();
-    let builder=WebviewBuilder::new(label.clone(),url).incognito(private);
+    // Initialize the *unpainted* WebView2 surface to Minternet's dark color.
+    // Without this, Windows defaults to WHITE between native navigation
+    // and its first HTML frame. This is not a stylesheet override: websites
+    // with their own backgrounds still render normally after painting.
+    let builder=WebviewBuilder::new(label.clone(),url)
+        .background_color(tauri::webview::Color(10,15,27,255))
+        .incognito(private);
     // Opt in to a separate WebView2 site profile only after a user imports
     // an enabled extension. Keeps trusted browser chrome, credentials and
     // its existing profile outside third-party extension scope. Without an
@@ -6375,6 +6382,7 @@ fn main() {
                 }
             }
             let builder = WindowBuilder::new(app, "main")
+                .background_color(tauri::window::Color(10,15,27,255))
                 .title("Minternet")
                 // Request dark OS chrome and native menus where supported.
                 .theme(Some(tauri::Theme::Dark))
@@ -6424,6 +6432,10 @@ fn main() {
             }
             window.add_child(
                 WebviewBuilder::new("chrome",WebviewUrl::App("index.html".into()))
+                    // The toolbar overlays site content outside its compact
+                    // header. Keep this webview fully transparent; the parent
+                    // HWND behind it is now an opaque DARK native surface.
+                    .background_color(tauri::webview::Color(0,0,0,0))
                     // Tauri's native file-drop handler supersedes HTML5
                     // DataTransfer on Windows. Browser/bookmark drags need
                     // actual text/html, uri-list, and File objects in chrome.
