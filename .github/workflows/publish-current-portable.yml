@@ -155,9 +155,12 @@ jobs:
               esac
               base=$(basename "$candidate")
               if [ "$PLATFORM" = "Windows" ]; then
+                # Preserve the requested stable executable filename and the
+                # versioned rollback binary as separate release assets.
                 case "$base" in
-                  Minternet-Windows-Portable-v*.exe) filename="$base" ;;
-                  *) filename="Minternet-Portable-x64.exe" ;;
+                  Minterest.exe|Minternet-Windows-Portable-v*.exe|Minternet-Portable-x64.exe)
+                    filename="$base" ;;
+                  *) echo "Unexpected Windows EXE: $base"; exit 1 ;;
                 esac
               else
                 filename="Minternet-${artifact}-${base}"
