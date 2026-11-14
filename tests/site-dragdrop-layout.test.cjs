@@ -28,8 +28,11 @@ test('04 split preview displays only the actual two-pane rectangles',()=>{
   assert.match(css,/\.split-drag-zones\[data-panes="2"\]\{grid-template-rows:1fr;\}/);
 });
 test('05 three-pane preview matches L-shaped actual layout',()=>{
-  assert.match(ui,/count===3\?\['Left','Upper Right','Lower Right'\]/);
+  assert.match(ui,/sideLeft\?\['Upper Left','Lower Left','Right'\]/);
+  assert.match(ui,/\['Left','Upper Right','Lower Right'\]/);
   assert.match(css,/\.split-drag-zones\[data-panes="3"\] \.split-drag-zone:first-child\{grid-row:span 2;\}/);
+  assert.match(css,/data-side="left"/);
+  assert.match(native,/fn split_rect_on_side\(/);
 });
 test('06 four-pane preview offers precise ordered quadrants',()=>{
   assert.match(ui,/\['Upper Left','Upper Right','Lower Left','Lower Right'\]/);
@@ -39,6 +42,8 @@ test('07 native split allocator exchanges only requested panes',()=>{
   assert.match(native,/fn assign_split_slot\(split:&mut Vec<u32>,id:u32,target:usize\)/);
   assert.match(native,/split\.swap\(source,dest\)/);
   assert.match(native,/std::mem::replace\(&mut split\[target\],id\)/);
+  assert.match(native,/fn place_new_split_pane\(/);
+  assert.match(native,/fn remove_split_pane\(/);
   assert.doesNotMatch(native,/split\.insert\(insert_at,id\)/);
 });
 test('08 the exact drop quadrant is sent rather than guessed',()=>{
@@ -55,4 +60,16 @@ test('10 native split tests cover target positions, swapping, and maximum count'
   for(const name of ['requested_fourth_quadrant_is_exact_and_others_stay_in_place',
     'new_pane_displaces_only_the_selected_occupant','split_targets_follow_actual_pane_shapes',
     'four_panes_never_exceed_limit_or_lose_existing_panes'])assert.ok(native.includes(name),name);
+});
+
+test('11 pointer chooses which half is split for three panes',()=>{
+ assert.match(ui,/splitPaneIds\.length===2\?x<viewport\.width\/2:splitThreeLeft/);
+ assert.match(native,/\*split_left=quadrant%2==0/);
+ assert.match(native,/drop_third_on_left_splits_left_only/);
+ assert.match(native,/drop_third_on_right_keeps_left_pane_in_place/);
+});
+test('12 dropping in explicit quadrants preserves existing opposite panes',()=>{
+ assert.match(native,/fourth_pane_lands_in_requested_quadrant_without_shifting_opposite_side/);
+ assert.match(native,/removing_fourth_pane_preserves_opposite_side_geometry/);
+ assert.match(ui,/splitPreview\.dataset\.side=sideLeft\?'left':'right'/);
 });
