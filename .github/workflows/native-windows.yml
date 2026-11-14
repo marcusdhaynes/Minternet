@@ -571,31 +571,36 @@ jobs:
           if (!($published -contains $env:RELEASE_EXE)) {
             throw 'Update release is missing its portable Windows EXE.'
           }
-          # The public endpoint consumed by Minternet must see this exact
-          # version and both required assets before CI reports success.
+          # Use the workflow's authenticated GitHub API quota. Shared IP
+          # anonymous requests were rate-limited (403) and falsely failed
+          # builds whose EXE had already been published correctly.
           $verified = $false
-          for ($attempt=0; $attempt -lt 8; $attempt++) {
-            try {
-              $latest = Invoke-RestMethod -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/latest" -Headers @{
-                'User-Agent'='Minternet-Release-Verification'
-                'Accept'='application/vnd.github+json'
-              } -TimeoutSec 15
-              $assetNames = @($latest.assets | ForEach-Object { $_.name })
-              if ($latest.tag_name -eq $tag -and
-                  ($assetNames -contains $env:RELEASE_EXE) -and
-                  ($assetNames -contains 'SHA256SUMS.txt')) {
-                $verified = $true
-                break
+          for ($attempt=0; $attempt -lt 12; $attempt++) {
+            $response = @(gh api "repos/$env:GITHUB_REPOSITORY/releases/latest" --header "Accept: application/vnd.github+json" 2>&1)
+            if ($LASTEXITCODE -eq 0) {
+              try {
+                $latest = ($response -join [Environment]::NewLine) | ConvertFrom-Json
+                $assetNames = @($latest.assets | ForEach-Object { $_.name })
+                if ($latest.tag_name -eq $tag -and
+                    $latest.target_commitish -eq $env:GITHUB_SHA -and
+                    !$latest.draft -and !$latest.prerelease -and
+                    ($assetNames -contains $env:RELEASE_EXE) -and
+                    ($assetNames -contains 'SHA256SUMS.txt')) {
+                  $verified = $true
+                  break
+                }
+              } catch {
+                Write-Host "Release metadata still settling: $_"
               }
-            } catch {
-              Write-Host "GitHub release metadata not yet visible: $_"
+            } else {
+              Write-Host "Authenticated latest-release check retry $attempt"
             }
             Start-Sleep -Seconds 3
           }
           if (!$verified) {
-            throw "Published EXE is not discoverable through the public GitHub Releases latest API."
+            throw "GitHub did not confirm the latest published release tag, source SHA and required assets."
           }
-          "PASS: public GitHub API lists verified release $tag, portable EXE, and SHA-256 sums." >> $env:GITHUB_STEP_SUMMARY
+          "PASS: authenticated releases/latest API confirms public release $tag, exact commit, portable EXE and SHA-256 sums." >> $env:GITHUB_STEP_SUMMARY
 
       - name: Post Windows build result to verification ledger
         if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
@@ -617,7 +622,7 @@ jobs:
           - Release tag: $env:RELEASE_TAG
           - EXE asset: $env:RELEASE_EXE
           - Tests: see workflow logs (build, cargo, Node, native WebView2, in-place replacement)
-          - Publication: a successful result requires the public releases/latest API to expose the EXE and SHA256SUMS.txt
+          - Publication: authenticated releases/latest API must confirm public release, exact source SHA, EXE and SHA256SUMS.txt
           "@
           gh api "repos/$env:GITHUB_REPOSITORY/issues/21/comments" -f body="$body" | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "Cannot post CI evidence to issue #21." }
