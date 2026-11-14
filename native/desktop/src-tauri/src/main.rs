@@ -3693,6 +3693,18 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         notify(&app);
         return Ok(json!({"ok":true,"tabId":new_id}));
     }
+    if name=="site-context-select" {
+        let tab_id=value.get("tabId").and_then(Value::as_u64)
+            .ok_or("Missing context tab ID")? as u32;
+        let request_id=value.get("requestId").and_then(Value::as_u64)
+            .ok_or("Missing context request ID")?;
+        let command_id=value.get("commandId").and_then(Value::as_i64)
+            .filter(|id|*id>=0&&*id<=i32::MAX as i64).map(|id|id as i32);
+        // WebView2 validates the command against the exact context request;
+        // the original page and iframe retain ownership of the action.
+        site_context_menu::select(&app,tab_id,request_id,command_id)?;
+        return Ok(json!({"ok":true}));
+    }
     if name=="site-context-copy" {
         let copy=value.as_str().ok_or("No text to copy")?;
         if copy.len()>10000{return Err("Text exceeds clipboard limit".into());}
