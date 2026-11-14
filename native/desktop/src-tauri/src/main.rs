@@ -35,6 +35,10 @@ struct LocalMediaPath(Mutex<Option<PathBuf>>);
 fn find_visible(app:&tauri::AppHandle)->bool{
     app.state::<FindBarState>().0.lock().map(|v|*v).unwrap_or(false)
 }
+// Freeze the website profile for the lifetime of this process. Installing or
+// disabling an extension must never silently switch cookie jars mid-session.
+#[cfg(windows)]
+static SITE_EXTENSION_PROFILE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 const HOME: &str = "about:blank"; // Internal tab sentinel, never a homepage.
 const DEFAULT_HOMEPAGE: &str = "https://www.google.com/";
 
@@ -2077,7 +2081,16 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     // its existing profile outside third-party extension scope. Without an
     // imported extension existing cookies and sessions stay untouched.
     #[cfg(windows)]
-    let builder=if !private && extensions::any_enabled(app){
+    let extension_profile=*SITE_EXTENSION_PROFILE.get_or_init(||{
+        extensions::any_enabled(app) ||
+        extensions::isolated_site_dir(app).map(|dir|dir.exists()).unwrap_or(false)
+    });
+    // Once someone has used the isolated extensions profile, keep the same
+    // cookie/session directory even when all extensions are disabled.
+    // This avoids logging them out on subsequent updates or toggle changes.
+    // Incognito tabs never inherit installed extensions.
+    #[cfg(windows)]
+    let builder=if !private && extension_profile{
         builder.browser_extensions_enabled(true)
             .data_directory(extensions::isolated_site_dir(app)?)
             .extensions_path(extensions::active_dir(app)?)
@@ -6207,6 +6220,12 @@ fn main() {
         .manage(privacy_shield::ShieldState(Mutex::new(privacy_shield::ShieldConfig::default())))
         .invoke_handler(tauri::generate_handler![browser_action, browser_snapshot])
         .setup(|app| {
+            #[cfg(windows)]
+            let _=SITE_EXTENSION_PROFILE.set(
+                extensions::any_enabled(app.handle()) ||
+                extensions::isolated_site_dir(app.handle())
+                    .map(|path|path.exists()).unwrap_or(false)
+            );
             let real_launch=new_window_startup().is_none()&&
                 !std::env::args().any(|arg|
                     arg.starts_with("--minternet-")&&(arg.ends_with("-smoke")||arg.ends_with("-reopen")));
