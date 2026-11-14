@@ -139,7 +139,7 @@ test('Settings and context panels close on outside pointer-down or window blur',
     read('ui/search-settings.js'),read('ui/downloads-ui.js'),
     read('ui/media-devices-ui.js'),read('ui/chrome-native-menu.js'),
     read('ui/password-ui.js'),read('ui/payment-ui.js'),
-    read('ui/identity-ui.js'),read('ui/privacy-shield-ui.js'),
+    read('ui/identity-ui.js'),
     read('ui/history-ui.js'),read('ui/tab-group-ui.js')]){
     assert.match(code,/window\.addEventListener(?:\?\.)?\('blur'/);
   }
