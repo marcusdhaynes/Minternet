@@ -180,7 +180,7 @@ pub fn maybe_run_helper()->bool{
                 run_helper(&target,parent,&expected),
             _=>Err("Malformed update helper arguments".into())
         };
-        if let Err(error)=status{
+        if let Err(ref error)=status{
             eprintln!("Minternet update failed: {error}");
             // Never leave a previously usable EXE closed when a write-lock,
             // antivirus, permission, or startup failure aborts installation.
@@ -189,8 +189,12 @@ pub fn maybe_run_helper()->bool{
                 let _=Command::new(target).spawn();
             }
         }
+        // GitHub Actions must be able to distinguish a verified successful
+        // replacement from a rollback or failed update.
+        std::process::exit(if status.is_ok(){0}else{1});
     }
-    true
+    #[cfg(not(windows))]
+    return true;
 }
 #[cfg(windows)]
 fn run_helper(target:&Path,old_pid:u32,expected:&str)->Result<(),String>{
