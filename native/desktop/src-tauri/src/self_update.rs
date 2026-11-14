@@ -360,10 +360,18 @@ pub fn maybe_run_helper()->bool{
         let _=fs::write(log,format!("Minternet update error: {error}\n"));
         // Do not strand the user if the helper cannot replace the EXE.
         // The original exists unchanged or has been restored by rollback.
-        if let Some(target)=args.get(3).map(PathBuf::from){
-            if target.is_file(){
-                if let Some(folder)=target.parent(){
-                    let _=Command::new(&target).current_dir(folder).spawn();
+        let legitimate_helper=std::env::current_exe().ok().is_some_and(|source|
+            source.file_name().and_then(|n|n.to_str())==Some("Minterest.exe") &&
+            source.parent().is_some_and(|folder|
+                folder.starts_with(std::env::temp_dir().join("Minterest-Portable-Updates"))));
+        if legitimate_helper{
+            if let Some(target)=args.get(3).map(PathBuf::from){
+                if target.is_absolute() && target.is_file() &&
+                   target.extension().is_some_and(|ext|
+                       ext.to_string_lossy().eq_ignore_ascii_case("exe")){
+                    if let Some(folder)=target.parent(){
+                        let _=Command::new(&target).current_dir(folder).spawn();
+                    }
                 }
             }
         }
