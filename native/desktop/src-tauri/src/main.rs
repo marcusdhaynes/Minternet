@@ -2600,7 +2600,47 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                 .and_then(|browser|browser.tabs.iter().find(|tab|tab.id==id)
                     .map(|tab|tab.url.clone())).unwrap_or_default();
             if auth_popup::preserve_opener(&opener_url,&url){
-                return NewWindowResponse::Allow;
+                // A managed Tauri popup receives the opener's WebView2
+                // environment via window_features. That gives window.open
+                // a *real* WindowProxy while keeping native navigation and
+                // permissions constrained to an HTTPS authentication window.
+                static AUTH_POPUP_COUNTER: AtomicU64=AtomicU64::new(0);
+                let serial=AUTH_POPUP_COUNTER.fetch_add(1,Ordering::Relaxed);
+                let builder=tauri::WebviewWindowBuilder::new(
+                    &for_popup,format!("auth-{id}-{serial}"),
+                    WebviewUrl::External(tauri::Url::parse("about:blank")
+                        .expect("built-in blank URL"))
+                )
+                .title("Minternet — Sign In")
+                .min_inner_size(380.0,320.0)
+                .inner_size(800.0,700.0)
+                .window_features(_features)
+                .on_navigation(|target|{
+                    target.as_str()=="about:blank" ||
+                    (target.scheme()=="https" && target.host_str().is_some()
+                    && target.username().is_empty() && target.password().is_none())
+                })
+                .on_permission_request(|_,kind|match kind{
+                    // Keep WebView2's native, origin-scoped identity handling.
+                    PermissionKind::Other => PermissionResponse::Default,
+                    _ => PermissionResponse::Deny,
+                })
+                .on_download(|_,event|match event{
+                    DownloadEvent::Requested{..}=>false,
+                    _=>true
+                })
+                .on_new_window(|_,_|NewWindowResponse::Deny)
+                .on_document_title_changed(|window,title|{
+                    let safe=title.chars().take(140).collect::<String>();
+                    let _=window.set_title(&format!("Minternet — {safe}"));
+                });
+                return match builder.build(){
+                    Ok(window)=>NewWindowResponse::Create{window},
+                    Err(error)=>{
+                        eprintln!("Could not create managed sign-in popup: {error}");
+                        NewWindowResponse::Deny
+                    }
+                };
             }
             // Ordinary target=_blank links open as Minternet tabs.
             if url.as_str()=="about:blank" ||
