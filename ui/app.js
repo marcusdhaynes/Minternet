@@ -325,6 +325,16 @@ function buildTab(tab, active) {
   return root;
 }
 window.minternetToast = toast;
+// Native WebView2 recovery surfaces actionable status in trusted chrome.
+if(window.__TAURI__?.event?.listen){
+  window.__TAURI__.event.listen('minternet:surface-warning',event=>{
+    const details=event?.payload;
+    if(details?.tabId===snapshot.activeId && typeof details?.message==='string'){
+      toast(details.message);
+    }
+  }).catch(()=>{});
+}
+
 window.minternetRenderTabs = () => {
   if(window.minternetGroups?.renderTabs)
     window.minternetGroups.renderTabs(snapshot,byId('tabs'),buildTab);
