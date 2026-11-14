@@ -2009,6 +2009,50 @@ fn schedule_startup_bounds_reconciliation(app:&tauri::AppHandle){
     });
 }
 
+// CI-only: reproduce the reported startup visual failure by deliberately
+// offsetting and shrinking a real WebView2 child after maximizing the native
+// window. Prove the runtime repair restores the child to the true client
+// rectangle, rather than merely asserting the function exists in source.
+fn start_geometry_smoke(app:&tauri::AppHandle,id:u32){
+    let worker=app.clone();
+    std::thread::spawn(move||{
+        std::thread::sleep(Duration::from_millis(1100));
+        let handle=worker.clone();
+        let _=worker.run_on_main_thread(move||{
+            if let Some(window)=handle.get_window("main"){
+                let _=window.maximize();
+            }
+        });
+        std::thread::sleep(Duration::from_millis(850));
+        let handle=worker.clone();
+        let _=worker.run_on_main_thread(move||{
+            let Some(window)=handle.get_window("main") else{return};
+            let Ok((width,height))=dimensions(&window) else{return};
+            let scale=window.scale_factor().unwrap_or(1.0).max(0.1);
+            let top=chrome_top(&handle)+if find_visible(&handle){FIND_BAR}else{0.0};
+            let Some(view)=handle.get_webview(&format!("tab-{id}")) else{return};
+            let wrong=tauri::Rect {
+                position:LogicalPosition::new(53.0,top).into(),
+                size:LogicalSize::new((width-280.0).max(100.0),
+                    (height-top-90.0).max(100.0)).into()
+            };
+            if view.set_bounds(wrong).is_err(){return;}
+            let changed=reconcile_visible_child_bounds(&handle);
+            let (Ok(pos),Ok(size))=(view.position(),view.size()) else{return};
+            let expected=[0.0,top*scale,width*scale,(height-top)*scale];
+            let actual=[pos.x as f64,pos.y as f64,
+                size.width as f64,size.height as f64];
+            if changed && expected.iter().zip(actual.iter())
+                .all(|(a,b)|(a-b).abs()<=3.0){
+                let marker=std::env::temp_dir()
+                    .join(format!("minternet-geometry-{}.ok",std::process::id()));
+                let _=std::fs::write(marker,
+                    "PASS: maximized WebView2 child corrected from off-center rectangle to full client bounds");
+            }
+        });
+    });
+}
+
 fn display_active(app: &tauri::AppHandle) {
     let mut targets=HashSet::new();
     {
@@ -6471,6 +6515,7 @@ fn main() {
             let stability_smoke = std::env::args().any(|a| a == "--minternet-stability-smoke");
             let pin_smoke = std::env::args().any(|a| a == "--minternet-pin-smoke");
             let pin_reopen_smoke = std::env::args().any(|a| a == "--minternet-pin-reopen-smoke");
+            let geometry_smoke = std::env::args().any(|a| a == "--minternet-geometry-smoke");
             if !std::env::args().any(|a|a.starts_with("--minternet-") &&
                 (a.ends_with("-smoke")||a.ends_with("-reopen"))) {
                 let target=homepage(app.handle()).to_string();
@@ -6863,6 +6908,22 @@ fn main() {
                 LogicalPosition::new(0.0,0.0),
                 LogicalSize::new(width,height)
             )?;
+            if geometry_smoke {
+                // The test must own a real webpage child, not just the
+                // dashboard chrome, before testing maximize and recovery.
+                let id={
+                    let state=app.state::<Mutex<Browser>>();
+                    let mut browser=state.lock().map_err(|e|std::io::Error::other(e.to_string()))?;
+                    let id=browser.tabs.first().map(|tab|tab.id).unwrap_or(0);
+                    browser.active_id=id;
+                    id
+                };
+                if id==0{return Err(std::io::Error::other("No smoke tab"));}
+                let url=tauri::Url::parse("https://example.com/")
+                    .map_err(std::io::Error::other)?;
+                navigate_tab(app.handle(),id,Some(url),true)
+                    .map_err(std::io::Error::other)?;
+            }
             // Fresh secondary windows start at the explicitly requested URL,
             // never duplicating the original window's restored session.
             if let Some((address,_private))=new_window_target{
@@ -6930,6 +6991,11 @@ fn main() {
             // WebView2 add_child. Fix native child bounds once the startup
             // window has settled; future passes are no-ops when already aligned.
             schedule_startup_bounds_reconciliation(app.handle());
+            if geometry_smoke {
+                let id=app.state::<Mutex<Browser>>().lock()
+                    .ok().map(|b|b.active_id).unwrap_or(0);
+                if id!=0{start_geometry_smoke(app.handle(),id);}
+            }
             // A verified replacement is healthy only after native windows,
             // restored tabs, and the browser's event handlers are initialized.
             portable_updater::confirm_startup();
