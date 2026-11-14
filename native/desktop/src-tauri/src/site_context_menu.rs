@@ -199,11 +199,21 @@ mod windows_menu {
                     });
                 });
                 let scale=handle.get_window("main")
-                    .and_then(|window|window.scale_factor().ok()).unwrap_or(1.0);
+                    .and_then(|window|window.scale_factor().ok()).unwrap_or(1.0)
+                    .max(0.1);
+                // WebView2 Location is relative to the *clicked webview*, not
+                // to the containing window. Its origin can be shifted both
+                // vertically AND horizontally (for example in split view).
+                // Query the actual child position instead of assuming x=0
+                // and a fixed toolbar height.
+                let (origin_x,origin_y)=handle.get_webview(&format!("tab-{id}"))
+                    .and_then(|view|view.position().ok())
+                    .map(|pos|(pos.x as f64/scale,pos.y as f64/scale))
+                    .unwrap_or((0.0,super::super::chrome_top(&handle)));
                 let result=handle.emit_to("chrome","minternet:site-context",json!({
                     "tabId":id,"requestId":request_id,
-                    "x":(point.x as f64/scale).max(0.0),
-                    "y":(super::super::chrome_top(&handle)+point.y as f64/scale).max(0.0),
+                    "x":(origin_x+point.x as f64/scale).max(0.0),
+                    "y":(origin_y+point.y as f64/scale).max(0.0),
                     "kind":target_kind,"nativeItems":entries,
                     "linkUrl":href.chars().take(4000).collect::<String>(),
                     "sourceUrl":source.chars().take(4000).collect::<String>(),
