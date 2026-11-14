@@ -13,17 +13,27 @@ let focusLease=0;
 let focusCancelled=false;
 let focusTargetTabId=null;
 let addressEditedSinceNew=false;
+const addressDrafts=new Map();
+let reloadPending=null;
+function stopReloadIndicator(){
+  if(reloadPending?.timer)clearTimeout(reloadPending.timer);
+  reloadPending=null;
+  byId('reload')?.classList.remove('refresh-spinning');
+  byId('reload')?.removeAttribute('aria-busy');
+}
 function focusNewTabAddress(){
   const target=snapshot.activeId;
   if(target===focusTargetTabId&&!focusCancelled&&document.activeElement===byId('address'))return;
+  if(target===focusTargetTabId && addressEditedSinceNew)return;
   focusTargetTabId=target;
-  addressEditedSinceNew=false;
-  byId('address')?.removeAttribute('data-minternet-typed');
+  addressEditedSinceNew=Boolean(addressDrafts.get(target));
+  if(!addressEditedSinceNew)byId('address')?.removeAttribute('data-minternet-typed');
   const lease=++focusLease;
   focusCancelled=false;
   const field=byId('address');
   const tryFocus=()=>{
-    if(lease!==focusLease||focusCancelled||snapshot.activeId!==target)return;
+    if(lease!==focusLease||focusCancelled||snapshot.activeId!==target||
+       addressEditedSinceNew||addressDrafts.has(target))return;
     if(document.activeElement===field)return;
     if(document.activeElement instanceof HTMLElement && document.activeElement.matches('input:not(#address),textarea,[contenteditable="true"]')){focusCancelled=true;return;}
     if(window.__TAURI__)void api.command('focus-address').catch(()=>{});
@@ -329,6 +339,7 @@ function render(data) {
   }
   snapshot = data;
   const ids=new Set(data.tabs.map(t=>t.id));
+  for(const id of addressDrafts.keys())if(!ids.has(id))addressDrafts.delete(id);
   for(const id of nativeTabIcons.keys())if(!ids.has(id))nativeTabIcons.delete(id);
   const tabs = byId('tabs');
   const active = data.tabs.find(t => t.id === data.activeId);
@@ -366,22 +377,30 @@ function render(data) {
   if(isNewTab){
     requestAnimationFrame(()=>{
       const address=byId('address');
-      address?.focus();
-      address?.select();
+      if(address && !addressEditedSinceNew && !addressDrafts.has(data.activeId)){
+        address.focus();address.select();
+      }
       focusNewTabAddress();
     });
   }
     byId('back').disabled = !active?.canBack;
   byId('forward').disabled = !active?.canForward;
   byId('reload').disabled = !active || active.secretTab || active.url === 'about:blank';
-  byId('reload').classList.toggle('refresh-spinning',Boolean(active?.loading));
-  if(!active?.loading)byId('reload').removeAttribute('aria-busy');
-  else byId('reload').setAttribute('aria-busy','true');
+  // Keep a user-initiated refresh spinning until its native load cycle
+  // reports completion; an interim stale snapshot must not stop it.
+  if(reloadPending){
+    if(!active||active.id!==reloadPending.id)stopReloadIndicator();
+    else if(active.loading)reloadPending.sawLoading=true;
+    else if(reloadPending.sawLoading)stopReloadIndicator();
+  }
+  byId('reload').classList.toggle('refresh-spinning',Boolean(active?.loading||reloadPending));
+  if(active?.loading||reloadPending)byId('reload').setAttribute('aria-busy','true');
+  else byId('reload').removeAttribute('aria-busy');
   const isBlank = !active || (active.url === 'about:blank'&&!active.secretTab);
   byId('homeScreen').hidden = !isBlank;
   byId('address').setAttribute('aria-label', active?.url?.startsWith('http://') ? 'Insecure HTTP address' : 'Search or enter address');
   if (!addressFocused) byId('address').value = pendingNavigation?.text ||
-    (isBlank||active?.secretTab ? '' : active.url);
+    (addressDrafts.get(data.activeId) ?? (isBlank||active?.secretTab ? '' : active.url));
   byId('address').placeholder=active?.secretTab?'Secret Tab · URL Concealed':'Search privately or enter a secure address';
   if (lastUrl !== active?.url) {
     lastUrl = active?.url;
@@ -390,7 +409,16 @@ function render(data) {
 }
 api.onState(render);
 api.onFocusAddress(() => byId('address').focus());
-const bind = (id, name) => byId(id).addEventListener('click', () => {if(name==='reload')byId('reload').classList.add('refresh-spinning');void command(name);});
+const bind = (id, name) => byId(id).addEventListener('click', () => {
+  if(name==='reload'){
+    const id=snapshot.activeId;
+    stopReloadIndicator();
+    reloadPending={id,sawLoading:false,timer:setTimeout(stopReloadIndicator,45000)};
+    byId('reload').classList.add('refresh-spinning');
+    byId('reload').setAttribute('aria-busy','true');
+    void command(name).then(result=>{if(!result||result?.message)stopReloadIndicator();});
+  }else void command(name);
+});
 for (const [id, name] of [
   ['newTab','new'],['newPrivate','new-private'],['dashboardButton','deselect'],
   ['reload','reload'],['tor','tor'],
@@ -406,6 +434,7 @@ byId('addressForm').addEventListener('submit', event => {
     priorUrl:active?.url||'about:blank',started:Date.now()};
   // This is an optimistic address commit, not a website navigation. Native
   // decides the actual address. Never revert to the new tab's old homepage.
+  addressDrafts.delete(active?.id);
   field.value=typed;
   void command('navigate',typed);
   field.blur();
@@ -426,23 +455,32 @@ function prepareBlankTab() {
   clearTimeout(warmTimer);
   warmTimer = setTimeout(() => {
     const active = snapshot.tabs.find(t => t.id === snapshot.activeId);
-    if (active?.url === 'about:blank') void api.command('prepare-tab').catch(() => {});
+    // Never create/re-parent a WebView2 controller during address-bar input:
+    // on Windows this can steal focus and erase the very first keystrokes.
+    if (active?.url === 'about:blank' &&
+        document.activeElement!==byId('address') &&
+        !addressDrafts.has(active.id)) {
+      void api.command('prepare-tab').catch(() => {});
+    }
   }, 75);
 }
 byId('address').addEventListener('input',event=>{
   addressEditedSinceNew=true;
+  if(snapshot.activeId!=null)addressDrafts.set(snapshot.activeId,event.currentTarget.value);
   event.currentTarget.dataset.minternetTyped='true';
-  prepareBlankTab();
+  clearTimeout(warmTimer);
 });
 byId('address').addEventListener('focus', event => {
   addressFocused = true;
-  event.target.select();
-  prepareBlankTab();
+  if(!addressEditedSinceNew)event.target.select();
 });
 byId('homeSearch')?.addEventListener('focus', prepareBlankTab);
 byId('address').addEventListener('blur', () => {
   addressFocused = false;
   const active = snapshot.tabs.find(t => t.id === snapshot.activeId);
+  // Native popup, focus hand-off or warm-up must not discard a draft.
+  const draft=addressDrafts.get(snapshot.activeId);
+  if(draft!==undefined && active?.url==='about:blank')return;
   byId('address').value = pendingNavigation?.text ||
     (active && active.url !== 'about:blank' ? active.url : '');
 });
