@@ -924,6 +924,11 @@ html.minternet-overlay-active .group-editor-backdrop {
    panes, or four quadrants. Never draw four false drop targets for two panes. */
 .split-drag-zones[data-panes="2"]{grid-template-rows:1fr;}
 .split-drag-zones[data-panes="3"] .split-drag-zone:first-child{grid-row:span 2;}
+/* With three panes, the cursor chooses whether LEFT or RIGHT is divided.
+   Never present a preview that later moves the new pane to the other side. */
+.split-drag-zones[data-panes="3"][data-side="left"] .split-drag-zone:first-child{grid-area:1 / 1 / 2 / 2;}
+.split-drag-zones[data-panes="3"][data-side="left"] .split-drag-zone:nth-child(2){grid-area:2 / 1 / 3 / 2;}
+.split-drag-zones[data-panes="3"][data-side="left"] .split-drag-zone:nth-child(3){grid-area:1 / 2 / 3 / 3;}
 .split-drag-zone{display:grid;place-items:center;font-size:12px;font-weight:600;
   letter-spacing:.02em;color:#ded5ffb8;text-shadow:0 1px 3px #080a12;
   border:1px solid #a9a0df55;border-radius:7px;background:#8491c30e;
