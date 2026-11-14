@@ -34,15 +34,15 @@
     }
   }
   function normalizedRelease(release) {
-    if(release?.draft || !/^minternet-build-\\d+$/.test(release?.tag_name||''))return null;
+    if(release?.draft || !/^minternet-build-\d+$/.test(release?.tag_name||''))return null;
     var assets=Array.isArray(release.assets)?release.assets:[];
     var asset=assets.find(function(a){
-      return /^Minternet-.*\\.exe$/i.test(a.name||'') &&
+      return /^Minternet-.*\.exe$/i.test(a.name||'') &&
         !/setup/i.test(a.name||'') &&
-        /^https:\\/\\/github\\.com\\/marcusdhaynes\\/Minternet\\/releases\\/download\\//.test(a.browser_download_url||'');
+        /^https:\/\/github\.com\/marcusdhaynes\/Minternet\/releases\/download\//.test(a.browser_download_url||'');
     });
     if(!asset)return null;
-    var version=(release.name||'').match(/v(\\d+\\.\\d+\\.\\d+)/);
+    var version=(release.name||'').match(/v(\d+\.\d+\.\d+)/);
     var next=version?version[1]:CURRENT_VERSION;
     var build=Number((release.tag_name||'').replace('minternet-build-',''));
     if(!Number.isSafeInteger(build)||build<=0)return null;
@@ -162,8 +162,9 @@
     renderSection(el, null, 'Checking for updates…', true);
     checkForUpdate(true).then(function (info) {
       renderSection(el, info, info ? 'A newer version is available.' : 'No newer release found.', false);
-    }).catch(function () {
-      renderSection(el, null, 'Could not check for updates.', false);
+    }).catch(function (error) {
+      var message=String(error?.message||'Network unavailable').slice(0,160);
+      renderSection(el,null,'Could not check updates: '+message,false);
     });
   }
 
