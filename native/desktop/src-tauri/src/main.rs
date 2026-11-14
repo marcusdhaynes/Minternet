@@ -5477,7 +5477,15 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 state.size_and_home = None;
             }
             display_active(&app);
-            return Ok(json!({"ok": true}));
+            // The chrome controller normally occupies only the toolbar.
+            // Its JS innerHeight may still report that short viewport before
+            // WebView2 delivers the resize. Return the parent window's actual
+            // client bounds so custom context menus can position immediately
+            // beside the pointer rather than being clamped to the top.
+            let viewport=app.get_window("main")
+                .and_then(|window|dimensions(&window).ok())
+                .map(|(width,height)|json!({"width":width,"height":height}));
+            return Ok(json!({"ok": true,"viewport":viewport}));
         }
         "split-status" => {
             let ids=app.state::<SplitState>().0.lock().map_err(|e|e.to_string())?.clone();
