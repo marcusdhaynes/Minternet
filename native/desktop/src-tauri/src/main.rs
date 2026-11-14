@@ -1624,7 +1624,7 @@ mod split_layout_tests {
     #[test]
     fn removing_fourth_pane_preserves_opposite_side_geometry(){
         let mut panes=vec![1,2,3,4];let mut side=false;
-        super::remove_split_pane(&mut panes,1,&mut side);
+        super::remove_split_pane(&mut panes,2,&mut side);
         assert_eq!(panes,vec![1,3,4]);
         assert!(side);
     }
