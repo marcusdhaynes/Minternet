@@ -2090,7 +2090,14 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     let for_download=app.clone();
     let shield_preferences=app.state::<privacy_shield::ShieldState>().0.lock()
         .map(|s|s.clone()).unwrap_or_default();
-    let builder=WebviewBuilder::new(label.clone(),url).incognito(private);
+    // Leave HTML5 drag-and-drop owned by WebView2. Tauri's default native
+    // DragDropEvent handler replaces WebView2's Windows IDropTarget and
+    // prevents File/DataTransfer drops on ChatGPT, Muse, upload targets,
+    // sortable lists, editors and ordinary third-party web applications.
+    // Browser tab reordering remains scoped to the trusted chrome view.
+    let builder=WebviewBuilder::new(label.clone(),url)
+        .incognito(private)
+        .disable_drag_drop_handler();
     // Opt in to a separate WebView2 site profile only after a user imports
     // an enabled extension. Keeps trusted browser chrome, credentials and
     // its existing profile outside third-party extension scope. Without an
