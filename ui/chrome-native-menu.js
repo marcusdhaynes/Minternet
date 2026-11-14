@@ -180,7 +180,18 @@
   // submenus. The actual installed browser uses the native OS menu above.
   let fallback=null,customOpen=false;
   let openFolderButton=null;
-  function closeFallback(){
+  // The WebView2 menu deferral is tied to ONE original right-click event.
+  // Closing, switching or replacing any popup must complete that deferral.
+  let pendingSiteContext=null;
+  function closeFallback(selectedCommandId=null){
+    const pending=pendingSiteContext;
+    pendingSiteContext=null;
+    if(pending&&window.__TAURI__){
+      void window.minternet?.command('site-context-select',{
+        tabId:pending.tabId,requestId:pending.requestId,
+        commandId:Number.isSafeInteger(selectedCommandId)?selectedCommandId:null
+      });
+    }
     openFolderButton?.classList.remove('bookmark-open-folder');
     openFolderButton=null;
     fallback?.remove();fallback=null;
@@ -220,7 +231,10 @@
         host.addEventListener('mouseenter',()=>host.classList.add('system-popup-open'));
         host.addEventListener('mouseleave',()=>host.classList.remove('system-popup-open'));
       }else{
-        row.addEventListener('click',()=>{closeFallback();spec.action?.();});
+        row.addEventListener('click',()=>{
+          closeFallback(Number.isSafeInteger(spec.nativeCommandId)?spec.nativeCommandId:null);
+          spec.action?.();
+        });
         list.append(row);
       }
     }
@@ -458,43 +472,79 @@
     },
     site:details=>{
       const payload=details&&typeof details==='object'?details:{};
+      // WebView2 supplies exact menu actions for the target element and its
+      // frame. Preserve its command IDs, disabled state, checkboxes, nested
+      // spellcheck suggestions, video controls and localized labels.
+      const convertNative=(entries,depth=0)=>{
+        if(depth>9||!Array.isArray(entries))return [];
+        return entries.slice(0,160).flatMap(entry=>{
+          if(entry.separator)return [sep()];
+          const label=String(entry.text||entry.name||'').replace(/&(?!&)/g,'').trim();
+          if(!label)return [];
+          const text=(entry.checked?'✓  ':'')+label;
+          if(Array.isArray(entry.items)){
+            const children=convertNative(entry.items,depth+1);
+            return children.length?[{text,enabled:entry.enabled!==false,items:children}]:[];
+          }
+          if(!Number.isSafeInteger(entry.commandId)||entry.commandId<0)return [];
+          return [{
+            text,enabled:entry.enabled!==false,
+            shortcut:String(entry.shortcut||'').slice(0,36),
+            nativeCommandId:entry.commandId,
+            nativeName:String(entry.name||'')
+          }];
+        });
+      };
+      const nativeItems=convertNative(payload.nativeItems);
+      const nativeNames=new Set();
+      const collect=items=>{for(const i of items){
+        if(i.nativeName)nativeNames.add(i.nativeName.toLowerCase());
+        if(i.items)collect(i.items);
+      }};
+      collect(nativeItems);
+      const hasNative=(...names)=>names.some(name=>nativeNames.has(name.toLowerCase()));
       const href=/^https?:\/\//i.test(payload.linkUrl||'')?payload.linkUrl:'';
       const media=/^https?:\/\//i.test(payload.sourceUrl||'')?payload.sourceUrl:'';
       const page=/^https?:\/\//i.test(payload.pageUrl||'')?payload.pageUrl:'';
       const selected=typeof payload.selection==='string'?payload.selection.slice(0,2048):'';
       const point={x:Math.max(0,Number(payload.x)||0),y:Math.max(0,Number(payload.y)||0)};
-      const items=[];
+      const items=[...nativeItems];
+      // The built-in menu is authoritative. These are Minternet-specific
+      // fallbacks, not replacements for bitmap copy, Save Image As, spell
+      // checking, native media controls or extension items.
+      const extras=[];
       if(href){
-        items.push(item('↗  Open Link in New Tab',()=>window.minternet?.command('site-link-new-tab',{tabId:payload.tabId,url:href})));
-        items.push(item('▣  Open Link in New Window',()=>window.minternet?.command('open-new-browser-window',{url:href,sourceTabId:payload.tabId})));
-        items.push(item('⧉  Copy Link Address',()=>window.minternet?.command('site-context-copy',href)));
-        items.push(sep());
+        if(!hasNative('openLinkInNewTab'))extras.push(item('↗  Open Link in New Tab',()=>window.minternet?.command('site-link-new-tab',{tabId:payload.tabId,url:href})));
+        if(!hasNative('openLinkInNewWindow'))extras.push(item('▣  Open Link in New Window',()=>window.minternet?.command('open-new-browser-window',{url:href,sourceTabId:payload.tabId})));
+        if(!hasNative('copyLink'))extras.push(item('⧉  Copy Link Address',()=>window.minternet?.command('site-context-copy',href)));
       }
-      if(media){
-        items.push(item('↗  Open Media in New Tab',()=>window.minternet?.command('site-link-new-tab',{tabId:payload.tabId,url:media})));
-        items.push(item('▣  Open Media in New Window',()=>window.minternet?.command('open-new-browser-window',{url:media,sourceTabId:payload.tabId})));
-        items.push(item('⧉  Copy Media Address',()=>window.minternet?.command('site-context-copy',media)));
-        items.push(sep());
+      if(media&&items.length===0){
+        extras.push(item('↗  Open Media in New Tab',()=>window.minternet?.command('site-link-new-tab',{tabId:payload.tabId,url:media})));
+        extras.push(item('⧉  Copy Media Address',()=>window.minternet?.command('site-context-copy',media)));
       }
-      if(selected){
-        items.push(item('⧉  Copy Selected Text',()=>window.minternet?.command('site-context-copy',selected)));
-        items.push(sep());
+      if(selected&&!hasNative('copy','copySelection'))
+        extras.push(item('⧉  Copy Selected Text',()=>window.minternet?.command('site-context-copy',selected)));
+      if(payload.editable&&items.length===0){
+        for(const [label,action] of [['✂  Cut','cut'],['⧉  Copy','copy'],['▣  Paste','paste'],['▤  Select All','selectAll']])
+          extras.push(item(label,()=>window.minternet?.command('site-context-edit',{tabId:payload.tabId,action})));
       }
-      if(payload.editable){
-        items.push(item('✂  Cut',()=>window.minternet?.command('site-context-edit',{tabId:payload.tabId,action:'cut'})));
-        items.push(item('⧉  Copy',()=>window.minternet?.command('site-context-edit',{tabId:payload.tabId,action:'copy'})));
-        items.push(item('▣  Paste',()=>window.minternet?.command('site-context-edit',{tabId:payload.tabId,action:'paste'})));
-        items.push(item('▤  Select All',()=>window.minternet?.command('site-context-edit',{tabId:payload.tabId,action:'selectAll'})));
-        items.push(sep());
+      if(page&&items.length===0)
+        extras.push(item('⧉  Copy Page Address',()=>window.minternet?.command('site-context-copy',page)));
+      if(items.length===0||!hasNative('reload')){
+        extras.push(item('↻  Reload',()=>window.minternet?.command('reload')));
       }
-      if(page){
-        items.push(item('▣  Open Page in New Window',()=>window.minternet?.command('open-new-browser-window',{url:page,sourceTabId:payload.tabId})));
-        items.push(item('⧉  Copy Page Address',()=>window.minternet?.command('site-context-copy',page)));
+      if(extras.length){
+        if(items.length)items.push(sep());
+        items.push(...extras);
       }
-      items.push(item('←  Back',()=>window.minternet?.command('back')));
-      items.push(item('→  Forward',()=>window.minternet?.command('forward')));
-      items.push(item('↻  Reload',()=>window.minternet?.command('reload')));
-      return popup(items,point,{custom:true,heading:href?'LINK':payload.editable?'EDIT':'PAGE'});
+      if(items.length===0)items.push(disabled('No actions available for this element'));
+      const heading={image:'IMAGE',video:'VIDEO',audio:'AUDIO',selection:'SELECTION'}[payload.kind]||
+        (href?'LINK':payload.editable?'EDIT':'PAGE');
+      const popupResult=popup(items,point,{custom:true,heading});
+      if(Number.isSafeInteger(payload.requestId)&&payload.requestId>0){
+        pendingSiteContext={tabId:payload.tabId,requestId:payload.requestId};
+      }
+      return popupResult;
     },
     chrome:event=>{
       const target=event?.target;
@@ -553,10 +603,20 @@
   if(window.__TAURI__?.event?.listen){
     void window.__TAURI__.event.listen('minternet:site-context',event=>{
       const detail=event.payload;
-      if(!detail||!Number.isSafeInteger(detail.tabId))return;
-      // Ignore a late context request from a background or closed tab.
-      if(!groups()?.getLatest().tabs.some(t=>t.id===detail.tabId))return;
+      if(!detail||!Number.isSafeInteger(detail.tabId)||
+         !Number.isSafeInteger(detail.requestId))return;
+      // A stale request from a closed tab must be cancelled in WebView2.
+      if(!groups()?.getLatest().tabs.some(t=>t.id===detail.tabId)){
+        void window.minternet?.command('site-context-select',{
+          tabId:detail.tabId,requestId:detail.requestId,commandId:null
+        });
+        return;
+      }
       void handlers.site(detail);
+    }).catch(()=>{});
+    void window.__TAURI__.event.listen('minternet:site-context-expired',event=>{
+      if(pendingSiteContext?.requestId===event.payload?.requestId)
+        closeFallback();
     }).catch(()=>{});
   }
   const bar=$('bookmarkBar');
