@@ -1614,6 +1614,7 @@ fn update_split_badges(app:&tauri::AppHandle,window:&tauri::Window,
         let callback_app=app.clone();
         let badge_id=*id;
         let builder=WebviewBuilder::new(label,WebviewUrl::App("split-badge.html".into()))
+            .background_color(tauri::webview::Color(0,0,0,0))
             .transparent(true)
             .on_navigation(move |url|{
                 if url.host_str()==Some("minternet.invalid") {
@@ -3753,6 +3754,10 @@ fn open_local_media(app:&tauri::AppHandle,selected:&std::path::Path,smoke:bool)
         WebviewWindowBuilder::new(
                 app,"minternet-media-player",
                 WebviewUrl::App("media-player.html".into()))
+            .background_color(tauri::webview::Color(0,0,0,0))
+            // Transparent floating windows can paint a full white rectangle
+            // before WebView2's first composed frame on some Windows GPUs.
+            .no_redirection_bitmap(true)
             .title("Minternet Local Media Player")
             .inner_size(368.0,116.0)
             .min_inner_size(80.0,45.0)
