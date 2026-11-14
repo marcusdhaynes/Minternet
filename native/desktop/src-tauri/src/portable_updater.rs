@@ -130,15 +130,24 @@ fn prepare(app:&AppHandle)->Result<(),String>{
         return Err("Update SHA-256 verification failed; original EXE was not changed".into());
     }
     report(app,"restarting","Verified. Replacing Minternet at its current location…");
-    let args=["--minternet-apply-update".to_string(),target.to_string_lossy().into_owned(),
-        std::process::id().to_string(),expected];
-    Command::new(&staged).args(&args).spawn()
-        .map_err(|e|format!("Unable to start update helper: {e}"))?;
-    // The helper is an independently running, verified copy of the new EXE.
-    // Preserve tabs before exiting; relaunch uses the original file location.
-    super::refresh_session_urls(app);
-    super::save_session(app)?;
-    app.exit(0);
+    let handle=app.clone();
+    // WebView state and session persistence belong on the UI thread.
+    app.run_on_main_thread(move||{
+        super::refresh_session_urls(&handle);
+        if let Err(error)=super::save_session(&handle){
+            report(&handle,"error",&format!("Could not preserve the browser session: {error}"));
+            return;
+        }
+        let args=["--minternet-apply-update".to_string(),target.to_string_lossy().into_owned(),
+            std::process::id().to_string(),expected];
+        if let Err(error)=Command::new(&staged).args(&args).spawn(){
+            report(&handle,"error",&format!("Unable to start update helper: {error}"));
+            return;
+        }
+        // A separately running, SHA-verified new binary now handles the
+        // replacement and rollback; only this point exits the old browser.
+        handle.exit(0);
+    }).map_err(|e|e.to_string())?;
     Ok(())
 }
 #[cfg(not(windows))]
