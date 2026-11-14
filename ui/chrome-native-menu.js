@@ -183,7 +183,10 @@
   // The WebView2 menu deferral is tied to ONE original right-click event.
   // Closing, switching or replacing any popup must complete that deferral.
   let pendingSiteContext=null;
-  function closeFallback(selectedCommandId=null){
+  let menuGeneration=0;
+  function closeFallback(selectedCommandId=null,keepOverlay=false){
+    // A delayed native overlay resize must not resurrect a dismissed menu.
+    menuGeneration++;
     const pending=pendingSiteContext;
     pendingSiteContext=null;
     if(pending&&window.__TAURI__){
@@ -199,7 +202,8 @@
     document.removeEventListener('keydown',esc,true);
     if(customOpen){
       customOpen=false;
-      if(window.__TAURI__)void window.minternet?.command('chrome-overlay',false);
+      if(window.__TAURI__&&!keepOverlay)
+        void window.minternet?.command('chrome-overlay',false);
     }
   }
   function outside(e){if(fallback&&!fallback.contains(e.target))closeFallback();}
@@ -210,6 +214,52 @@
   // Opening a page context menu can blur the chrome window immediately; do
   // not interpret that handoff as a request to close the menu.
   if(!window.__TAURI__)window.addEventListener?.('blur',closeFallback);
+  // The chrome WebView normally renders only the tab/address bars, so its
+  // innerHeight can be 70px when the user right-clicks on a website. Wait for
+  // the native overlay operation and use its authoritative parent-window
+  // dimensions instead of clamping every context menu to the toolbar top.
+  async function popupViewport(){
+    if(!window.__TAURI__)return {width:innerWidth,height:innerHeight};
+    const result=await window.minternet?.command('chrome-overlay',true);
+    const width=Number(result?.viewport?.width);
+    const height=Number(result?.viewport?.height);
+    return {
+      width:Number.isFinite(width)&&width>0?width:innerWidth,
+      height:Number.isFinite(height)&&height>0?height:innerHeight
+    };
+  }
+  // Browser-style positioning: anchor to the right-click location, flip above
+  // or left when needed, and cap tall menus instead of pushing them to y=3.
+  function placePopup(host,point,viewport){
+    const margin=6;
+    const width=Math.max(20,Number(viewport?.width)||innerWidth);
+    const height=Math.max(20,Number(viewport?.height)||innerHeight);
+    const x=Number.isFinite(Number(point?.x))?Number(point.x):margin;
+    const y=Number.isFinite(Number(point?.y))?Number(point.y):margin;
+    const maxHeight=Math.max(22,Math.min(550,height-margin*2));
+    host.style.maxHeight=maxHeight+'px';
+    const list=host.querySelector?.(':scope > .system-popup-list');
+    if(list){
+      const other=Math.max(0,(host.scrollHeight||0)-(list.scrollHeight||0));
+      if((host.scrollHeight||0)>maxHeight){
+        host.classList.add('system-popup-scrollable');
+        list.style.maxHeight=Math.max(20,maxHeight-other)+'px';
+        list.style.overflowY='auto';
+      }
+    }
+    const rect=host.getBoundingClientRect();
+    const popupWidth=rect.width;
+    const popupHeight=Math.min(maxHeight,rect.height);
+    let left=x+3;
+    if(left+popupWidth>width-margin)left=x-popupWidth-3;
+    left=Math.max(margin,Math.min(left,width-popupWidth-margin));
+    let top=y+3;
+    if(top+popupHeight>height-margin)top=y-popupHeight-3;
+    top=Math.max(margin,Math.min(top,height-popupHeight-margin));
+    host.style.left=Math.round(left)+'px';
+    host.style.top=Math.round(top)+'px';
+    host.classList.toggle('flip-left',left+popupWidth*2>width-margin);
+  }
   function domMenu(items){
     const list=document.createElement('div');list.className='system-popup-list';
     for(const spec of items){
@@ -241,11 +291,13 @@
     return list;
   }
   async function popup(items,point,options={}){
-    const x=Math.max(0,Math.round(point.x||0)), y=Math.max(0,Math.round(point.y||0));
-    // Intentionally no native Menu.new/Popup path, even in smoke tests.
-    // DOM context menus remain visually consistent throughout Minternet.
+    // Intentionally no native Menu.new/Popup path. Keep our own styled menu.
     options={...options,custom:true};
-    closeFallback();
+    closeFallback(null,true);
+    const generation=++menuGeneration;
+    customOpen=true;
+    const viewport=await popupViewport();
+    if(generation!==menuGeneration)return false;
     const host=document.createElement('div');
     host.className='system-popup-root'+(options.custom?' minternet-context-menu':'')+(options.compactTab?' compact-tab-menu':'');
     if(options.custom){
@@ -268,8 +320,6 @@
         header.append(label,closeTab);
       }else header.textContent=options.heading||'MINTERNET';
       host.append(header);
-      customOpen=true;
-      if(window.__TAURI__)void window.minternet?.command('chrome-overlay',true);
     }
     if(options.quickActions){
       const toolbar=document.createElement('div');toolbar.className='tab-context-quick';
@@ -303,19 +353,20 @@
     }
     const contents=domMenu(items);host.append(contents);
     document.body.append(host);fallback=host;
-    const rect=host.getBoundingClientRect();
-    host.style.left=Math.max(2,Math.min(x,innerWidth-rect.width-3))+'px';
-    host.style.top=Math.max(3,Math.min(y,innerHeight-rect.height-4))+'px';
-    if(x+rect.width*2>innerWidth)host.classList.add('flip-left');
+    placePopup(host,point,viewport);
     document.addEventListener('pointerdown',outside,true);
     document.addEventListener('keydown',esc,true);
     return true;
   }
   // Minimal inline group inspector. All controls update the live group state.
-  function groupInspector(id,point){
+  async function groupInspector(id,point){
     const group=groups()?.get(id);
     if(!group)return;
-    closeFallback();
+    closeFallback(null,true);
+    const generation=++menuGeneration;
+    customOpen=true;
+    const viewport=await popupViewport();
+    if(generation!==menuGeneration)return;
     const host=document.createElement('div');
     host.className='system-popup-root minternet-context-menu group-inspector';
     host.setAttribute('role','dialog');
@@ -390,19 +441,19 @@
     });choices.append(custom);
     host.append(choices,huePanel);refreshSelected();
     document.body.append(host);fallback=host;
-    customOpen=true;
-    if(window.__TAURI__)void window.minternet?.command('chrome-overlay',true);
     function reposition(){
-      const rect=host.getBoundingClientRect();
-      host.style.left=Math.max(3,Math.min(point.x||0,innerWidth-rect.width-3))+'px';
-      host.style.top=Math.max(3,Math.min(point.y||0,innerHeight-rect.height-3))+'px';
+      placePopup(host,point,viewport);
     }
     reposition();
     document.addEventListener('pointerdown',outside,true);
     document.addEventListener('keydown',esc,true);
   }
-  function groupsOverview(point){
-    closeFallback();
+  async function groupsOverview(point){
+    closeFallback(null,true);
+    const generation=++menuGeneration;
+    customOpen=true;
+    const viewport=await popupViewport();
+    if(generation!==menuGeneration)return;
     const host=document.createElement('div');
     host.className='system-popup-root minternet-context-menu group-overview';
     const heading=document.createElement('div');heading.className='minternet-context-heading';
@@ -425,11 +476,8 @@
     create.textContent='＋  New Tab Group';
     create.addEventListener('click',()=>{closeFallback();groups()?.openEditor(null,true);});
     host.append(create);
-    document.body.append(host);fallback=host;customOpen=true;
-    if(window.__TAURI__)void window.minternet?.command('chrome-overlay',true);
-    const rect=host.getBoundingClientRect();
-    host.style.left=Math.max(3,Math.min(point.x||0,innerWidth-rect.width-3))+'px';
-    host.style.top=Math.max(3,Math.min(point.y||0,innerHeight-rect.height-3))+'px';
+    document.body.append(host);fallback=host;
+    placePopup(host,point,viewport);
     document.addEventListener('pointerdown',outside,true);
     document.addEventListener('keydown',esc,true);
   }
