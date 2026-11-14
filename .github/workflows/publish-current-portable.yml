@@ -67,8 +67,11 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.head_branch == 'main' &&
-       github.event.workflow_run.head_repository.full_name == github.repository)
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       (github.event.workflow_run.head_branch == 'main' ||
+        (github.event.workflow_run.name == 'Minternet Windows portable single EXE (under 50 MB)' &&
+         (github.event.workflow_run.event == 'push' ||
+          github.event.workflow_run.event == 'workflow_dispatch'))))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -111,7 +114,12 @@ jobs:
           SRC=$(jq -r '.head_repository.full_name' <<<"$DETAILS")
           SHA=$(jq -r '.head_sha' <<<"$DETAILS")
           test "$RESULT" = "success"
-          test "$BRANCH" = "main"
+          # Windows preview branches are allowed only after a trusted
+          # first-party push/dispatch has passed the complete build suite.
+          # Other platform archives continue to require main.
+          if [ "$NAME" != "Minternet Windows portable single EXE (under 50 MB)" ]; then
+            test "$BRANCH" = "main"
+          fi
           test "$SRC" = "$GITHUB_REPOSITORY"
           case "$NAME" in
             "Minternet Windows portable single EXE (under 50 MB)") PLATFORM=Windows ;;
