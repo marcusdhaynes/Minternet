@@ -28,6 +28,12 @@ test('opaque dark window and website backgrounds are established before first pa
   assert.match(native,/WebviewBuilder::new\("chrome",WebviewUrl::App\("index\.html"\.into\(\)\)\)[\s\S]{0,400}?\.background_color\(tauri::webview::Color\(0,0,0,0\)\)/);
   assert.match(css,/:root\s*\{[^}]*background:\s*#0a0f1b/s);
 });
+test('transparent auxiliary windows cannot show default white rectangles',()=>{
+  assert.match(native,/WebviewBuilder::new\(label,WebviewUrl::App\("split-badge\.html"\.into\(\)\)\)\s*\.background_color\(tauri::webview::Color\(0,0,0,0\)\)/);
+  assert.match(native,/WebviewWindowBuilder::new\([\s\S]{0,150}?media-player\.html[\s\S]{0,140}?\.background_color\(tauri::webview::Color\(0,0,0,0\)\)/);
+  assert.match(native,/\.no_redirection_bitmap\(true\)/,
+    'Windows transparent floating windows must suppress pre-WebView2 white frames');
+});
 test('flash prevention preserves regular tab changes and reflows',()=>{
   const switching=block('fn display_active(','fn is_real_page_url(');
   assert.match(switching,/state\.shown==targets/);
