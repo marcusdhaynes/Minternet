@@ -6375,6 +6375,7 @@ fn install_panic_diagnostics(app:&tauri::AppHandle){
     }));
 }
 fn main() {
+    if self_update::maybe_run_updater_smoke(){return;}
     // The staged, verified replacement EXE runs in helper mode and NEVER
     // creates an ordinary browser window or opens a website.
     if self_update::maybe_run_helper(){return;}
