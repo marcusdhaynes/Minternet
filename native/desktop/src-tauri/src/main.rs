@@ -6520,6 +6520,19 @@ fn main() {
                                 let _=view.eval(r#"setTimeout(() =>
                                     window.minternetToast?.('Previous session ended unexpectedly. All saved tabs were preserved. Select a tab to reopen it.'),400)"#);
                             }
+                            // Report an aborted update after the helper has
+                            // restored and reopened the original executable.
+                            let update_failure=std::env::temp_dir()
+                                .join("Minterest-update-error.txt");
+                            if let Ok(detail)=std::fs::read_to_string(&update_failure){
+                                let _=std::fs::remove_file(&update_failure);
+                                let display=detail.chars().take(240).collect::<String>();
+                                if let Ok(message)=serde_json::to_string(&display){
+                                    let _=view.eval(format!(
+                                        "setTimeout(()=>window.minternetToast?.({message}),600)"
+                                    ));
+                                }
+                            }
                             if stability_smoke {
                                 // Exercise the real trusted-chrome IPC, native
                                 // WebView2 creation, SPA URL capture and tab
