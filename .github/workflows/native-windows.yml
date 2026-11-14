@@ -10,6 +10,10 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
+# Prevent an older, slower Windows run from replacing a newer release.
+concurrency:
+  group: minternet-windows-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   portable:
     outputs:
