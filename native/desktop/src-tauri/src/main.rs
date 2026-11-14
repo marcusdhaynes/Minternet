@@ -1924,6 +1924,91 @@ fn restore_visible_surfaces(app:&tauri::AppHandle){
     }
 }
 
+// Reconcile the actual *child* WebView2 rectangles against the parent's
+// current physical client area. On startup Windows sometimes finalizes a
+// maximized/restored HWND after add_child and before the resize listener is
+// installed. The parent then fills the monitor while the site retains an
+// old smaller/off-center HWND, displaying a white rectangle with black bands.
+// A cached logical layout is not proof that the native child still matches.
+fn reconcile_visible_child_bounds(app:&tauri::AppHandle)->bool {
+    let Some(window)=app.get_window("main") else{return false};
+    let Ok((width,height))=dimensions(&window) else{return false};
+    let scale=window.scale_factor().unwrap_or(1.0).max(0.1);
+    let (bar_visible,overlay_open)={
+        let cache=app.state::<Mutex<LayoutCache>>();
+        let Ok(value)=cache.lock() else{return false};
+        (value.bookmark_bar_visible,value.overlay_open)
+    };
+    let top=CHROME+if bar_visible {BOOKMARK_BAR} else {0.0}
+        +if find_visible(app){FIND_BAR}else{0.0};
+    if height<top+2.0{return false;}
+    let (home,active)={
+        let state=app.state::<Mutex<Browser>>();
+        let Ok(b)=state.lock() else{return false};
+        (b.active().is_none_or(|t|t.url==HOME),
+         b.active().and_then(|t|t.view.clone()))
+    };
+    let split=visible_split(app);
+    let count=if split.len()>1 {split.len()} else {0};
+    let ids=if count>0 {
+        split.into_iter().map(|id|format!("tab-{id}")).collect::<Vec<_>>()
+    } else {active.into_iter().collect::<Vec<_>>()};
+    let ratios=app.state::<SplitRatios>().0.lock()
+        .map(|r|*r).unwrap_or((0.5,0.5));
+    let available=height-top;
+    let mut corrected=false;
+
+    let mut fix=|view:&tauri::Webview,x:f64,y:f64,w:f64,h:f64|{
+        let (Ok(pos),Ok(size))=(view.position(),view.size()) else{return};
+        let expected=[x*scale,y*scale,w*scale,h*scale];
+        let actual=[pos.x as f64,pos.y as f64,size.width as f64,size.height as f64];
+        if expected.iter().zip(actual.iter()).any(|(want,got)|(want-got).abs()>3.0){
+            let rectangle=tauri::Rect {
+                position:LogicalPosition::new(x,y).into(),
+                size:LogicalSize::new(w.max(1.0),h.max(1.0)).into()
+            };
+            if view.set_bounds(rectangle).is_ok(){
+                notify_native_compositor(view);
+                corrected=true;
+            }
+        }
+    };
+    if let Some(chrome)=app.get_webview("chrome"){
+        fix(&chrome,0.0,0.0,width,
+            if home||overlay_open {height}else{top.min(height)});
+    }
+    for (index,label) in ids.iter().enumerate(){
+        if let Some(view)=app.get_webview(label){
+            let (x,y,w,h)=if count>1{
+                split_rect(index,count,width,available,top,ratios.0,ratios.1)
+            }else{(0.0,top,width,available)};
+            fix(&view,x,y,w,h);
+        }
+    }
+    corrected
+}
+
+// Bounds validation is cheap and conditional: only a geometrically wrong
+// child is resized. A one-time startup pass also refreshes the layout cache
+// after Windows has finalized maximization. Never hide, recreate or reload
+// the page just to fix a child surface, preserving logins and unsaved work.
+fn schedule_startup_bounds_reconciliation(app:&tauri::AppHandle){
+    let original=app.clone();
+    std::thread::spawn(move||{
+        for (index,delay) in [200u64,550,1100].into_iter().enumerate(){
+            std::thread::sleep(Duration::from_millis(delay));
+            let handle=original.clone();
+            let _=original.run_on_main_thread(move||{
+                if index==0{
+                    invalidate_layout(&handle);
+                    refresh_layout(&handle);
+                }
+                reconcile_visible_child_bounds(&handle);
+            });
+        }
+    });
+}
+
 fn display_active(app: &tauri::AppHandle) {
     let mut targets=HashSet::new();
     {
@@ -6808,6 +6893,7 @@ fn main() {
                                 callback_pending.store(false,Ordering::Release);
                                 invalidate_layout(&callback_app);
                                 refresh_layout(&callback_app);
+                                reconcile_visible_child_bounds(&callback_app);
                                 schedule_surface_restore(&callback_app);
                             }).is_err() {
                                 pending.store(false,Ordering::Release);
@@ -6832,13 +6918,18 @@ fn main() {
                         }
                     },
                     tauri::WindowEvent::Focused(true) => {
-                        // Force a compositor refresh on restore/focus even when
-                        // the physical dimensions match the cached dimensions.
+                        // A stale parent cache may hide a misaligned child on
+                        // restore. Only resize it if its physical bounds drifted.
+                        reconcile_visible_child_bounds(&handle);
                         schedule_surface_restore(&handle);
                     },
                     _=>{}
                 }
             });
+            // A parent-window resize/maximize can complete after the first
+            // WebView2 add_child. Fix native child bounds once the startup
+            // window has settled; future passes are no-ops when already aligned.
+            schedule_startup_bounds_reconciliation(app.handle());
             // A verified replacement is healthy only after native windows,
             // restored tabs, and the browser's event handlers are initialized.
             portable_updater::confirm_startup();
