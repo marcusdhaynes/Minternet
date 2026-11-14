@@ -1851,6 +1851,11 @@ fn restore_visible_surfaces(app:&tauri::AppHandle){
     };
     for label in labels {
         if let Some(view)=app.get_webview(&label){
+            // A visible WebView2 child can retain a stale white surface after
+            // native minimize/resize even with a populated HTML document.
+            // Reattach the same live controller without navigating or
+            // discarding login cookies, page state, or scroll position.
+            let _=view.hide();
             let _=view.show();
             notify_native_compositor(&view);
         }
@@ -2404,27 +2409,27 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                             });
                         });
                     }
-                    // ChatGPT can occasionally finish a WebView2 navigation
-                    // while leaving an empty document surface. Retry the same
-                    // conversation URL exactly once if it remains textless and
-                    // noninteractive for twenty seconds. Do not reload a page
-                    // with any active input, media or visible application text.
-                    if event.url().host_str()==Some("chatgpt.com") {
+                    // A page can report navigation complete yet render an
+                    // entirely empty, noninteractive document. Retry at most
+                    // once per URL within this browser session, and never
+                    // touch pages containing inputs, media or meaningful DOM.
+                    if event.url().scheme()=="https" || event.url().scheme()=="http" {
                         let _=view.eval(r#"
                           (() => {
-                            const marker='minternet-blank-surface-retry-v1';
                             setTimeout(() => {
                               try {
-                                if(document.visibilityState!=='visible')return;
-                                if(document.readyState!=='complete')return;
-                                if(sessionStorage.getItem(marker)==='done')return;
+                                if(document.visibilityState!=='visible' ||
+                                   document.readyState!=='complete')return;
                                 const body=document.body;
-                                if(!body || (body.innerText||'').trim().length>=32)return;
-                                if(document.querySelector('textarea,input:not([type="hidden"]),[contenteditable="true"],video,canvas'))return;
-                                sessionStorage.setItem(marker,'done');
+                                if(!body||(body.innerText||'').trim().length>8)return;
+                                if(body.querySelector('input,textarea,select,button,a,iframe,canvas,video,audio,svg,img,[contenteditable="true"],[role="button"]'))return;
+                                const key='minternet-empty-document-once:'+
+                                  location.pathname+location.search;
+                                if(sessionStorage.getItem(key)==='1')return;
+                                sessionStorage.setItem(key,'1');
                                 location.reload();
-                              } catch {}
-                            },20000);
+                              }catch{}
+                            },18000);
                           })();
                         "#);
                     }
