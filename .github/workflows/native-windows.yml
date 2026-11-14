@@ -388,6 +388,59 @@ jobs:
             if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
             Remove-Item $pass,$fail -Force -ErrorAction SilentlyContinue
           }
+      - name: Test real in-place Windows EXE replacement and restart
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $root = Join-Path $env:RUNNER_TEMP "minternet-update-e2e"
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          $source = (Resolve-Path "src-tauri/target/release/minternet_native.exe").Path
+          $target = Join-Path $root "Minternet.exe"
+          $helper = Join-Path $root "verified-helper.exe"
+          Copy-Item -LiteralPath $source -Destination $target -Force
+          Copy-Item -LiteralPath $source -Destination $helper -Force
+          $expected = (Get-FileHash -LiteralPath $helper -Algorithm SHA256).Hash.ToLowerInvariant()
+          $original = Start-Process -FilePath $target -PassThru
+          $replacement = $null
+          try {
+            Start-Sleep -Seconds 3
+            $original.Refresh()
+            if ($original.HasExited) { throw "Original portable Minternet could not launch" }
+            # The helper must wait for this running EXE before replacing
+            # that very same path and automatically relaunching it.
+            $quotedTarget = '"' + $target + '"'
+            $replacement = Start-Process -FilePath $helper -ArgumentList @(
+              "--minternet-apply-update", $quotedTarget, "$($original.Id)", $expected
+            ) -PassThru
+            Start-Sleep -Seconds 2
+            $original.Refresh()
+            if (!$original.HasExited) {
+              $null = $original.CloseMainWindow()
+              if (!$original.WaitForExit(8000)) { Stop-Process -Id $original.Id -Force }
+            }
+            $replacement.WaitForExit(90000) | Out-Null
+            $replacement.Refresh()
+            if (!$replacement.HasExited) { throw "Update helper never exited" }
+            if ($replacement.ExitCode -ne 0) { throw "Update helper failed with code $($replacement.ExitCode)" }
+            if (!(Test-Path -LiteralPath $target)) { throw "Updated EXE was not restored to the original path" }
+            $actual = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $expected) { throw "Installed EXE checksum mismatch" }
+            if (@(Get-ChildItem -LiteralPath $root -Filter '*.backup-*').Count -gt 0) {
+              throw "Update backup was not cleaned up after confirmed startup"
+            }
+            "PASS: running Windows portable EXE replaced at same path, SHA-256 verified, relaunch acknowledged." >> $env:GITHUB_STEP_SUMMARY
+          } finally {
+            if ($replacement) {
+              $replacement.Refresh()
+              if (!$replacement.HasExited) { Stop-Process -Id $replacement.Id -Force -ErrorAction SilentlyContinue }
+            }
+            $original.Refresh()
+            if (!$original.HasExited) { Stop-Process -Id $original.Id -Force -ErrorAction SilentlyContinue }
+            # Stop the instance relaunched by the helper before cleanup.
+            Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+              Where-Object { $_.ExecutablePath -eq $target } |
+              ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+          }
       # Publish only after the full node, Rust and native Windows smoke suites.
       - name: Package verified and versioned portable EXE
         id: package
