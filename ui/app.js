@@ -24,7 +24,9 @@ function focusNewTabAddress(){
   const field=byId('address');
   const tryFocus=()=>{
     if(lease!==focusLease||focusCancelled||snapshot.activeId!==target)return;
-    if(document.activeElement===field)return;
+    // In a multi-WebView2 window, document.activeElement can still be the
+    // input while the OS keyboard focus is actually owned by a site child.
+    // Always reclaim the native chrome controller during the short lease.
     if(window.__TAURI__)void api.command('focus-address').catch(()=>{});
     field?.focus({preventScroll:true});
     if(!addressEditedSinceNew)field?.select();
@@ -376,8 +378,16 @@ function render(data) {
   const isBlank = !active || (active.url === 'about:blank'&&!active.secretTab);
   byId('homeScreen').hidden = !isBlank;
   byId('address').setAttribute('aria-label', active?.url?.startsWith('http://') ? 'Insecure HTTP address' : 'Search or enter address');
-  if (!addressFocused) byId('address').value = pendingNavigation?.text ||
-    (isBlank||active?.secretTab ? '' : active.url);
+  // Preserve a live draft through focus losses and old page-load notifications.
+  // A new active tab or a committed navigation ends that draft explicitly.
+  const addressField=byId('address');
+  if(render.lastAddressTab!==data.activeId){
+    render.lastAddressTab=data.activeId;
+    addressField.dataset.minternetTyped='false';
+  }
+  if (!addressFocused && addressField.dataset.minternetTyped!=='true')
+    addressField.value = pendingNavigation?.text ||
+      (isBlank||active?.secretTab ? '' : active.url);
   byId('address').placeholder=active?.secretTab?'Secret Tab · URL Concealed':'Search privately or enter a secure address';
   if (lastUrl !== active?.url) {
     lastUrl = active?.url;
@@ -403,6 +413,7 @@ byId('addressForm').addEventListener('submit', event => {
   // This is an optimistic address commit, not a website navigation. Native
   // decides the actual address. Never revert to the new tab's old homepage.
   field.value=typed;
+  field.dataset.minternetTyped='false';
   void command('navigate',typed);
   field.blur();
 });
@@ -438,6 +449,10 @@ byId('address').addEventListener('focus', event => {
 byId('homeSearch')?.addEventListener('focus', prepareBlankTab);
 byId('address').addEventListener('blur', () => {
   addressFocused = false;
+  // A WebView2 focus handoff is not a navigation. Never discard the
+  // unfinished address just because the page took keyboard focus.
+  // render() will restore a URL when the user changes tabs or navigates.
+  if (byId('address').dataset.minternetTyped === 'true') return;
   const active = snapshot.tabs.find(t => t.id === snapshot.activeId);
   byId('address').value = pendingNavigation?.text ||
     (active && active.url !== 'about:blank' ? active.url : '');
