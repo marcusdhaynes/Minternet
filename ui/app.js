@@ -439,14 +439,14 @@ function prepareBlankTab() {
 byId('address').addEventListener('input',event=>{
   addressEditedSinceNew=true;
   event.currentTarget.dataset.minternetTyped='true';
-  prepareBlankTab();
+  // Do not instantiate a background WebView2 controller while the user is
+  // typing: controller creation can transfer OS keyboard focus mid-keystroke.
 });
 byId('address').addEventListener('focus', event => {
   addressFocused = true;
-  event.target.select();
-  prepareBlankTab();
+  if(event.target.dataset.minternetTyped!=='true')event.target.select();
 });
-byId('homeSearch')?.addEventListener('focus', prepareBlankTab);
+// Dashboard search must not steal native focus by prewarming a site controller.
 byId('address').addEventListener('blur', () => {
   addressFocused = false;
   // A WebView2 focus handoff is not a navigation. Never discard the
