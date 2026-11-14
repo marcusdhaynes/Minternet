@@ -2063,6 +2063,96 @@ fn refresh_browser_favicon(app:&tauri::AppHandle,id:u32,label:&str){
     });
 }
 
+#[cfg(windows)]
+fn attach_webview_process_recovery(app:&tauri::AppHandle,id:u32,view:&tauri::Webview){
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        COREWEBVIEW2_PROCESS_FAILED_KIND,COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED,
+        COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED,
+        COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE
+    };
+    let handle=app.clone();
+    let _=view.with_webview(move |native|{
+        let Ok(web)=(unsafe{native.controller().CoreWebView2()}) else{return};
+        let listener=webview2_com::ProcessFailedEventHandler::create(
+            Box::new(move |_,args|{
+                let Some(args)=args else{return Ok(())};
+                let mut kind=COREWEBVIEW2_PROCESS_FAILED_KIND(0);
+                if (unsafe{args.ProcessFailedKind(&mut kind)}).is_err(){return Ok(());}
+                if kind==COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE {
+                    let _=handle.emit_to("chrome","minternet:surface-warning",
+                        json!({"tabId":id,"message":"This page has stopped responding. Use Refresh to recover."}));
+                    return Ok(());
+                }
+                if kind!=COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED &&
+                   kind!=COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED {
+                    // A GPU process can restart automatically; no page reload
+                    // is necessary and doing so could discard unsaved input.
+                    return Ok(());
+                }
+                // Avoid triggering repeated recovery for the same process
+                // crash; all WebView2 callbacks must complete before rebuild.
+                static RECENT:std::sync::OnceLock<Mutex<HashMap<u32,Instant>>>=
+                    std::sync::OnceLock::new();
+                let should_recover={
+                    let recent=RECENT.get_or_init(||Mutex::new(HashMap::new()));
+                    if let Ok(mut history)=recent.lock(){
+                        if history.get(&id).is_some_and(|time|
+                            time.elapsed()<Duration::from_secs(10)){false}
+                        else{history.insert(id,Instant::now());true}
+                    }else{false}
+                };
+                if should_recover{
+                    let worker=handle.clone();
+                    std::thread::spawn(move||{
+                        std::thread::sleep(Duration::from_millis(160));
+                        let main=worker.clone();
+                        let _=worker.run_on_main_thread(move||{
+                            let details={
+                                let state=main.state::<Mutex<Browser>>();
+                                state.lock().ok().and_then(|b|b.tabs.iter().find(|t|t.id==id)
+                                    .map(|t|(t.url.clone(),t.view.clone())))
+                            };
+                            let Some((url,label))=details else{return};
+                            if !is_real_page_url(&url){return;}
+                            // A terminated browser process requires a fresh
+                            // controller; a terminated renderer can reload.
+                            let mut restored=false;
+                            if kind==COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED{
+                                if let Some(label)=label.as_ref(){
+                                    if let Some(view)=main.get_webview(label){
+                                        restored=view.reload().is_ok();
+                                    }
+                                }
+                            }
+                            if !restored{
+                                if let Some(label)=label{
+                                    if let Some(view)=main.get_webview(&label){
+                                        let _=view.close();
+                                    }
+                                }
+                                if let Ok(mut b)=main.state::<Mutex<Browser>>().lock(){
+                                    if let Some(tab)=b.tabs.iter_mut().find(|t|t.id==id){
+                                        tab.view=None;
+                                    }
+                                }
+                                if let Ok(parsed)=tauri::Url::parse(&url){
+                                    let _=navigate_tab(&main,id,Some(parsed),false);
+                                }
+                            }
+                            schedule_surface_restore(&main);
+                            let _=main.emit_to("chrome","minternet:surface-warning",
+                                json!({"tabId":id,"message":"The webpage renderer restarted after an unexpected failure."}));
+                        });
+                    });
+                }
+                Ok(())
+            })
+        );
+        let mut token=0i64;
+        let _=unsafe{web.add_ProcessFailed(&listener,&mut token)};
+    });
+}
+
 fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: bool) -> Result<(), String> {
     let Some(window) = app.get_window("main") else { return Err("Missing window".into()) };
     let label = format!("tab-{id}");
@@ -2418,6 +2508,8 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     // instead of guessing /favicon.ico like the old toolbar did.
     #[cfg(windows)]
     attach_browser_favicon(app,id,&created);
+    #[cfg(windows)]
+    attach_webview_process_recovery(app,id,&created);
     media_devices::attach(app,id,&created,private);
     site_context_menu::attach(app,id,&created);
     #[cfg(windows)]
