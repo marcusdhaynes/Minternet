@@ -14,7 +14,7 @@ fn trusted_identity_host(host: &str) -> bool {
     // Exact host or specific, well-defined subdomains; never suffix substrings.
     matches!(host,
         "accounts.google.com"|"login.microsoftonline.com"|"login.live.com"|
-        "appleid.apple.com"|"github.com"|"id.kraken.com"|
+        "appleid.apple.com"|"id.kraken.com"|
         "accounts.youtube.com"|"login.yahoo.com"|"auth0.com") ||
         host.ends_with(".auth0.com") || host.ends_with(".okta.com") ||
         host.ends_with(".onelogin.com")
