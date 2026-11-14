@@ -239,12 +239,15 @@
     const maxHeight=Math.max(22,Math.min(550,height-margin*2));
     host.style.maxHeight=maxHeight+'px';
     const list=host.querySelector?.(':scope > .system-popup-list');
-    if(list){
-      const other=Math.max(0,(host.scrollHeight||0)-(list.scrollHeight||0));
-      if((host.scrollHeight||0)>maxHeight){
-        host.classList.add('system-popup-scrollable');
+    if((host.scrollHeight||0)>maxHeight){
+      host.classList.add('system-popup-scrollable');
+      if(list){
+        const other=Math.max(0,(host.scrollHeight||0)-(list.scrollHeight||0));
         list.style.maxHeight=Math.max(20,maxHeight-other)+'px';
         list.style.overflowY='auto';
+      }else{
+        // Group inspector and overview panels have no single menu list.
+        host.style.overflowY='auto';
       }
     }
     const rect=host.getBoundingClientRect();
