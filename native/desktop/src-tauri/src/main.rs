@@ -1818,7 +1818,10 @@ fn notify_native_compositor(view:&tauri::Webview){
 #[cfg(not(windows))]
 fn notify_native_compositor(_view:&tauri::Webview){}
 fn restore_visible_surfaces(app:&tauri::AppHandle){
-    invalidate_layout(app);
+    // Do not invalidate and rewrite every surface's bounds for a focus/move
+    // notification. Repeated Show() and SetBounds() on live WebView2 controllers
+    // can discard their current DirectComposition frame (black/white flashes).
+    // A real window resize already invalidates layout through its own handler.
     refresh_layout(app);
     let labels={
         let split=visible_split(app);
@@ -1833,7 +1836,7 @@ fn restore_visible_surfaces(app:&tauri::AppHandle){
     };
     for label in labels {
         if let Some(view)=app.get_webview(&label){
-            let _=view.show();
+            // Preserve visibility, DOM, scroll position, and GPU frame.
             notify_native_compositor(&view);
         }
     }
@@ -1875,15 +1878,18 @@ fn display_active(app: &tauri::AppHandle) {
         state.shown=targets.clone();
         (hidden,shown)
     };
-    for label in to_hide{
-        if let Some(view)=app.get_webview(&label){let _=view.hide();}
-    }
-    for label in to_show{
-        if let Some(view)=app.get_webview(&label){
-            let zoom=app.state::<ZoomState>().0.lock().map(|n|*n).unwrap_or(1.0);
-            let _=view.set_zoom(zoom);
+    // Show the incoming surface before retiring the previous one. This
+    // prevents the host background from appearing between two site frames.
+    // Zoom is initialized when the controller is created; do not reapply it
+    // on every switch, which forces an unnecessary WebView2 repaint.
+    for label in &to_show{
+        if let Some(view)=app.get_webview(label){
             let _=view.show();
+            notify_native_compositor(&view);
         }
+    }
+    for label in &to_hide{
+        if let Some(view)=app.get_webview(label){let _=view.hide();}
     }
     notify(app);
 }
@@ -6527,6 +6533,7 @@ fn main() {
                             let callback_pending=pending.clone();
                             if app.run_on_main_thread(move || {
                                 callback_pending.store(false,Ordering::Release);
+                                invalidate_layout(&callback_app);
                                 refresh_layout(&callback_app);
                                 schedule_surface_restore(&callback_app);
                             }).is_err() {
