@@ -24,7 +24,8 @@ test('03 check child width, height, horizontal and vertical offsets',()=>{
 });
 test('04 startup verifies sizes after Windows finalizes maximize or restore',()=>{
  const s=section('fn schedule_startup_bounds_reconciliation(', 'fn start_geometry_smoke(');
- assert.match(s,/200u64,550,1100/);
+ assert.match(s,/150u64,250,400,600,1000,1500,2000/);
+ assert.match(s,/window\.is_minimized\(\)/);
  assert.match(s,/invalidate_layout\(&handle\)/);
  assert.match(s,/refresh_layout\(&handle\)/);
  assert.match(s,/reconcile_visible_child_bounds\(&handle\)/);
