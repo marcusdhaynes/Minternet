@@ -482,6 +482,16 @@
     <div class="vault-backdrop" id="vaultBackdrop"></div>
     <aside class="vault-panel">
       <div class="vault-head"><strong>Logins</strong><button type="button" id="vaultLock" title="Lock vault">Lock</button><button type="button" id="vaultClose" aria-label="Close logins manager">×</button></div>
+      <section id="vaultPasskeys" class="vault-passkeys" aria-label="Passkey Settings">
+        <div class="vault-list-head">⚿ Passkeys</div>
+        <p>Passkeys are created by websites and stored in Windows Hello or your selected passkey provider, never in Minternet's password vault. Use the site's own account settings to register a new passkey.</p>
+        <div class="vault-passkey-actions">
+          <button type="button" id="passkeyCheck">Check Compatibility</button>
+          <button type="button" id="passkeyManage">Manage In Windows</button>
+          <button type="button" id="passkeyTest">Test WebAuthn</button>
+        </div>
+        <p id="passkeyStatus" role="status" aria-live="polite">Compatibility has not been checked on this device.</p>
+      </section>
       <p class="vault-info">Encrypted on this device. Your master password is required after restarting Minternet. Never enter it on a website.</p>
       <form id="vaultAuthForm" class="vault-auth" autocomplete="off">
         <label>Master Password<input id="vaultMaster" type="password" autocomplete="off" minlength="12" required></label>
