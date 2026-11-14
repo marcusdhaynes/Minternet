@@ -453,4 +453,28 @@ jobs:
           if (!($published -contains $env:RELEASE_EXE)) {
             throw 'Update release is missing its portable Windows EXE.'
           }
-          "PASS: published GitHub Release $tag with verified Windows executable." >> $env:GITHUB_STEP_SUMMARY
+          # The public endpoint consumed by Minternet must see this exact
+          # version and both required assets before CI reports success.
+          $verified = $false
+          for ($attempt=0; $attempt -lt 8; $attempt++) {
+            try {
+              $latest = Invoke-RestMethod -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/latest" -Headers @{
+                'User-Agent'='Minternet-Release-Verification'
+                'Accept'='application/vnd.github+json'
+              } -TimeoutSec 15
+              $assetNames = @($latest.assets | ForEach-Object { $_.name })
+              if ($latest.tag_name -eq $tag -and
+                  ($assetNames -contains $env:RELEASE_EXE) -and
+                  ($assetNames -contains 'SHA256SUMS.txt')) {
+                $verified = $true
+                break
+              }
+            } catch {
+              Write-Host "GitHub release metadata not yet visible: $_"
+            }
+            Start-Sleep -Seconds 3
+          }
+          if (!$verified) {
+            throw "Published EXE is not discoverable through the public GitHub Releases latest API."
+          }
+          "PASS: public GitHub API lists verified release $tag, portable EXE, and SHA-256 sums." >> $env:GITHUB_STEP_SUMMARY
