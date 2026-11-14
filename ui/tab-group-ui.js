@@ -14,6 +14,14 @@
   const reusedChips=new Map(),reusedEndCaps=new Map();
   let draggingTabId=null;
   let gesture=null, ghost=null, splitPreview=null, dragOverlay=false, suppressedClick=null;
+  // The chrome WebView is only toolbar-height until a native tab drag expands
+  // its overlay. During that async transition innerHeight is not the parent
+  // browser height; use the logical client bounds returned by native code.
+  let dragViewport=null;
+  function dropViewport(){
+    return {width:Math.max(innerWidth,dragViewport?.width||0),
+      height:Math.max(innerHeight,dragViewport?.height||0)};
+  }
   let splitPaneIds=[];
   const ungroupTarget=$('tabUngroupDrop');
   const tabStrip=$('tabs');
@@ -161,6 +169,7 @@
     ghost=null;
     splitPreview?.remove();
     splitPreview=null;
+    dragViewport=null;
     if(dragOverlay){
       dragOverlay=false;
       if(window.__TAURI__)void api.command('chrome-overlay',false);
@@ -466,8 +475,9 @@
     return Math.max(2,Math.min(4,splitPaneIds.length+(splitPaneIds.includes(id)?0:1)));
   }
   function draggedQuadrant(x,y,top){
-    const col=x<innerWidth/2?0:1;
-    const row=y<top+(innerHeight-top)/2?0:2;
+    const viewport=dropViewport();
+    const col=x<viewport.width/2?0:1;
+    const row=y<top+(viewport.height-top)/2?0:2;
     return col+row;
   }
   function visibleSplitSlot(count,quadrant){
@@ -496,7 +506,10 @@
         splitPreview.append(zone);
       }
     }
+    const viewport=dropViewport();
     splitPreview.style.top=Math.round(top)+'px';
+    splitPreview.style.width=Math.round(viewport.width)+'px';
+    splitPreview.style.height=Math.round(Math.max(0,viewport.height-top))+'px';
     const slot=visibleSplitSlot(count,draggedQuadrant(x,y,top));
     [...splitPreview.children].forEach((zone,i)=>zone.classList.toggle('active',i===slot));
     ghost.textContent='◫  Drop in '+splitPreview.children[slot]?.textContent;
@@ -513,7 +526,13 @@
       createGhost(gesture.id);
       if(window.__TAURI__){
         dragOverlay=true;
-        void api.command('chrome-overlay',true);
+        void api.command('chrome-overlay',true).then(result=>{
+          if(!gesture?.active)return;
+          const width=Number(result?.viewport?.width),height=Number(result?.viewport?.height);
+          if(width>0&&height>0&&Number.isFinite(width)&&Number.isFinite(height)){
+            dragViewport={width,height};
+          }
+        });
       }
       // Read existing panes once per gesture. A regular tab drag must not
       // affect site-level HTML5 file drops or introduce a native drop handler.
@@ -533,8 +552,9 @@
     if(ghost){
       ghost.style.left=Math.round(event.clientX+11)+'px';ghost.style.top=Math.round(event.clientY+9)+'px';
       const top=document.querySelector('.chrome').getBoundingClientRect().bottom;
-      const overPage=event.clientY>top+6&&event.clientY<=innerHeight &&
-        event.clientX>=0&&event.clientX<=innerWidth;
+      const viewport=dropViewport();
+      const overPage=event.clientY>top+6&&event.clientY<=viewport.height &&
+        event.clientX>=0&&event.clientX<=viewport.width;
       ghost.classList.toggle('split-drag-preview',overPage);
       if(overPage)updateSplitPreview(event.clientX,event.clientY,top);
       else{splitPreview?.remove();splitPreview=null;}
@@ -553,10 +573,11 @@
     const tab=hit?.closest('.tab[data-tab-id]');
     const groupId=chip?.dataset.groupId;
     const top=document.querySelector('.chrome').getBoundingClientRect().bottom;
-    if(event.clientY>top+6&&event.clientY<=innerHeight &&
-       event.clientX>=0&&event.clientX<=innerWidth){
-      const x=Math.max(0,Math.min(1,event.clientX/Math.max(innerWidth,1)));
-      const y=Math.max(0,Math.min(1,(event.clientY-top)/Math.max(innerHeight-top,1)));
+    const viewport=dropViewport();
+    if(event.clientY>top+6&&event.clientY<=viewport.height &&
+       event.clientX>=0&&event.clientX<=viewport.width){
+      const x=Math.max(0,Math.min(1,event.clientX/Math.max(viewport.width,1)));
+      const y=Math.max(0,Math.min(1,(event.clientY-top)/Math.max(viewport.height-top,1)));
       // Pass the literal quadrant that was highlighted at drop, so the
       // native allocator never guesses or shifts unrelated split panes.
       const quadrant=draggedQuadrant(event.clientX,event.clientY,top);
