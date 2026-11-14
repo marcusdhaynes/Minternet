@@ -41,5 +41,5 @@ test('white page, focus and draft-preservation fixes survive',()=>{
 test('recent download and navigation enhancements survive',()=>{
  assert.match(native,/download_mode:String/);
  assert.match(html,/src="\.\/navigation-history-ui\.js"/);
- assert.match(html,/src="\.\/site-download-links\.js"/);
+ assert.match(native,/initialization_script\(include_str!\("\.\.\/\.\.\/\.\.\/\.\.\/ui\/site-download-links\.js"\)\)/);
 });
