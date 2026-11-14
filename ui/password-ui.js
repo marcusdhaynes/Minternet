@@ -100,6 +100,39 @@
     report('');
     if(window.__TAURI__)void invoke('chrome-overlay',false);
   }
+  // Passkeys are intentionally separate from the encrypted password vault.
+  // The website's WebAuthn API must remain browser/OS-owned; Minternet never
+  // asks the website to export secrets or implements fake credential objects.
+  const passkeyStatus=$('passkeyStatus');
+  function passkeyReport(message){if(passkeyStatus)passkeyStatus.textContent=String(message);}
+  async function checkPasskeys(){
+    passkeyReport('Checking Windows Hello and native WebAuthn…');
+    try{
+      const result=await call('passkey-status');
+      if(!result||result.message)throw Error(result?.message||'Native capability check failed');
+      const native=result.nativeProbeSucceeded
+        ? (result.windowsHelloAvailable?'Windows Hello authenticator available':'No Windows Hello platform authenticator detected')
+        : (result.platform==='windows'?'Windows WebAuthn capability check failed':'Windows Hello is not available on this platform');
+      const api=result.nativeWebAuthnApiVersion==null?'':(' (Windows WebAuthn API v'+result.nativeWebAuthnApiVersion+')');
+      passkeyReport(native+api+'. Website registration/sign-in is NOT verified; use Test WebAuthn for an end-to-end check.');
+    }catch(e){passkeyReport('Unable to check passkeys: '+String(e?.message||e));}
+  }
+  $('passkeyCheck')?.addEventListener('click',checkPasskeys);
+  $('passkeyManage')?.addEventListener('click',async()=>{
+    try{
+      const result=await call('passkey-open-settings');
+      if(result?.message)throw Error(result.message);
+      if(!result?.ok)throw Error('Windows Passkeys settings did not open');
+      passkeyReport('Opened Windows Settings → Accounts → Passkeys. Windows manages credential details and deletion.');
+    }catch(e){passkeyReport(String(e?.message||e));}
+  });
+  $('passkeyTest')?.addEventListener('click',async()=>{
+    // A genuine registration/sign-in ceremony needs a relying-party server.
+    // The user controls consent, and WebAuthn private keys never enter chrome.
+    close();
+    const result=await call('new-url','https://webauthn.io/');
+    if(result?.message)window.minternetToast?.(result.message);
+  });
   $('passwordManagerOpen').addEventListener('click',open);
   $('vaultBackdrop').addEventListener('click',close);
   document.addEventListener('pointerdown',event=>{
