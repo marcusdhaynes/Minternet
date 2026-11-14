@@ -60,7 +60,7 @@ test('09 runtime geometry smoke emits a clear failure instead of silent success'
  assert.match(s,/expected=\{expected:\?\}, actual=\{actual:\?\}/);
 });
 test('10 regular users never receive the test-only forced geometry disturbance',()=>{
- const s=section('schedule_startup_bounds_reconciliation\(app.handle\(\)\);', 'portable_updater::confirm_startup\(\)');
+ const s=section('schedule_startup_bounds_reconciliation(app.handle());', 'portable_updater::confirm_startup()');
  assert.match(s,/if geometry_smoke/);
  assert.match(s,/start_geometry_smoke\(app\.handle\(\),id\)/);
 });
