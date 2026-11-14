@@ -118,12 +118,25 @@
     })().finally(()=>{checking=null;});
     return checking;
   }
-  function applyUpdate(info){
-    // A download is NOT an installed update. Never reload, exit, or claim
-    // success before a verified native replacement/relaunch exists.
-    if(!info?.downloadUrl){window.open(info?.url||RELEASES,'_blank','noopener');return;}
-    window.open(info.downloadUrl,'_blank','noopener');
-    window.minternetToast?.('Download started. The installed version has not changed yet.');
+  async function applyUpdate(info){
+    if(window.__TAURI__){
+      if(!window.minternet?.command){
+        window.minternetToast?.('Native update service is unavailable.');
+        return;
+      }
+      const section=$('updatesSection');
+      if(section)renderSection(section,info,'Preparing verified update…');
+      const result=await window.minternet.command('update-install');
+      if(result?.message){
+        if(section)renderSection(section,info,result.message);
+        window.minternetToast?.(result.message);
+      }
+      // A separate native helper performs replacement/relaunch. Do not
+      // navigate away, fake installation, or open GitHub in another browser.
+      return;
+    }
+    // The web companion is deployed through GitHub Pages.
+    window.location.reload();
   }
   function renderSection(el,info,status){
     el.replaceChildren();
@@ -175,6 +188,19 @@
     close.addEventListener('click',event=>{event.stopPropagation();dismissVersion(info.version);ribbon.remove();});
     ribbon.append(label,close);ribbon.addEventListener('click',()=>applyUpdate(info));
     document.body.append(ribbon);
+  }
+  // Download progress and errors originate in the trusted native updater.
+  // An installed browser remains open if verification or helper startup fails.
+  if(window.__TAURI__?.event?.listen){
+    void window.__TAURI__.event.listen('minternet:update',event=>{
+      const payload=event.payload||{};
+      const section=$('updatesSection');
+      if(section){
+        const status=section.querySelector('[role="status"]');
+        if(status)status.textContent=String(payload.message||'');
+      }
+      if(payload.kind==='error')window.minternetToast?.(String(payload.message||'Update failed'));
+    }).catch(()=>{});
   }
   window.MuseUpdates={
     get CURRENT_VERSION(){return installed;},isNewer,checkForUpdate,applyUpdate,mountSection,mountRibbon,
