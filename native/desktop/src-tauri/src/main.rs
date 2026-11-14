@@ -6038,6 +6038,7 @@ fn install_panic_diagnostics(app:&tauri::AppHandle){
     }));
 }
 fn main() {
+    if portable_updater::maybe_version_smoke(){return;}
     if portable_updater::maybe_run_helper(){return;}
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
