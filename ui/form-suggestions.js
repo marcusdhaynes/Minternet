@@ -80,13 +80,19 @@
     // Do not open a toolbar-obscuring dialog merely because a site has a
     // login or email field. Show it only when there is something useful.
     const status=await cmd('vault-status');
-    if(!status?.unlocked)return;
+    const locked=!status?.unlocked;
+    // The master key is intentionally not persisted between browser runs.
+    // A locked vault previously suppressed all suggestions silently. Offer
+    // an explicit unlock action, never a hidden password or auto-unlock.
+    if(locked && (ctx.kind!=='login'||(!status?.exists&&!ctx.saveReady)))return;
     let logins=[],cards=[],identities=[];
     if(ctx.kind==='login'){
-      const all=await cmd('vault-list');
-      logins=(Array.isArray(all)?all:[]).filter(item=>
-        item.origin===ctx.origin&&item.autofill!==false);
-      if(!logins.length&&!ctx.saveReady)return;
+      if(!locked){
+        const all=await cmd('vault-list');
+        logins=(Array.isArray(all)?all:[]).filter(item=>
+          item.origin===ctx.origin&&item.autofill!==false);
+        if(!logins.length&&!ctx.saveReady)return;
+      }
     }else if(ctx.kind==='payment'){
       const all=await cmd('vault-card-list');
       cards=Array.isArray(all)?all:[];
@@ -106,6 +112,14 @@
     head.append(action('×',()=>hide(true),'form-suggestion-x'));
     panel.append(head);
     if(ctx.kind==='login'){
+      if(locked){
+        panel.append(create('p','form-suggestion-help',
+          status?.exists
+            ? 'Saved logins are locked. Unlock your encrypted vault to fill them.'
+            : 'Set up Passwords to securely save this login.'));
+        panel.append(action(status?.exists?'Unlock Saved Logins':'Set Up Passwords',
+          ()=>openManager('login'),'form-suggestion-option'));
+      }else{
       for(const item of logins.slice(0,7)){
         panel.append(action('Fill · '+item.username,async()=>{
           const answer=await cmd('vault-fill',item.username);
@@ -117,6 +131,7 @@
         await approved('vault-capture-login',null,'Login encrypted and saved.');
       },'form-suggestion-option'));
       panel.append(action('✎ Edit Logins',()=>openManager('login'),'form-suggestion-option'));
+      }
     }else if(ctx.kind==='payment'){
       for(const card of cards.slice(0,7)){
         panel.append(action('Fill · '+(card.label||card.name)+' ••••'+card.last4,async()=>{
