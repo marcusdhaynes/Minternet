@@ -25,8 +25,12 @@ test('WebView2 suppresses its default context menu and supplies trusted selected
   assert.match(native,/add_ContextMenuRequested/);
   assert.match(native,/args\.SetHandled\(true\)/);
   assert.match(native,/args\.ContextMenuTarget\(\)/);
-  assert.match(native,/target\.LinkUri\(&mut value\)/);
-  assert.match(native,/target\.SelectionText\(&mut value\)/);
+  assert.match(native,/target\.HasLinkUri\(&mut flag\)/);
+  assert.match(native,/target\.LinkUri\(p\)/);
+  assert.match(native,/args\.SetSelectedCommandId\(id\)/);
+  assert.match(native,/target\.SelectionText\(p\)/);
+  assert.match(native,/args\.MenuItems\(\)/);
+  assert.match(native,/item\.CommandId\(&mut command_id\)/);
   assert.match(native,/minternet:site-context/);
   assert.match(main,/site_context_menu::attach\(app,id,&created\)/);
 });

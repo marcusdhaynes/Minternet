@@ -56,7 +56,8 @@ test('New Tab address survives stale homepage WebView2 notifications',()=>{
   assert.match(native,/pending_previous_url:Option<String>/);
   assert.match(native,/if stale\{return;\}/);
   assert.match(native,/tab\.pending_previous_url\.as_deref\(\)==Some\(url\)/);
-  assert.match(chrome,/if\s*\(!addressFocused\) byId\('address'\)\.value/);
+  assert.match(chrome,/!addressFocused && addressField\.dataset\.minternetTyped!=='true'/);
+  assert.match(chrome,/if \(byId\('address'\)\.dataset\.minternetTyped === 'true'\) return/);
 });
 
 test('Find bar is below Bookmarks without occupying full-page overlay',()=>{
@@ -153,7 +154,7 @@ test('official extension catalogs are browsable without misleading install claim
   assert.match(html,/id="firefoxExtensionStore"/);
   assert.match(manager,/https:\/\/chromewebstore\.google\.com\//);
   assert.match(manager,/https:\/\/addons\.mozilla\.org\/en-US\/firefox\//);
-  assert.match(html,/installing from the store's own button is not currently supported/);
+  assert.match(html,/one-click installation from store pages is not currently supported/);
 });
 
 test('No fake-OAuth popup exceptions or cross-site popup blocking remain',()=>{
