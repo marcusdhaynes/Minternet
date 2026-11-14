@@ -187,12 +187,20 @@ pub fn maybe_run_helper()->bool{
         let parent=args.next().and_then(|n|n.to_string_lossy().parse::<u32>().ok());
         let expected=args.next().map(|s|s.to_string_lossy().into_owned());
         let fallback=target.clone();
+        let old_pid=parent;
         let status=match (target,parent,expected){
             (Some(target),Some(parent),Some(expected)) =>
                 run_helper(&target,parent,&expected),
             _=>Err("Malformed update helper arguments".into())
         };
         if let Err(ref error)=status{
+            // A Windows-subsystem application has no visible stderr. Preserve
+            // the actual failing OS operation for diagnostics and CI.
+            if let Some(pid)=old_pid {
+                let marker=std::env::temp_dir()
+                    .join(format!("minternet-update-helper-{pid}.failed"));
+                let _=fs::write(marker,error.as_bytes());
+            }
             eprintln!("Minternet update failed: {error}");
             // Never leave a previously usable EXE closed when a write-lock,
             // antivirus, permission, or startup failure aborts installation.
@@ -227,13 +235,18 @@ fn run_helper(target:&Path,old_pid:u32,expected:&str)->Result<(),String>{
     // Never overwrite a pre-existing backup or silently discard user files.
     if backup.exists(){return Err("A previous update backup exists; refusing unsafe overwrite".into());}
     let mut moved=false;
+    let mut last_error=String::new();
     for _ in 0..240{
         match fs::rename(target,&backup){
             Ok(())=>{moved=true;break;},
-            Err(_)=>std::thread::sleep(Duration::from_millis(250))
+            Err(error)=>{
+                last_error=error.to_string();
+                std::thread::sleep(Duration::from_millis(250));
+            }
         }
     }
-    if !moved{return Err("Original EXE remained locked or its directory is not writable".into());}
+    if !moved{return Err(format!(
+        "Original EXE could not be renamed at {}: {last_error}",target.display()));}
     if let Err(error)=fs::copy(&self_exe,target){
         // A failed copy may leave a partially written EXE at the original
         // name. Remove it BEFORE restoring the backup (Windows rename will
