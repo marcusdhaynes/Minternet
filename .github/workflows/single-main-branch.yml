@@ -1,0 +1,65 @@
+name: Keep only the main branch
+on:
+  create:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+  schedule:
+    - cron: '17 * * * *'
+permissions:
+  contents: write
+concurrency:
+  group: minternet-main-only-branches
+  cancel-in-progress: false
+jobs:
+  enforce:
+    if: github.event_name != 'create' || github.event.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Archive unfamiliar commits before deleting extra branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          main_sha=$(gh api "repos/$repo/branches/main" --jq '.commit.sha')
+          deleted=0
+          failures=0
+          while IFS= read -r branch; do
+            test "$branch" = main && continue
+            encoded=$(jq -nr --arg name "$branch" '$name|@uri')
+            info=$(gh api "repos/$repo/branches/$encoded" 2>/dev/null) || continue
+            sha=$(jq -r '.commit.sha' <<<"$info")
+            behind=$(gh api "repos/$repo/compare/$sha...$main_sha" --jq '.behind_by' 2>/dev/null) || behind=unknown
+            if test "$behind" != 0; then
+              safe=$(printf '%s' "$branch" | tr '/' '-' | tr -cd '[:alnum:]_.-')
+              short=$(printf '%s' "$sha" | cut -c1-12)
+              tag="retired-branch/$safe-$short"
+              if ! gh api "repos/$repo/git/ref/tags/$tag" >/dev/null 2>&1; then
+                if ! gh api -X POST "repos/$repo/git/refs" -f ref="refs/tags/$tag" -f sha="$sha" >/dev/null; then
+                  echo "::error::Failed to preserve $branch; refusing to delete"
+                  failures=$((failures+1))
+                  continue
+                fi
+              fi
+              echo "Safeguarded $branch as historical tag $tag"
+            fi
+            current=$(gh api "repos/$repo/branches/$encoded" --jq '.commit.sha' 2>/dev/null) || continue
+            if test "$current" != "$sha"; then
+              failures=$((failures+1))
+              continue
+            fi
+            if gh api -X DELETE "repos/$repo/git/refs/heads/$encoded" >/dev/null; then
+              deleted=$((deleted+1))
+              echo "Removed $branch"
+            else
+              failures=$((failures+1))
+              echo "::error::Cannot remove $branch"
+            fi
+          done < <(gh api --paginate "repos/$repo/branches?per_page=100" --jq '.[].name')
+          remaining=$(gh api --paginate "repos/$repo/branches?per_page=100" --jq '.[].name' | grep -vc '^main$' || true)
+          echo "Branches removed: $deleted" >> "$GITHUB_STEP_SUMMARY"
+          echo "Non-main branches remaining: $remaining" >> "$GITHUB_STEP_SUMMARY"
+          test "$failures" -eq 0 && test "$remaining" -eq 0

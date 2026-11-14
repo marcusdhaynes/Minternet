@@ -1,0 +1,92 @@
+{
+  "date": "2026-11-14",
+  "canonical_branch": "main",
+  "prior_main": "14a1fbe5a9ed12da1e9794c1eefbabfc9c6cea7a",
+  "preserved_in_merge": "19295a369216ee2b9503ce075537df2796dd01f2",
+  "retired_branches": [
+    {
+      "branch": "build/nov13-settings-extensions-final",
+      "sha": "95abebfb9485e19f0c3dd59d41a4afa57965a874"
+    },
+    {
+      "branch": "dependabot/github_actions/actions/checkout-7",
+      "sha": "279929730fe0cb55ea928512838a0e43c8921b15"
+    },
+    {
+      "branch": "dependabot/github_actions/actions/deploy-pages-5",
+      "sha": "362d50091d7a37e610218bd28485ce3cdfa569f6"
+    },
+    {
+      "branch": "dependabot/github_actions/actions/setup-node-7",
+      "sha": "92730921807c2ebde3422adfebb24e13b9dc0475"
+    },
+    {
+      "branch": "dependabot/github_actions/actions/setup-python-7",
+      "sha": "998c135405e307b528d1400e38719e293249095c"
+    },
+    {
+      "branch": "dependabot/github_actions/actions/upload-artifact-7",
+      "sha": "9788932939cfb301748a16aad8ca2838e6d49604"
+    },
+    {
+      "branch": "dependabot/npm_and_yarn/electron-45.2.3",
+      "sha": "3e0b39baa57e86e036f65bb1080263bbd301b3be"
+    },
+    {
+      "branch": "feat/bookmark-manager-identity-autofill-20261106",
+      "sha": "b6f78c0c0ad10526454c3db7f75b7fb24d4691bb"
+    },
+    {
+      "branch": "fix/bookmark-bar-folder-drag-reorder-20261106",
+      "sha": "9348352d13dc56c4ac2f04e247475d08a33a4af9"
+    },
+    {
+      "branch": "fix/bookmark-bar-folder-instant-icons-20261106",
+      "sha": "f08b72648289b5cfdff617ba073f67f223b7650b"
+    },
+    {
+      "branch": "fix/download-destination-behavior-nov13",
+      "sha": "0260c19e7307dd9b107962ecfa5edef18f7f87f4"
+    },
+    {
+      "branch": "fix/google-account-status-oauth-feedback-20261107",
+      "sha": "90791f48ac15d9908c547e86cf82b8b1a4b0c334"
+    },
+    {
+      "branch": "fix/google-home-and-downloads-20261106",
+      "sha": "e86028d56b6edb8b08c5ebf652241d414c6279ee"
+    },
+    {
+      "branch": "fix/google-session-persistence-folder-icons-20261106",
+      "sha": "1ec07896caff20786afcceb1dbdc21433c1bf2cc"
+    },
+    {
+      "branch": "fix/nov-2026-browser-stability-controls",
+      "sha": "7b7a1e14886cef91380f60ddb45b38f91c2e3c62"
+    },
+    {
+      "branch": "fix/rapid-relaunch-google-downloads-20261109",
+      "sha": "0cea4bddbfb74adcdd47d54a0fb863a143593d30"
+    },
+    {
+      "branch": "fix/real-tab-favicons-and-new-tab-right-scroll-20261107",
+      "sha": "8905eb9cf5f6e13eb7eb0b91c37889450cf32ef5"
+    },
+    {
+      "branch": "fix/restore-nov13-settings-extensions",
+      "sha": "14a1fbe5a9ed12da1e9794c1eefbabfc9c6cea7a"
+    },
+    {
+      "branch": "fix/secret-bookmarks-lock-group-ux-20261106",
+      "sha": "b8026fd3f493005fa76dd7a16199e25d295e6a5c"
+    },
+    {
+      "branch": "fix/secret-bookmarks-visible-name-key-20261105",
+      "sha": "e27d545726a1c945e11154e3234d48e7ac15e678"
+    },
+    {
+      "branch": "fix/tab-pin-and-bookmark-icon-alignment-20261107",
+      "sha": "4018bed26c4a192f2e181e44eb76e1c051df21a3"
+    }
+  ]
+}

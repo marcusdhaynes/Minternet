@@ -1,11 +1,7 @@
 name: Minternet Windows portable single EXE (under 50 MB)
 on:
-  # Every repository push creates a Windows build, including development
-  # branches and configuration-only changes. Tags are also supported.
+  # Production builds only from the canonical main branch.
   push:
-    branches: ['**']
-    tags: ['v*']
-  pull_request:
     branches: [main]
   workflow_dispatch:
 permissions:
@@ -17,6 +13,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   portable:
+    if: github.ref == 'refs/heads/main'
     outputs:
       version_label: ${{ steps.package.outputs.version_label }}
       exe_name: ${{ steps.package.outputs.exe_name }}
@@ -61,6 +58,7 @@ jobs:
           node --check ../../ui/volume-ui.js
           node --check ../../ui/audio-gain.js
           node --check ../../ui/credential-import.js
+          node --test ../../tests/single-branch-policy.test.cjs
           node --test ../../tests/release-feature-parity.test.cjs
           node --test ../../tests/updates-release.test.cjs
           node --test ../../tests/site-context-menu.test.cjs
