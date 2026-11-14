@@ -2656,7 +2656,15 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                     _=>true
                 })
                 .on_new_window(|_,_|NewWindowResponse::Deny)
-                .on_page_load(|window,_|{
+                .on_page_load(|window,event|{
+                    // The real HTTPS origin, never a site-controlled HTML
+                    // title, identifies the authentication window to users.
+                    if event.url().scheme()=="https"{
+                        if let Some(host)=event.url().host_str(){
+                            let _=window.set_title(&format!(
+                                "Minternet Sign In — https://{host}"));
+                        }
+                    }
                     // Verify *cross-window messaging*, not merely the presence
                     // of a popup. Only active under the explicit CI smoke flag.
                     if std::env::args().any(|a|a=="--minternet-auth-popup-smoke"){
@@ -2674,10 +2682,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                         })();"#);
                     }
                 })
-                .on_document_title_changed(|window,title|{
-                    let safe=title.chars().take(140).collect::<String>();
-                    let _=window.set_title(&format!("Minternet — {safe}"));
-                });
+                ;
                 return match builder.build(){
                     Ok(window)=>NewWindowResponse::Create{window},
                     Err(error)=>{
@@ -3591,12 +3596,6 @@ fn open_site_popup_tab(app:&tauri::AppHandle,opener:u32,target:tauri::Url)
         }
     }else {display_active(app);}
     notify(app);
-    if std::env::args().any(|a|a=="--minternet-auth-popup-smoke"){
-        let marker=std::env::temp_dir()
-            .join(format!("minternet-auth-popup-{}.ok",std::process::id()));
-        std::fs::write(marker,
-            format!("Website window request opened Minternet tab {id}; no OS popup")).ok();
-    }
     let _=selected;
     Ok(id)
 }
