@@ -63,6 +63,8 @@ jobs:
           node --test ../../tests/updates-release.test.cjs
           node --test ../../tests/context-menu-position.test.cjs
           node --test ../../tests/site-context-menu.test.cjs
+          node --test ../../tests/native-startup-geometry.test.cjs
+          node --test ../../tests/site-dragdrop-layout.test.cjs
           node --test ../../tests/native-surface-transitions.test.cjs
           node --check ../../ui/updates.js
           node --test ../../tests/bookmarks.test.cjs ../../tests/bookmark-import.test.cjs ../../tests/tab-groups.test.cjs ../../tests/native-menus.test.cjs ../../tests/search-settings.test.cjs ../../tests/rapid-bookmarks-volume-import.test.cjs ../../tests/tab-blank-zones.test.cjs ../../tests/browser-home-download.test.cjs ../../tests/tab-limit.test.cjs ../../tests/extensions-manager.test.cjs ../../tests/settings-visual-density.test.cjs
@@ -137,6 +139,36 @@ jobs:
           } finally {
             if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
             Remove-Item $marker -Force -ErrorAction SilentlyContinue
+          }
+      - name: Reproduce and repair off-center WebView2 startup after maximization
+        shell: pwsh
+        run: |
+          $exe = "$env:RUNNER_TEMP\minternet-portable\Minternet-Portable-x64.exe"
+          $p = Start-Process -FilePath $exe -ArgumentList "--minternet-geometry-smoke" -PassThru
+          $passed = Join-Path $env:TEMP "minternet-geometry-$($p.Id).ok"
+          $failed = Join-Path $env:TEMP "minternet-geometry-$($p.Id).failed"
+          try {
+            $success = $false
+            for ($i = 0; $i -lt 50; $i++) {
+              Start-Sleep -Milliseconds 800
+              $p.Refresh()
+              if ($p.HasExited) { throw "Minternet exited during maximized WebView2 geometry test" }
+              if (Test-Path -LiteralPath $failed) {
+                throw "WebView2 geometry recovery failed: $(Get-Content $failed -Raw)"
+              }
+              if (Test-Path -LiteralPath $passed) { $success = $true; break }
+            }
+            if (!$success) {
+              throw "Real native site child did not recover exact physical bounds after maximize and simulated stale rectangle"
+            }
+            $proof = Get-Content -LiteralPath $passed -Raw
+            if ($proof -notmatch "PASS: maximized WebView2 child corrected") {
+              throw "Unexpected native geometry proof: $proof"
+            }
+            "PASS: real maximized WebView2 recovers from the same 53px off-center, undersized rectangle shown in screenshot." >> $env:GITHUB_STEP_SUMMARY
+          } finally {
+            if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
+            Remove-Item $passed,$failed -Force -ErrorAction SilentlyContinue
           }
       - name: Verify OAuth popup renders with a working native window.opener
         shell: pwsh
