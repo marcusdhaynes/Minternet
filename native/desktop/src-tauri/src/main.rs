@@ -2042,13 +2042,16 @@ fn start_geometry_smoke(app:&tauri::AppHandle,id:u32){
             let expected=[0.0,top*scale,width*scale,(height-top)*scale];
             let actual=[pos.x as f64,pos.y as f64,
                 size.width as f64,size.height as f64];
-            if changed && expected.iter().zip(actual.iter())
-                .all(|(a,b)|(a-b).abs()<=3.0){
-                let marker=std::env::temp_dir()
-                    .join(format!("minternet-geometry-{}.ok",std::process::id()));
-                let _=std::fs::write(marker,
-                    "PASS: maximized WebView2 child corrected from off-center rectangle to full client bounds");
-            }
+            let good=changed && expected.iter().zip(actual.iter())
+                .all(|(a,b)|(a-b).abs()<=3.0);
+            let marker=std::env::temp_dir().join(format!(
+                "minternet-geometry-{}.{}",std::process::id(),
+                if good {"ok"}else{"failed"}));
+            let _=std::fs::write(marker,if good {
+                "PASS: maximized WebView2 child corrected from off-center rectangle to full client bounds".to_string()
+            } else {
+                format!("failed to correct WebView2 bounds; repaired={changed}, expected={expected:?}, actual={actual:?}")
+            });
         });
     });
 }
@@ -6918,7 +6921,7 @@ fn main() {
                     browser.active_id=id;
                     id
                 };
-                if id==0{return Err(std::io::Error::other("No smoke tab"));}
+                if id==0{return Err(std::io::Error::other("No smoke tab").into());}
                 let url=tauri::Url::parse("https://example.com/")
                     .map_err(std::io::Error::other)?;
                 navigate_tab(app.handle(),id,Some(url),true)
