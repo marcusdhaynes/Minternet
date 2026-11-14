@@ -174,12 +174,21 @@ pub fn maybe_run_helper()->bool{
         let target=args.next().map(PathBuf::from);
         let parent=args.next().and_then(|n|n.to_string_lossy().parse::<u32>().ok());
         let expected=args.next().map(|s|s.to_string_lossy().into_owned());
+        let fallback=target.clone();
         let status=match (target,parent,expected){
             (Some(target),Some(parent),Some(expected)) =>
                 run_helper(&target,parent,&expected),
             _=>Err("Malformed update helper arguments".into())
         };
-        if let Err(error)=status{eprintln!("Minternet update failed: {error}");}
+        if let Err(error)=status{
+            eprintln!("Minternet update failed: {error}");
+            // Never leave a previously usable EXE closed when a write-lock,
+            // antivirus, permission, or startup failure aborts installation.
+            if let Some(target)=fallback.filter(|p|
+                p.is_file() && p.extension().is_some_and(|x|x.eq_ignore_ascii_case("exe"))) {
+                let _=Command::new(target).spawn();
+            }
+        }
     }
     true
 }
@@ -243,7 +252,6 @@ fn run_helper(target:&Path,old_pid:u32,expected:&str)->Result<(),String>{
         let _=fs::rename(target,&failed);
         fs::rename(&backup,target)
             .map_err(|e|format!("Automatic rollback failed: {e}; backup is at {}",backup.display()))?;
-        let _=Command::new(target).spawn();
         return Err("New EXE failed startup confirmation; original version restored".into());
     }
     let _=fs::remove_file(&marker);
