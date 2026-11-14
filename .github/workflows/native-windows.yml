@@ -82,6 +82,45 @@ jobs:
           "Minternet standalone EXE: $bytes bytes" >> $env:GITHUB_STEP_SUMMARY
           if ($bytes -ge 50000000) { throw "Portable executable exceeds 50,000,000 bytes" }
           Copy-Item $files[0].FullName "Minternet-Portable-x64.exe"
+      - name: Verify in-place portable updater replacement, rollback backup and automatic relaunch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference="Stop"
+          $exe=(Resolve-Path "src-tauri/target/release/minternet_native.exe").Path
+          $stage=Join-Path $env:TEMP "Minterest-Portable-Updates/ci-$env:GITHUB_RUN_ID"
+          New-Item -Path $stage -ItemType Directory -Force | Out-Null
+          $helper=Join-Path $stage "Minterest.exe"
+          Copy-Item -LiteralPath $exe -Destination $helper -Force
+          $targetDir=Join-Path $env:RUNNER_TEMP "minternet-updater-in-place-$env:GITHUB_RUN_ID"
+          New-Item -Path $targetDir -ItemType Directory -Force | Out-Null
+          $target=Join-Path $targetDir "Minterest.exe"
+          Copy-Item -LiteralPath $exe -Destination $target -Force
+          [IO.File]::AppendAllText($target,"Original portable build placeholder")
+          $before=(Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash
+          $expected=(Get-FileHash -LiteralPath $helper -Algorithm SHA256).Hash.ToLowerInvariant()
+          $proof=Join-Path $env:TEMP "minternet-update-reopened-$env:GITHUB_RUN_ID.ok"
+          if(Test-Path $proof){Remove-Item $proof -Force}
+          $arguments=@("--minternet-install-update","0",('"' + $target + '"'),$expected,"--smoke",('"' + $proof + '"'))
+          $updater=Start-Process -FilePath $helper -ArgumentList $arguments -PassThru
+          try {
+            if(-not $updater.WaitForExit(45000)){throw "Portable update helper did not exit"}
+            $installed=(Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant()
+            if($installed -ne $expected){throw "The original portable EXE was not replaced correctly"}
+            if(-not (Test-Path $proof)){throw "Updated EXE did not relaunch successfully"}
+            $marker=Get-Content -LiteralPath $proof -Raw
+            if($marker -notmatch "Minternet updater restarted installed EXE successfully"){
+              throw "Restart verification failed"
+            }
+            $backup=Get-ChildItem -LiteralPath $targetDir -Filter "*.minternet-previous-*.exe" | Select-Object -First 1
+            if(-not $backup){throw "The updater did not preserve a rollback executable"}
+            if((Get-FileHash -LiteralPath $backup.FullName -Algorithm SHA256).Hash -ne $before){
+              throw "Rollback backup does not match original executable"
+            }
+            "PASS: verified portable EXE installed at unchanged path, rolled back original and restarted." >> $env:GITHUB_STEP_SUMMARY
+          } finally {
+            if(-not $updater.HasExited){Stop-Process -Id $updater.Id -Force}
+            Remove-Item $proof -Force -ErrorAction SilentlyContinue
+          }
       - name: Verify native media asset playback in actual Windows WebView2
         shell: pwsh
         run: |
