@@ -2502,6 +2502,32 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
         // must actually load before its first HTTPS navigation. Ordinary HTTP
         // is legitimate browser content but remains visibly marked insecure.
         .on_navigation(move |url| {
+            // CI probe endpoints never leave this process or send credentials.
+            if std::env::args().any(|a|a=="--minternet-auth-popup-smoke") &&
+                url.as_str()=="https://minternet-auth-probe.invalid/__ok" {
+                let marker=std::env::temp_dir().join(format!(
+                    "minternet-auth-popup-{}.ok",std::process::id()));
+                let _=std::fs::write(marker,
+                    "PASS: child WebView2 window sent a message through its real window.opener");
+                return false;
+            }
+            if std::env::args().any(|a|a=="--minternet-passkey-smoke") &&
+                url.scheme()=="https" &&
+                url.host_str()==Some("minternet-passkey.invalid") &&
+                url.path()=="/__probe" {
+                let payload=url.query_pairs().find(|(key,_)|key=="data")
+                    .map(|(_,value)|value.to_string()).unwrap_or_default();
+                if payload.len()<=1800 {
+                    if let Ok(browser)=serde_json::from_str::<serde_json::Value>(&payload){
+                        let marker=std::env::temp_dir().join(format!(
+                            "minternet-passkey-{}.ok",std::process::id()));
+                        let _=std::fs::write(marker,json!({
+                            "browser":browser,"windows":passkey_support::status()
+                        }).to_string());
+                    }
+                }
+                return false;
+            }
             if matches!(url.scheme(), "https"|"http") {
                 let blocked=for_navigation.state::<privacy_shield::ShieldState>().0.lock()
                     .map(|settings|privacy_shield::block_navigation(&settings,url)).unwrap_or(false);
@@ -2630,6 +2656,24 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                     _=>true
                 })
                 .on_new_window(|_,_|NewWindowResponse::Deny)
+                .on_page_load(|window,_|{
+                    // Verify *cross-window messaging*, not merely the presence
+                    // of a popup. Only active under the explicit CI smoke flag.
+                    if std::env::args().any(|a|a=="--minternet-auth-popup-smoke"){
+                        let _=window.eval(r#"(function(){
+                          let attempts=0;
+                          const timer=setInterval(()=>{
+                            if(++attempts>60){clearInterval(timer);return;}
+                            try{
+                              if(window.opener&&!window.opener.closed){
+                                window.opener.postMessage({minternetAuthProof:true},'*');
+                                clearInterval(timer);
+                              }
+                            }catch{}
+                          },100);
+                        })();"#);
+                    }
+                })
                 .on_document_title_changed(|window,title|{
                     let safe=title.chars().take(140).collect::<String>();
                     let _=window.set_title(&format!("Minternet — {safe}"));
@@ -2757,16 +2801,49 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                     if is_real_page_url(event.url().as_str()) {
                         apply_volume_to_site(&for_load,id,view.label(),true);
                     }
-                    // CI only: a site requesting a separate window must
-                    // create an adjacent native Minternet tab instead.
+                    // CI: prove that an OAuth-style bootstrap popup retains
+                    // window.opener and can send a real postMessage to its site.
                     if event.url().host_str()==Some("example.com") &&
                         std::env::args().any(|a|a=="--minternet-auth-popup-smoke") {
-                        let _=view.eval(r#"
-                            setTimeout(() => {
-                              window.open('https://example.org/?minternet-popup-smoke=1',
-                                '_blank','width=480,height=600');
-                            }, 250);
-                        "#);
+                        let _=view.eval(r#"(function(){
+                          let child=null;
+                          window.addEventListener('message',event=>{
+                            if(event.source===child&&event.data?.minternetAuthProof===true){
+                              location.assign('https://minternet-auth-probe.invalid/__ok');
+                            }
+                          });
+                          setTimeout(()=>{
+                            child=window.open('about:blank','minternet-auth-smoke',
+                              'width=480,height=600');
+                          },250);
+                        })();"#);
+                    }
+                    // CI: live HTTPS WebView2 capability check, no user
+                    // enrollment, fake private keys or synthesized assertions.
+                    if event.url().host_str()==Some("example.com") &&
+                        std::env::args().any(|a|a=="--minternet-passkey-smoke"){
+                        let _=view.eval(r#"(async function(){
+                          const pk=window.PublicKeyCredential;
+                          const report={
+                            origin:location.origin,
+                            secure:window.isSecureContext===true,
+                            credentials:!!navigator.credentials,
+                            create:typeof navigator.credentials?.create==='function',
+                            get:typeof navigator.credentials?.get==='function',
+                            publicKeyCredential:typeof pk==='function',
+                            platformAuthenticator:null
+                          };
+                          try{
+                            if(typeof pk?.isUserVerifyingPlatformAuthenticatorAvailable==='function'){
+                              report.platformAuthenticator=await Promise.race([
+                                pk.isUserVerifyingPlatformAuthenticatorAvailable(),
+                                new Promise(resolve=>setTimeout(()=>resolve('timeout'),4000))
+                              ]);
+                            }
+                          }catch(error){report.platformAuthenticator='error:'+error.name;}
+                          location.assign('https://minternet-passkey.invalid/__probe?data='+
+                            encodeURIComponent(JSON.stringify(report)));
+                        })();"#);
                     }
                     // Only a prompt typed into the trusted browser address bar
                     // can enable ChatGPT auto-submit. External URLs never do.
@@ -6725,6 +6802,7 @@ fn main() {
             let smoke = std::env::args().any(|a| a == "--minternet-smoke");
             let turbo_smoke = std::env::args().any(|a| a == "--minternet-turbo-smoke");
             let auth_popup_smoke = std::env::args().any(|a| a == "--minternet-auth-popup-smoke");
+            let passkey_smoke = std::env::args().any(|a| a == "--minternet-passkey-smoke");
             let media_smoke = std::env::args().any(|a| a == "--minternet-media-smoke");
             let bookmarks_smoke = std::env::args().any(|a| a == "--minternet-bookmarks-smoke");
             let bookmarks_reopen = std::env::args().any(|a| a == "--minternet-bookmarks-reopen");
@@ -6820,7 +6898,7 @@ fn main() {
                                     }
                                   },300);
                                 "#);
-                            } else if smoke || auth_popup_smoke {
+                            } else if smoke || auth_popup_smoke || passkey_smoke {
                                 let _ = view.eval(
                                     "setTimeout(() => window.minternet?.command('navigate', 'https://example.com'), 200)"
                                 );
