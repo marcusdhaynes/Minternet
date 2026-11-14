@@ -235,8 +235,13 @@ fn run_helper(target:&Path,old_pid:u32,expected:&str)->Result<(),String>{
     }
     if !moved{return Err("Original EXE remained locked or its directory is not writable".into());}
     if let Err(error)=fs::copy(&self_exe,target){
-        let _=fs::rename(&backup,target);
-        return Err(format!("Cannot place updated EXE: {error}"));
+        // A failed copy may leave a partially written EXE at the original
+        // name. Remove it BEFORE restoring the backup (Windows rename will
+        // otherwise refuse to replace the corrupt target).
+        let _=fs::remove_file(target);
+        fs::rename(&backup,target).map_err(|rollback|
+            format!("EXE copy failed ({error}); original backup remains at {} because restore failed: {rollback}",backup.display()))?;
+        return Err(format!("Cannot place updated EXE; original restored: {error}"));
     }
     if sha256_file(target)?!=expected.to_ascii_lowercase(){
         let _=fs::remove_file(target);
