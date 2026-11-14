@@ -14,6 +14,7 @@
   const reusedChips=new Map(),reusedEndCaps=new Map();
   let draggingTabId=null;
   let gesture=null, ghost=null, splitPreview=null, dragOverlay=false, suppressedClick=null;
+  let splitPaneIds=[];
   const ungroupTarget=$('tabUngroupDrop');
   const tabStrip=$('tabs');
   const groupUndoJson=()=>JSON.stringify({
@@ -155,6 +156,7 @@
   }
   function clearDropState(){
     draggingTabId=null;
+    splitPaneIds=[];
     ghost?.remove();
     ghost=null;
     splitPreview?.remove();
@@ -458,6 +460,47 @@
       else tabStrip.classList.add('drag-ungroup-over');
     }
   }
+  // Preview the *actual* resulting geometry, not four advertised boxes
+  // that the native two-/three-pane layout would subsequently rearrange.
+  function splitPaneCount(id){
+    return Math.max(2,Math.min(4,splitPaneIds.length+(splitPaneIds.includes(id)?0:1)));
+  }
+  function draggedQuadrant(x,y,top){
+    const col=x<innerWidth/2?0:1;
+    const row=y<top+(innerHeight-top)/2?0:2;
+    return col+row;
+  }
+  function visibleSplitSlot(count,quadrant){
+    if(count<=2)return quadrant%2;
+    if(count===3)return quadrant%2===0?0:quadrant<2?1:2;
+    return quadrant;
+  }
+  function updateSplitPreview(x,y,top){
+    const count=splitPaneCount(draggingTabId);
+    if(!splitPreview){
+      splitPreview=document.createElement('div');
+      splitPreview.className='split-drag-zones';
+      splitPreview.setAttribute('aria-hidden','true');
+      document.body.append(splitPreview);
+    }
+    if(Number(splitPreview.dataset.panes)!==count){
+      splitPreview.dataset.panes=String(count);
+      splitPreview.replaceChildren();
+      const labels=count===2?['Left','Right']:
+        count===3?['Left','Upper Right','Lower Right']:
+        ['Upper Left','Upper Right','Lower Left','Lower Right'];
+      for(const label of labels){
+        const zone=document.createElement('div');
+        zone.className='split-drag-zone';
+        zone.textContent=label;
+        splitPreview.append(zone);
+      }
+    }
+    splitPreview.style.top=Math.round(top)+'px';
+    const slot=visibleSplitSlot(count,draggedQuadrant(x,y,top));
+    [...splitPreview.children].forEach((zone,i)=>zone.classList.toggle('active',i===slot));
+    ghost.textContent='◫  Drop in '+splitPreview.children[slot]?.textContent;
+  }
   function movePointer(event){
     if(!gesture||event.pointerId!==gesture.pointerId)return;
     if(!gesture.active){
@@ -472,6 +515,14 @@
         dragOverlay=true;
         void api.command('chrome-overlay',true);
       }
+      // Read existing panes once per gesture. A regular tab drag must not
+      // affect site-level HTML5 file drops or introduce a native drop handler.
+      void api.command('split-status').then(status=>{
+        if(gesture?.active&&gesture.id===draggingTabId &&
+           Array.isArray(status?.ids)){
+          splitPaneIds=status.ids.filter(Number.isSafeInteger);
+        }
+      });
       document.body.classList.add('tab-dragging');
       tabStrip.querySelectorAll('.tab[data-tab-id]').forEach(el=>{
         el.classList.toggle('tab-drag-source',Number(el.dataset.tabId)===draggingTabId);
@@ -481,28 +532,12 @@
     event.preventDefault();
     if(ghost){
       ghost.style.left=Math.round(event.clientX+11)+'px';ghost.style.top=Math.round(event.clientY+9)+'px';
-      const beyondChrome=event.clientY>document.querySelector('.chrome').getBoundingClientRect().bottom+6;
-      ghost.classList.toggle('split-drag-preview',beyondChrome);
-      if(beyondChrome){
-        ghost.textContent='◫  Snap into Split View';
-        if(!splitPreview){
-          splitPreview=document.createElement('div');
-          splitPreview.className='split-drag-zones';
-          splitPreview.setAttribute('aria-hidden','true');
-          for(let i=0;i<4;i++){
-            const zone=document.createElement('div');zone.className='split-drag-zone';
-            splitPreview.append(zone);
-          }
-          document.body.append(splitPreview);
-        }
-        const top=document.querySelector('.chrome').getBoundingClientRect().bottom;
-        splitPreview.style.top=Math.round(top)+'px';
-        const cell=(event.clientY-top)<(innerHeight-top)/2?0:2;
-        const index=cell+(event.clientX<innerWidth/2?0:1);
-        [...splitPreview.children].forEach((zone,i)=>zone.classList.toggle('active',i===index));
-      }else{
-        splitPreview?.remove();splitPreview=null;
-      }
+      const top=document.querySelector('.chrome').getBoundingClientRect().bottom;
+      const overPage=event.clientY>top+6&&event.clientY<=innerHeight &&
+        event.clientX>=0&&event.clientX<=innerWidth;
+      ghost.classList.toggle('split-drag-preview',overPage);
+      if(overPage)updateSplitPreview(event.clientX,event.clientY,top);
+      else{splitPreview?.remove();splitPreview=null;}
     }
     updateHover(event.clientX,event.clientY);
   }
@@ -517,11 +552,15 @@
     const chip=hit?.closest('.group-chip[data-group-id]');
     const tab=hit?.closest('.tab[data-tab-id]');
     const groupId=chip?.dataset.groupId;
-    if(event.clientY>document.querySelector('.chrome').getBoundingClientRect().bottom+6){
-      const top=document.querySelector('.chrome').getBoundingClientRect().bottom;
+    const top=document.querySelector('.chrome').getBoundingClientRect().bottom;
+    if(event.clientY>top+6&&event.clientY<=innerHeight &&
+       event.clientX>=0&&event.clientX<=innerWidth){
       const x=Math.max(0,Math.min(1,event.clientX/Math.max(innerWidth,1)));
       const y=Math.max(0,Math.min(1,(event.clientY-top)/Math.max(innerHeight-top,1)));
-      void api.command('split-add',{id:finished.id,x,y});
+      // Pass the literal quadrant that was highlighted at drop, so the
+      // native allocator never guesses or shifts unrelated split panes.
+      const quadrant=draggedQuadrant(event.clientX,event.clientY,top);
+      void api.command('split-add',{id:finished.id,x,y,quadrant});
     }else if(groupId)dropIntoGroup(event,groupId);
     else if(tab&&Number(tab.dataset.tabId)!==finished.id)
       dropNextTo(event,Number(tab.dataset.tabId),tab);
