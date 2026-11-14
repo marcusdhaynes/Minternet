@@ -721,6 +721,9 @@ impl Default for VolumeConfig {
 struct VolumeState(Mutex<VolumeConfig>);
 #[derive(Default)]
 struct SplitState(Mutex<Vec<u32>>);
+// For three panes, split the half explicitly chosen by the user's cursor.
+// false: full left + two right; true: two left + full right.
+struct SplitThreeLeft(Mutex<bool>);
 struct SplitRatios(Mutex<(f64,f64)>);
 struct UndoState { tabs: Vec<Tab>, active_id:u32, split_ids:Vec<u32>, ratios:(f64,f64), ui:Option<Value> }
 struct UndoHistory(Mutex<VecDeque<UndoState>>);
@@ -1441,6 +1444,70 @@ fn split_rect(index:usize,count:usize,width:f64,height:f64,top:f64,
 // arbitrary list. Two-pane layout has left/right halves, three-pane layout
 // has a full-height left pane and right upper/lower panes; four has the
 // four distinct quadrants. The preview uses exactly this same mapping.
+// A 3-pane split must split the side the user chose, rather than
+// automatically moving the left pane and splitting the right half.
+fn split_rect_on_side(index:usize,count:usize,width:f64,height:f64,top:f64,
+                      horizontal:f64,vertical:f64,split_left:bool)->(f64,f64,f64,f64){
+    if count!=3||!split_left {
+        return split_rect(index,count,width,height,top,horizontal,vertical);
+    }
+    let left=(width*horizontal.clamp(0.2,0.8)).round();
+    let upper=(height*vertical.clamp(0.2,0.8)).round();
+    match index {
+        0=>(0.0,top,left,upper),
+        1=>(0.0,top+upper,left,height-upper),
+        _=>(left,top,width-left,height),
+    }
+}
+fn place_new_split_pane(split:&mut Vec<u32>,id:u32,quadrant:usize,
+                        split_left:&mut bool)->Result<(),String>{
+    match split.len(){
+        2 if !split.contains(&id)=>{
+            let left=split[0];let right=split[1];
+            *split_left=quadrant%2==0;
+            *split=if *split_left {
+                if quadrant<2 {vec![id,left,right]}else{vec![left,id,right]}
+            }else if quadrant<2 {
+                vec![left,id,right]
+            }else{
+                vec![left,right,id]
+            };
+            Ok(())
+        }
+        3 if !split.contains(&id)=>{
+            let old=split.clone();
+            // Convert the three actual pane rectangles to stable 2x2 slots.
+            // The selected destination is ALWAYS the requested quadrant.
+            let mut grid=if *split_left {
+                [old[0],old[2],old[1],old[2]]
+            }else{
+                [old[0],old[1],old[0],old[2]]
+            };
+            let q=quadrant.min(3);
+            let replaced=grid[q];
+            grid[q]=id;
+            let mut counts=std::collections::HashMap::new();
+            for pane in grid {*counts.entry(pane).or_insert(0u32)+=1;}
+            if counts.get(&replaced).copied().unwrap_or(0)==0{
+                // The split side has one now-unused quadrant (the other
+                // occurrence of the previously full-width pane). Move only
+                // the displaced occupant there; do not shift all panes.
+                let fill=if *split_left {
+                    if q==0 {1}else if q==2 {3}else if q==1 {3}else{1}
+                }else{
+                    if q==0 {2}else if q==2 {0}else{2}
+                };
+                grid[fill]=replaced;
+            }
+            *split=grid.to_vec();
+            Ok(())
+        }
+        _=>{
+            let slot=split_drop_target((split.len()+usize::from(!split.contains(&id))).min(4),quadrant);
+            assign_split_slot(split,id,slot)
+        }
+    }
+}
 fn split_drop_target(count:usize,quadrant:usize)->usize {
     let q=quadrant.min(3);
     match count {
@@ -1663,7 +1730,8 @@ fn update_split_badges(app:&tauri::AppHandle,window:&tauri::Window,
     }
     if ids.len()<2{return;}
     for (index,id) in ids.iter().enumerate(){
-        let (x,y,w,_)=split_rect(index,ids.len(),width,height,top,ratios.0,ratios.1);
+        let (x,y,w,_)=split_rect_on_side(index,ids.len(),width,height,top,ratios.0,ratios.1,
+                app.state::<SplitThreeLeft>().0.lock().map(|s|*s).unwrap_or(false));
         let label=format!("split-badge-{id}");
         let position=LogicalPosition::new(x+6.0,y+6.0);
         let size=LogicalSize::new(w.min(190.0).max(40.0)-12.0,24.0);
@@ -1839,7 +1907,8 @@ fn refresh_layout(app: &tauri::AppHandle) {
     };
     for (index, label) in visible_labels.iter().enumerate() {
         let (x,y,w,h) = if split_count > 1 {
-            split_rect(index,split_count,width,available,top,ratios.0,ratios.1)
+            split_rect_on_side(index,split_count,width,available,top,ratios.0,ratios.1,
+                app.state::<SplitThreeLeft>().0.lock().map(|s|*s).unwrap_or(false))
         } else {
             (0.0,top,width,available)
         };
@@ -1980,7 +2049,8 @@ fn reconcile_visible_child_bounds(app:&tauri::AppHandle)->bool {
     for (index,label) in ids.iter().enumerate(){
         if let Some(view)=app.get_webview(label){
             let (x,y,w,h)=if count>1{
-                split_rect(index,count,width,available,top,ratios.0,ratios.1)
+                split_rect_on_side(index,count,width,available,top,ratios.0,ratios.1,
+                app.state::<SplitThreeLeft>().0.lock().map(|s|*s).unwrap_or(false))
             }else{(0.0,top,width,available)};
             fix(&view,x,y,w,h);
         }
@@ -5720,7 +5790,8 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         }
         "split-status" => {
             let ids=app.state::<SplitState>().0.lock().map_err(|e|e.to_string())?.clone();
-            return Ok(json!({"ids":ids}));
+            let split_left=app.state::<SplitThreeLeft>().0.lock().map(|s|*s).unwrap_or(false);
+            return Ok(json!({"ids":ids,"splitLeft":split_left}));
         }
         "split-add" => {
             let id=value.as_u64().or_else(||value.get("id").and_then(Value::as_u64))
@@ -5761,8 +5832,9 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                     .filter(|q|*q<4).map(|q|q as usize)
                     .unwrap_or(if ny<0.5 {if nx<0.5 {0} else {1}}
                                else if nx<0.5 {2} else {3});
-                let slot=split_drop_target(next_count,quadrant);
-                assign_split_slot(&mut split,id,slot)?;
+                let side=app.state::<SplitThreeLeft>();
+                let mut left=side.0.lock().map_err(|e|e.to_string())?;
+                place_new_split_pane(&mut split,id,quadrant,&mut left)?;
             }
             let ids=app.state::<SplitState>().0.lock().map_err(|e|e.to_string())?.clone();
             // Prepare only the participating panes, never load unrelated tabs.
@@ -6455,6 +6527,7 @@ fn main() {
         .manage(ZoomState(Mutex::new(1.0)))
         .manage(VolumeState::default())
         .manage(SplitState::default())
+        .manage(SplitThreeLeft(Mutex::new(false)))
         .manage(SplitRatios(Mutex::new((0.5,0.5))))
         .manage(UndoHistory(Mutex::new(VecDeque::new())))
         .manage(Mutex::new(Browser::new()))
