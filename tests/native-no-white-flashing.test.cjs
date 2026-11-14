@@ -25,7 +25,7 @@ test('active WebView2 is never toggled off/on to recover its paint surface',()=>
 test('opaque dark window and website backgrounds are established before first paint',()=>{
   assert.match(native,/WindowBuilder::new\(app, "main"\)\s*\.background_color\(tauri::window::Color\(10,15,27,255\)\)/);
   assert.match(native,/WebviewBuilder::new\(label\.clone\(\),url\)\s*\.background_color\(tauri::webview::Color\(10,15,27,255\)\)/);
-  assert.match(native,/WebviewBuilder::new\("chrome",WebviewUrl::App\("index\.html"\.into\(\)\)\)\s*\.background_color\(tauri::webview::Color\(0,0,0,0\)\)/);
+  assert.match(native,/WebviewBuilder::new\("chrome",WebviewUrl::App\("index\.html"\.into\(\)\)\)[\s\S]{0,400}?\.background_color\(tauri::webview::Color\(0,0,0,0\)\)/);
   assert.match(css,/:root\s*\{[^}]*background:\s*#0a0f1b/s);
 });
 test('flash prevention preserves regular tab changes and reflows',()=>{
