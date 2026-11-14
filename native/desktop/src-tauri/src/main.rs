@@ -1847,7 +1847,7 @@ fn prune_splits(app:&tauri::AppHandle){
             for id in split.clone().into_iter().filter(|id|!ids.contains(id)){
                 remove_split_pane(&mut split,id,&mut left);
             }
-        }
+        };
     }
     invalidate_layout(app);
 }
@@ -5880,11 +5880,6 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 if split.is_empty(){
                     return Err("Open a second webpage before creating split view".into());
                 }
-                let next_count=if split.contains(&id) {
-                    split.len()
-                } else {
-                    (split.len()+1).min(4)
-                };
                 // The frontend provides the exact highlighted quadrant. Keep
                 // normalized coordinates for older browser chrome builds.
                 let quadrant=value.get("quadrant").and_then(Value::as_u64)
