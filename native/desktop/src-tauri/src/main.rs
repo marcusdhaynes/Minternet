@@ -1508,6 +1508,25 @@ fn place_new_split_pane(split:&mut Vec<u32>,id:u32,quadrant:usize,
         }
     }
 }
+// When a four-pane grid loses one pane, let the two remaining panes on
+// the opposite side keep their exact cells. Expand the surviving pane on
+// the vacated side, rather than changing unrelated panes' positions.
+fn remove_split_pane(split:&mut Vec<u32>,id:u32,split_left:&mut bool){
+    let Some(index)=split.iter().position(|pane|*pane==id) else{return};
+    if split.len()==4{
+        let old=split.clone();
+        match index {
+            0=>{*split=vec![old[2],old[1],old[3]];*split_left=false;},
+            2=>{*split=vec![old[0],old[1],old[3]];*split_left=false;},
+            1=>{*split=vec![old[0],old[2],old[3]];*split_left=true;},
+            _=>{*split=vec![old[0],old[2],old[1]];*split_left=true;}
+        }
+    }else{
+        split.retain(|pane|*pane!=id);
+        if split.len()<3{*split_left=false;}
+    }
+    if split.len()<2{split.clear();}
+}
 fn split_drop_target(count:usize,quadrant:usize)->usize {
     let q=quadrant.min(3);
     match count {
@@ -1576,6 +1595,35 @@ mod split_layout_tests {
         assert_eq!(slots,vec![1,4,3,2]);
     }
     #[test]
+    fn drop_third_on_left_splits_left_only(){
+        let mut panes=vec![1,2];let mut side=false;
+        super::place_new_split_pane(&mut panes,3,2,&mut side).unwrap();
+        assert!(side);
+        assert_eq!(panes,vec![1,3,2]);
+        assert_eq!(super::split_rect_on_side(2,3,1000.0,800.0,52.0,0.5,0.5,side),
+                   (500.0,52.0,500.0,800.0));
+    }
+    #[test]
+    fn drop_third_on_right_keeps_left_pane_in_place(){
+        let mut panes=vec![1,2];let mut side=false;
+        super::place_new_split_pane(&mut panes,3,3,&mut side).unwrap();
+        assert!(!side);
+        assert_eq!(panes,vec![1,2,3]);
+    }
+    #[test]
+    fn fourth_pane_lands_in_requested_quadrant_without_shifting_opposite_side(){
+        let mut panes=vec![1,2,3];let mut side=false;
+        super::place_new_split_pane(&mut panes,4,0,&mut side).unwrap();
+        assert_eq!(panes,vec![4,2,1,3]);
+    }
+    #[test]
+    fn removing_fourth_pane_preserves_opposite_side_geometry(){
+        let mut panes=vec![1,2,3,4];let mut side=false;
+        super::remove_split_pane(&mut panes,1,&mut side);
+        assert_eq!(panes,vec![1,3,4]);
+        assert!(side);
+    }
+    #[test]
     fn two_way_split_fills_entire_page() {
         assert_eq!(split_rect(0,2,1000.0,800.0,52.0,0.5,0.5),
                    (0.0,52.0,500.0,800.0));
@@ -1607,8 +1655,10 @@ fn return_split_pane(app:&tauri::AppHandle,id:u32){
     let remaining={
         let state=app.state::<SplitState>();
         let Ok(mut split)=state.0.lock() else{return};
-        split.retain(|entry|*entry!=id);
-        if split.len()<2 {split.clear();}
+        let state=app.state::<SplitThreeLeft>();
+        if let Ok(mut side)=state.0.lock(){
+            remove_split_pane(&mut split,id,&mut side);
+        }
         split.clone()
     };
     if remaining.len()>1 {
@@ -1787,8 +1837,12 @@ fn prune_splits(app:&tauri::AppHandle){
     };
     let state=app.state::<SplitState>();
     if let Ok(mut split)=state.0.lock(){
-        split.retain(|id|ids.contains(id));
-        if split.len()<2{split.clear();}
+        let side=app.state::<SplitThreeLeft>();
+        if let Ok(mut left)=side.0.lock(){
+            for id in split.clone().into_iter().filter(|id|!ids.contains(id)){
+                remove_split_pane(&mut split,id,&mut left);
+            }
+        }
     }
     invalidate_layout(app);
 }
@@ -5863,8 +5917,9 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             {
                 let state=app.state::<SplitState>();
                 let mut split=state.0.lock().map_err(|e|e.to_string())?;
-                split.retain(|x|*x!=id);
-                if split.len()<2{split.clear();}
+                let side=app.state::<SplitThreeLeft>();
+                let mut left=side.0.lock().map_err(|e|e.to_string())?;
+                remove_split_pane(&mut split,id,&mut left);
             }
             invalidate_layout(&app);
             display_active(&app);
@@ -5872,6 +5927,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         }
         "split-clear" => {
             app.state::<SplitState>().0.lock().map_err(|e|e.to_string())?.clear();
+            *app.state::<SplitThreeLeft>().0.lock().map_err(|e|e.to_string())?=false;
             invalidate_layout(&app);
             display_active(&app);
             return Ok(json!({"ok":true}));
@@ -6332,7 +6388,13 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 (label,was_active,tab.url.clone())
             };
             if name=="unload-tab" {
-                app.state::<SplitState>().0.lock().map_err(|e|e.to_string())?.retain(|candidate|*candidate!=id);
+                {
+                    let state=app.state::<SplitState>();
+                    let mut split=state.0.lock().map_err(|e|e.to_string())?;
+                    let side=app.state::<SplitThreeLeft>();
+                    let mut left=side.0.lock().map_err(|e|e.to_string())?;
+                    remove_split_pane(&mut split,id,&mut left);
+                }
                 prune_splits(&app);
             }
             if let Some(label)=label{
