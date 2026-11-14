@@ -91,7 +91,7 @@ jobs:
           New-Item -Path $stage -ItemType Directory -Force | Out-Null
           $helper=Join-Path $stage "Minterest.exe"
           Copy-Item -LiteralPath $exe -Destination $helper -Force
-          $targetDir=Join-Path $env:RUNNER_TEMP "minternet-updater-in-place-$env:GITHUB_RUN_ID"
+          $targetDir=Join-Path $env:TEMP "minternet-updater-in-place-$env:GITHUB_RUN_ID"
           New-Item -Path $targetDir -ItemType Directory -Force | Out-Null
           $target=Join-Path $targetDir "Minterest.exe"
           Copy-Item -LiteralPath $exe -Destination $target -Force
