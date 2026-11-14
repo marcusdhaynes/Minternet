@@ -16,5 +16,17 @@ jobs:
           node-version: '24'
       - run: npm install --no-fund --no-audit
       - run: npm run check
-      - run: npm test
+      - name: Full test suite
+        run: npm test
+      # Repeat the affected regression suite 10 times on the exact checked-out
+      # commit. Each iteration must pass independently; no failures masked.
+      - name: Ten consecutive OAuth, WebAuthn, privacy and geometry checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          for n in $(seq 1 10); do
+            echo "::group::Verification cycle $n/10"
+            node --test tests/custom-context-tabs.test.cjs tests/privacy-shield.test.cjs tests/native-startup-geometry.test.cjs tests/passkeys-auth-popup.test.cjs
+            echo "::endgroup::"
+          done
       - run: npm audit --audit-level=high

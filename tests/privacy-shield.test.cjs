@@ -38,7 +38,7 @@ test('Downloads acknowledgement persists across reviews, restarts and refreshing
   assert.match(native,/save_recent_downloads\(&app\)/);
 });
 
-test('site window requests use in-browser tabs without desktop popups',()=>{
+test('regular site windows use Minternet tabs, authenticated OAuth windows preserve the opener',()=>{
   const main=source('native/desktop/src-tauri/src/main.rs');
   const context=source('native/desktop/src-tauri/src/site_context_menu.rs');
   const shield=source('native/desktop/src-tauri/src/privacy_shield.rs');
@@ -48,7 +48,13 @@ test('site window requests use in-browser tabs without desktop popups',()=>{
   const handler=main.slice(a,b);
   assert.match(handler,/open_site_popup_tab/);
   assert.match(handler,/NewWindowResponse::Deny/);
-  assert.doesNotMatch(handler,/NewWindowResponse::Create|WebviewWindowBuilder::new/);
+  assert.match(handler,/auth_popup::preserve_opener\(&opener_url,&url\)/);
+  assert.match(handler,/NewWindowResponse::Create\{window\}/);
+  assert.match(handler,/\.window_features\(_features\)/);
+  assert.match(handler,/target\.scheme\(\)=="https"/);
+  assert.match(handler,/DownloadEvent::Requested\{\.\.\}=>false/);
+  assert.ok(handler.indexOf('NewWindowResponse::Create')<handler.indexOf('open_site_popup_tab'));
+  assert.match(source('native/desktop/src-tauri/src/auth_popup.rs'),/fn ordinary_web_links_stay_in_tabs/);
   assert.match(main,/spawn_browser_window/);
   assert.match(main,/"open-new-browser-window"/);
   assert.match(context,/ContextMenuRequestedEventHandler/);

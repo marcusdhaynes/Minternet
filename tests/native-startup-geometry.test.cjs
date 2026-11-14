@@ -40,7 +40,8 @@ test('06 homepage chrome and visible split panes are independently checked',()=>
  const s=section('fn reconcile_visible_child_bounds(', 'fn schedule_startup_bounds_reconciliation(');
  assert.match(s,/get_webview\("chrome"\)/);
  assert.match(s,/visible_split\(app\)/);
- assert.match(s,/split_rect\(index,count,width,available,top,ratios\.0,ratios\.1\)/);
+ assert.match(s,/split_rect_on_side\(index,count,width,available,top,ratios\.0,ratios\.1,/);
+ assert.match(s,/app\.state::<SplitThreeLeft>\(\)/);
 });
 test('07 only repaired geometry triggers native compositor notification',()=>{
  const s=section('fn reconcile_visible_child_bounds(', 'fn schedule_startup_bounds_reconciliation(');

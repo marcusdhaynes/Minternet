@@ -35,7 +35,7 @@ test('WebView2 suppresses its default context menu and supplies trusted selected
   assert.match(main,/site_context_menu::attach\(app,id,&created\)/);
 });
 
-test('site new windows always go through a Minternet tab, explicit right-click opens new process',()=>{
+test('ordinary site windows become tabs while HTTPS OAuth windows keep their WebView2 opener',()=>{
   const main=read('native/desktop/src-tauri/src/main.rs');
   const a=main.indexOf('.on_new_window(move |url, _features|');
   const b=main.indexOf('.on_page_load(move |view, event|',a);
@@ -43,7 +43,17 @@ test('site new windows always go through a Minternet tab, explicit right-click o
   const route=main.slice(a,b);
   assert.match(route,/open_site_popup_tab/);
   assert.match(route,/NewWindowResponse::Deny/);
-  assert.doesNotMatch(route,/WebviewWindowBuilder::new|NewWindowResponse::Create/);
+  // OAuth authentication is the sole exception: a managed WebView2 window
+  // must preserve the original WindowProxy for postMessage/callbacks.
+  assert.match(route,/auth_popup::preserve_opener\(&opener_url,&url\)/);
+  assert.match(route,/WebviewWindowBuilder::new/);
+  assert.match(route,/\.window_features\(_features\)/);
+  assert.match(route,/NewWindowResponse::Create\{window\}/);
+  assert.match(route,/\.on_navigation\(\|target\|/);
+  assert.match(route,/target\.scheme\(\)=="https"/);
+  assert.match(route,/\.on_download\(\|_,event\|/);
+  assert.ok(route.indexOf('auth_popup::preserve_opener')<route.indexOf('open_site_popup_tab'));
+  assert.match(read('native/desktop/src-tauri/src/auth_popup.rs'),/fn ordinary_web_links_stay_in_tabs/);
   assert.match(main,/fn spawn_browser_window/);
   assert.match(main,/--minternet-open-window/);
   assert.match(main,/--minternet-open-private-window/);
