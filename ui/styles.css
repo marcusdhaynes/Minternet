@@ -920,9 +920,15 @@ html.minternet-overlay-active .group-editor-backdrop {
 .split-drag-zones{position:fixed;z-index:295;left:0;right:0;bottom:0;display:grid;
   grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;pointer-events:none;
   gap:6px;padding:6px;}
-.split-drag-zone{border:1px solid #a9a0df55;border-radius:7px;background:#8491c30e;
+/* These are the actual native pane rectangles: two halves, three L-shaped
+   panes, or four quadrants. Never draw four false drop targets for two panes. */
+.split-drag-zones[data-panes="2"]{grid-template-rows:1fr;}
+.split-drag-zones[data-panes="3"] .split-drag-zone:first-child{grid-row:span 2;}
+.split-drag-zone{display:grid;place-items:center;font-size:12px;font-weight:600;
+  letter-spacing:.02em;color:#ded5ffb8;text-shadow:0 1px 3px #080a12;
+  border:1px solid #a9a0df55;border-radius:7px;background:#8491c30e;
   transition:background 80ms ease,border-color 80ms ease;}
-.split-drag-zone.active{background:#ae9af05c;border:2px solid #d2c1ff99;}
+.split-drag-zone.active{background:#ae9af05c;border:2px solid #d2c1ff99;color:#fff;}
 
 /* Tab-only context menus: deliberately denser than group/folder inspectors.
    Blank strip is a three-action menu; individual tabs share this scale. */
