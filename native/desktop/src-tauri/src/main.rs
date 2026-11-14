@@ -6528,9 +6528,6 @@ fn main() {
                 LogicalPosition::new(0.0,0.0),
                 LogicalSize::new(width,height)
             )?;
-            // Confirm the new executable has initialized its native browser
-            // before the update helper deletes its rollback backup.
-            portable_updater::confirm_startup();
             // Fresh secondary windows start at the explicitly requested URL,
             // never duplicating the original window's restored session.
             if let Some((address,_private))=new_window_target{
@@ -6592,6 +6589,9 @@ fn main() {
                     _=>{}
                 }
             });
+            // A verified replacement is healthy only after native windows,
+            // restored tabs, and the browser's event handlers are initialized.
+            portable_updater::confirm_startup();
             Ok(())
         })
         .run(tauri::generate_context!())
