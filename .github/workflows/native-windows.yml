@@ -59,6 +59,9 @@ jobs:
           python -m pip install --disable-pip-version-check --quiet pillow
           python scripts/generate_icons.py
       - name: Build native portable EXE with embedded UI, no installer
+        env:
+          MINTERNET_BUILD_RUN_ID: ${{ github.run_id }}
+          MINTERNET_BUILD_SHA: ${{ github.sha }}
         run: npm run build
       - name: Verify password vault cryptography and split-window geometry
         run: cargo test --manifest-path src-tauri/Cargo.toml
