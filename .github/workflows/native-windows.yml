@@ -10,6 +10,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
+  issues: write
 # Prevent an older, slower Windows run from replacing a newer release.
 concurrency:
   group: minternet-windows-${{ github.ref }}
@@ -535,3 +536,28 @@ jobs:
             throw "Published EXE is not discoverable through the public GitHub Releases latest API."
           }
           "PASS: public GitHub API lists verified release $tag, portable EXE, and SHA-256 sums." >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Post Windows build result to verification ledger
+        if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RESULT: ${{ job.status }}
+          RELEASE_TAG: ${{ steps.package.outputs.version_label }}
+          RELEASE_EXE: ${{ steps.package.outputs.exe_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runUrl = "https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+          $outcome = if ($env:BUILD_RESULT -eq 'success') { 'PASS' } else { 'FAIL' }
+          $body = @"
+          ## Windows Updater CI: $outcome
+          - Commit: $env:GITHUB_SHA
+          - Run: $runUrl
+          - Job result before reporting: $env:BUILD_RESULT
+          - Release tag: $env:RELEASE_TAG
+          - EXE asset: $env:RELEASE_EXE
+          - Tests: see workflow logs (build, cargo, Node, native WebView2, in-place replacement)
+          - Publication: a successful result requires the public releases/latest API to expose the EXE and SHA256SUMS.txt
+          "@
+          gh api "repos/$env:GITHUB_REPOSITORY/issues/21/comments" -f body="$body" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "Cannot post CI evidence to issue #21." }
