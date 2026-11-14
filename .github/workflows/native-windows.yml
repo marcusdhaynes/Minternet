@@ -400,7 +400,8 @@ jobs:
           if (!(Test-Path -LiteralPath $marker)) { throw "EXE did not report its actual compiled version." }
           $reported = (Get-Content -LiteralPath $marker -Raw).Trim()
           Remove-Item -LiteralPath $marker -Force
-          $expected = ('{0}-build.{1}-g{2}' -f '0.3.0', $env:GITHUB_RUN_NUMBER, $env:GITHUB_SHA.Substring(0,8))
+          $configuredVersion = [string](Get-Content 'src-tauri/tauri.conf.json' -Raw | ConvertFrom-Json).version
+          $expected = ('{0}-build.{1}-g{2}' -f $configuredVersion, $env:GITHUB_RUN_NUMBER, $env:GITHUB_SHA.Substring(0,8))
           if ($reported -ne $expected) {
             throw "Embedded build version '$reported' does not match release tag version '$expected'."
           }
