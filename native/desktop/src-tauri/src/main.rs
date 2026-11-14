@@ -9,6 +9,8 @@ mod media_devices;
 mod site_context_menu;
 mod extensions;
 mod portable_updater;
+mod auth_popup;
+mod passkey_support;
 use base64::Engine as _;
 use rand::{rngs::OsRng,RngCore};
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -2589,10 +2591,18 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                 }
                 return NewWindowResponse::Deny;
             }
-            // Websites may request target=_blank or window.open(), but must
-            // not create new desktop windows. Ordinary HTTP(S) targets
-            // become Minternet tabs beside their opener. A blank request
-            // creates a normal blank tab, not an OS popup window.
+            // OAuth/identity popups need the *original WebView2 opener* for
+            // postMessage, window.closed and browser-managed redirects.
+            // An unrelated Minternet tab cannot be retroactively attached.
+            // Let WebView2 create its native, same-profile popup only for
+            // authentication windows. Ordinary windows remain Minternet tabs.
+            let opener_url=for_popup.state::<Mutex<Browser>>().lock().ok()
+                .and_then(|browser|browser.tabs.iter().find(|tab|tab.id==id)
+                    .map(|tab|tab.url.clone())).unwrap_or_default();
+            if auth_popup::preserve_opener(&opener_url,&url){
+                return NewWindowResponse::Allow;
+            }
+            // Ordinary target=_blank links open as Minternet tabs.
             if url.as_str()=="about:blank" ||
                 (matches!(url.scheme(),"https"|"http")&&url.host_str().is_some()
                     &&url.username().is_empty()&&url.password().is_none()){
@@ -4662,6 +4672,14 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             .filter_map(|t|t.view.clone()).collect::<Vec<_>>();
         for label in labels {if let Some(view)=app.get_webview(&label){let _=view.eval(&injection);}}
         return Ok(json!({"ok":true}));
+    }
+    if name=="passkey-status"{
+        // The OS probe does not assert WebView2 registration works. Private
+        // keys stay owned by Windows Hello or the selected passkey provider.
+        return Ok(passkey_support::status());
+    }
+    if name=="passkey-open-settings"{
+        return passkey_support::open_settings();
     }
     if name=="google-status"{
         return google_account::status(&app.state::<Mutex<google_account::GoogleState>>());
