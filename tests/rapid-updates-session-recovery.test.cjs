@@ -18,7 +18,7 @@ test('Updates checks native verified prereleases and reads actual installed buil
     if(name==='updates-apply')return {started:true};
     return {ok:true};
   }},location:{reload:()=>{throw Error('Update must not reload active session');}}};
-  const dom={readyState:'loading',addEventListener:()=>{},querySelector:()=>null};
+  const dom={readyState:'loading',addEventListener:()=>{},querySelector:()=>null,getElementById:()=>null};
   vm.runInNewContext(read('ui/updates.js'),{window:win,document:dom,
     fetch:()=>{throw Error('Browser-side API fetch should never be used in native build');},
     Date,Promise,localStorage:{getItem:()=>null,setItem:()=>{}}});
@@ -42,7 +42,7 @@ test('Web preview checks prereleases instead of stable-only latest endpoint',asy
       browser_download_url:'https://github.com/marcusdhaynes/Minternet/releases/download/'+tag+'/Minternet-Windows-Portable-v0.3.0-build.999.exe'}]};
   let checkedUrl='';
   const win={location:{}};
-  const dom={readyState:'loading',addEventListener:()=>{},querySelector:()=>null};
+  const dom={readyState:'loading',addEventListener:()=>{},querySelector:()=>null,getElementById:()=>null};
   vm.runInNewContext(read('ui/updates.js'),{window:win,document:dom,
     fetch:async url=>{checkedUrl=url;return {ok:true,json:async()=>[source]};},
     Date,Promise,localStorage:{getItem:()=>null,setItem:()=>{}}});
