@@ -3,7 +3,7 @@
 use serde_json::{json,Value};
 use std::{io::Read,time::Duration};
 
-const RELEASES_API:&str="https://api.github.com/repos/marcusdhaynes/Minternet/releases?per_page=30";
+const RELEASES_API:&str="https://api.github.com/repos/marcusdhaynes/Minternet/releases?per_page=100";
 const RELEASE_ASSET_PREFIX:&str="https://github.com/marcusdhaynes/Minternet/releases/download/";
 const MAX_RESPONSE:u64=2_000_000;
 const APP_VERSION:&str=env!("CARGO_PKG_VERSION");
@@ -22,7 +22,7 @@ fn older_than_installed(candidate:u64)->bool{
 }
 fn acceptable_asset(entry:&Value)->Option<String>{
     let name=entry.get("name")?.as_str()?;
-    if !name.ends_with(".exe") || !name.starts_with("Minternet-") ||
+    if !name.to_ascii_lowercase().ends_with(".exe") || !(name=="Minterest.exe" || name.starts_with("Minternet-")) ||
         name.to_ascii_lowercase().contains("setup"){return None;}
     let url=entry.get("browser_download_url")?.as_str()?;
     if !url.starts_with(RELEASE_ASSET_PREFIX){return None;}
@@ -36,8 +36,19 @@ fn extract(releases:&Value)->Result<Value,String>{
         let tag=release.get("tag_name").and_then(Value::as_str).unwrap_or("");
         let Some(run_id)=parse_tag(tag) else{continue};
         if older_than_installed(run_id){continue;}
-        let asset=release.get("assets").and_then(Value::as_array)
-            .and_then(|items|items.iter().find_map(acceptable_asset));
+        // A build is installable only if the executable AND its checksum
+        // are published together. Prefer the stable Minterest.exe alias.
+        let items=release.get("assets").and_then(Value::as_array);
+        let has_checksum=items.is_some_and(|items|items.iter().any(|asset|
+            asset.get("name").and_then(Value::as_str)==Some("SHA256SUMS.txt") &&
+            asset.get("browser_download_url").and_then(Value::as_str)
+                .is_some_and(|url|url.starts_with(RELEASE_ASSET_PREFIX))));
+        if !has_checksum{continue;}
+        let asset=items.and_then(|items|
+            items.iter().find(|entry|entry.get("name").and_then(Value::as_str)
+                ==Some("Minterest.exe"))
+                .and_then(acceptable_asset)
+                .or_else(||items.iter().find_map(acceptable_asset)));
         let Some(url)=asset else{continue};
         let page=release.get("html_url").and_then(Value::as_str).unwrap_or("");
         if !page.starts_with("https://github.com/marcusdhaynes/Minternet/releases/tag/"){continue;}
@@ -80,8 +91,12 @@ mod tests{
         let good=json!([{
           "tag_name":"minternet-build-900","draft":false,
           "html_url":"https://github.com/marcusdhaynes/Minternet/releases/tag/minternet-build-900",
-          "assets":[{"name":"Minternet-Windows-Portable-v0.3.0-build.2.exe",
-          "browser_download_url":"https://github.com/marcusdhaynes/Minternet/releases/download/minternet-build-900/Minternet-Windows-Portable-v0.3.0-build.2.exe"}],
+          "assets":[
+            {"name":"Minternet-Windows-Portable-v0.3.0-build.2.exe",
+             "browser_download_url":"https://github.com/marcusdhaynes/Minternet/releases/download/minternet-build-900/Minternet-Windows-Portable-v0.3.0-build.2.exe"},
+            {"name":"SHA256SUMS.txt",
+             "browser_download_url":"https://github.com/marcusdhaynes/Minternet/releases/download/minternet-build-900/SHA256SUMS.txt"}
+          ],
           "body":"Fixes"
         }]);
         if !older_than_installed(900){
