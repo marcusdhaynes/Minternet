@@ -7,6 +7,7 @@ mod secret_bookmarks;
 mod privacy_shield;
 mod media_devices;
 mod site_context_menu;
+mod portable_updater;
 use base64::Engine as _;
 use rand::{rngs::OsRng,RngCore};
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -5523,7 +5524,11 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         "prepare-tab" => { prepare_active(&app)?; }
         // Read the actual installed binary's version, never a stale frontend constant.
         "app-version" => {
-            return Ok(json!({"version":app.package_info().version.to_string()}));
+            return Ok(json!({"version":portable_updater::installed_version()}));
+        }
+        "update-install" => {
+            portable_updater::start(app.clone())?;
+            return Ok(json!({"ok":true,"started":true}));
         }
         "focus-address" => {focus_address_bar(&app);return Ok(json!({"ok":true}));}
         "find-bar-set" => {
@@ -6033,6 +6038,7 @@ fn install_panic_diagnostics(app:&tauri::AppHandle){
     }));
 }
 fn main() {
+    if portable_updater::maybe_run_helper(){return;}
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
@@ -6522,6 +6528,9 @@ fn main() {
                 LogicalPosition::new(0.0,0.0),
                 LogicalSize::new(width,height)
             )?;
+            // Confirm the new executable has initialized its native browser
+            // before the update helper deletes its rollback backup.
+            portable_updater::confirm_startup();
             // Fresh secondary windows start at the explicitly requested URL,
             // never duplicating the original window's restored session.
             if let Some((address,_private))=new_window_target{
