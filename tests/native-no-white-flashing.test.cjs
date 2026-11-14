@@ -41,6 +41,10 @@ test('crash recovery does not clear profiles or stored login sessions',()=>{
   const crash=block('fn attach_webview_process_recovery(','fn create_webview(');
   assert.doesNotMatch(crash,/clear_(cookies|storage)|remove_dir_all|reset_profile/);
   assert.match(crash,/schedule_surface_restore/);
+  assert.match(crash,/record\.1>=2/,
+    'Crash recovery must stop after repeated failures instead of flashing indefinitely');
+  assert.match(crash,/Duration::from_secs\(60\)/);
+  assert.match(crash,/Automatic reload was stopped to prevent flashing/);
 });
 test('no-flash regression is included in the Windows workflow',()=>{
   assert.match(workflow,/native-no-white-flashing\.test\.cjs/);
