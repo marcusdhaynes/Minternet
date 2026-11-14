@@ -4,27 +4,57 @@
 //! injection into untrusted origins.
 use serde_json::{json, Value};
 
+// Dynamically discover the OS WebAuthn API. A static link to webauthn.dll
+// would prevent Minternet from starting on Windows builds without that DLL.
 #[cfg(windows)]
-#[link(name="webauthn")]
+#[link(name="kernel32")]
 extern "system" {
-    fn WebAuthNGetApiVersionNumber() -> u32;
-    fn WebAuthNIsUserVerifyingPlatformAuthenticatorAvailable(
-        available: *mut i32,
-    ) -> i32;
+    fn LoadLibraryW(name: *const u16) -> *mut std::ffi::c_void;
+    fn GetProcAddress(module: *mut std::ffi::c_void, name: *const u8)
+        -> *mut std::ffi::c_void;
+    fn FreeLibrary(module: *mut std::ffi::c_void) -> i32;
+}
+
+#[cfg(windows)]
+fn windows_authenticator_probe() -> Option<(u32,bool,i32)> {
+    let dll:Vec<u16>="webauthn.dll\0".encode_utf16().collect();
+    let module=unsafe{LoadLibraryW(dll.as_ptr())};
+    if module.is_null(){return None;}
+    let version_address=unsafe{
+        GetProcAddress(module,b"WebAuthNGetApiVersionNumber\0".as_ptr())
+    };
+    let authenticator_address=unsafe{
+        GetProcAddress(module,
+            b"WebAuthNIsUserVerifyingPlatformAuthenticatorAvailable\0".as_ptr())
+    };
+    let value=if version_address.is_null() || authenticator_address.is_null(){
+        None
+    }else{
+        // The prototypes match Win32 WebAuthNGetApiVersionNumber (DWORD)
+        // and WebAuthNIsUserVerifyingPlatformAuthenticatorAvailable (HRESULT,
+        // BOOL*). No website-controlled arguments cross this boundary.
+        let version:unsafe extern "system" fn()->u32=
+            unsafe{std::mem::transmute(version_address)};
+        let check:unsafe extern "system" fn(*mut i32)->i32=
+            unsafe{std::mem::transmute(authenticator_address)};
+        let mut available=0i32;
+        let v=unsafe{version()};
+        let result=unsafe{check(&mut available)};
+        Some((v,available!=0,result))
+    };
+    let _=unsafe{FreeLibrary(module)};
+    value
 }
 
 pub fn status() -> Value {
     #[cfg(windows)]
     {
-        let version=unsafe{WebAuthNGetApiVersionNumber()};
-        let mut available=0i32;
-        let result=unsafe{
-            WebAuthNIsUserVerifyingPlatformAuthenticatorAvailable(&mut available)
-        };
+        let outcome=windows_authenticator_probe();
+        let (version,available,result)=outcome.unwrap_or((0,false,-1));
         return json!({
             "platform":"windows",
-            "nativeWebAuthnApiVersion":version,
-            "windowsHelloAvailable":result==0 && available!=0,
+            "nativeWebAuthnApiVersion":if outcome.is_some(){Some(version)}else{None},
+            "windowsHelloAvailable":result==0 && available,
             "nativeProbeSucceeded":result==0,
             "probeHresult":format!("0x{:08X}",result as u32),
             // This is OS capability, not evidence that WebView2 supports
