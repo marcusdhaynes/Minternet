@@ -235,11 +235,14 @@ fn wait_for_previous_process(pid:u32)->Result<(),String>{
 }
 #[cfg(windows)]
 fn replace_with_rollback(source:&Path,target:&Path,expected:&str)->Result<PathBuf,String>{
-    let old=target.with_extension("minternet-previous.exe");
-    let pending=target.with_extension("minternet-pending.exe");
-    if old.exists(){fs::remove_file(&old)
-        .map_err(|e|format!("Could not clear an old update backup: {e}"))?;}
-    if pending.exists(){let _=fs::remove_file(&pending);}
+    // Preserve previous rollback copies; never erase one just to begin an
+    // update attempt. The temporary and backup paths are process-specific.
+    let old=target.with_extension(format!(
+        "minternet-previous-{}.exe",std::process::id()));
+    let pending=target.with_extension(format!(
+        "minternet-pending-{}.exe",std::process::id()));
+    if old.exists(){return Err("Updater backup already exists".into());}
+    if pending.exists(){return Err("Updater staging file already exists".into());}
     // Copy while the original executable still exists. A failed copy is
     // non-destructive, and renaming within one directory is atomic.
     fs::copy(source,&pending).map_err(|e|format!("Cannot stage EXE in original folder: {e}"))?;
@@ -308,7 +311,6 @@ fn run_helper(pid:u32,target:&Path,expected:&str)->Result<(),String>{
                 let _=fs::remove_file(target);
                 fs::rename(&old,target).map_err(|e|
                     format!("New EXE closed immediately; rollback failed: {e}"))?;
-                let _=Command::new(target).current_dir(target.parent().unwrap()).spawn();
                 return Err("New Minternet closed during startup; restored previous version".into());
             }
             // Keep one previous executable for manual rollback. The next
@@ -319,7 +321,6 @@ fn run_helper(pid:u32,target:&Path,expected:&str)->Result<(),String>{
             let _=fs::remove_file(target);
             fs::rename(&old,target).map_err(|e|
                 format!("Could not launch updated EXE ({error}); rollback failed: {e}"))?;
-            let _=Command::new(target).current_dir(target.parent().unwrap()).spawn();
             Err(format!("Updated Minternet could not restart: {error}; previous version restored"))
         }
     }
@@ -339,6 +340,15 @@ pub fn maybe_run_helper()->bool{
     if let Err(error)=result{
         let log=std::env::temp_dir().join("Minterest-update-error.txt");
         let _=fs::write(log,format!("Minternet update error: {error}\n"));
+        // Do not strand the user if the helper cannot replace the EXE.
+        // The original exists unchanged or has been restored by rollback.
+        if let Some(target)=args.get(3).map(PathBuf::from){
+            if target.is_file(){
+                if let Some(folder)=target.parent(){
+                    let _=Command::new(&target).current_dir(folder).spawn();
+                }
+            }
+        }
     }
     true
 }
