@@ -45,6 +45,7 @@ jobs:
           node --check ../../ui/tab-blank-zones.js
           node --check ../../ui/downloads-ui.js
           node --check ../../ui/extensions-ui.js
+          node --check ../../ui/password-ui.js
           node --check ../../ui/site-download-links.js
           node --check ../../ui/bookmark-model.js
           node --check ../../ui/bookmark-import.js
@@ -185,7 +186,46 @@ jobs:
               if (Test-Path $marker) { $passed = $true; break }
             }
             if (!$passed) { throw "Popup did not render with a valid window.opener" }
-            "PASS: WebView2 related OAuth popup rendered and retained its opener." >> $env:GITHUB_STEP_SUMMARY
+            $proof = Get-Content -LiteralPath $marker -Raw
+            if ($proof -notmatch "PASS: child WebView2 window sent a message through its real window.opener") {
+              throw "A window existed but the OAuth opener messaging relationship was not verified: $proof"
+            }
+            "PASS: real WebView2 OAuth-style popup preserved window.opener and postMessage." >> $env:GITHUB_STEP_SUMMARY
+          } finally {
+            if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
+            Remove-Item $marker -Force -ErrorAction SilentlyContinue
+          }
+      - name: Probe real Windows WebView2 WebAuthn and Windows Hello readiness
+        shell: pwsh
+        run: |
+          $exe = "$env:RUNNER_TEMP\minternet-portable\Minternet-Portable-x64.exe"
+          $p = Start-Process -FilePath $exe -ArgumentList "--minternet-passkey-smoke" -PassThru
+          $marker = Join-Path $env:TEMP "minternet-passkey-$($p.Id).ok"
+          try {
+            $complete = $false
+            for ($i = 0; $i -lt 40; $i++) {
+              Start-Sleep -Seconds 2
+              $p.Refresh()
+              if ($p.HasExited) { throw "Browser exited before WebAuthn readiness probe" }
+              if (Test-Path $marker) { $complete = $true; break }
+            }
+            if (!$complete) { throw "Real HTTPS WebView2 WebAuthn readiness probe did not complete" }
+            $result = Get-Content -LiteralPath $marker -Raw | ConvertFrom-Json
+            if ($result.browser.origin -ne "https://example.com" -or
+                $result.browser.secure -ne $true) {
+              throw "WebAuthn probe was not performed in a trusted HTTPS website context"
+            }
+            if ($result.windows.platform -ne "windows" -or
+                $result.windows.keysInMinternetVault -ne $false) {
+              throw "Windows WebAuthn native probe missing or private key boundary violated"
+            }
+            if ($result.browser.create -and $result.browser.get -and
+                $result.browser.publicKeyCredential) {
+              "PASS: navigator.credentials.create/get and PublicKeyCredential exposed in real WebView2." >> $env:GITHUB_STEP_SUMMARY
+            } else {
+              "LIMITATION: real WebView2 lacks some WebAuthn APIs; Windows Hello cannot be declared compatible." >> $env:GITHUB_STEP_SUMMARY
+            }
+            "OS Windows Hello available: $($result.windows.windowsHelloAvailable); WebAuthn version: $($result.windows.nativeWebAuthnApiVersion); page UVPA: $($result.browser.platformAuthenticator)" >> $env:GITHUB_STEP_SUMMARY
           } finally {
             if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
             Remove-Item $marker -Force -ErrorAction SilentlyContinue
