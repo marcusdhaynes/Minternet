@@ -1087,6 +1087,18 @@
   });
   $('settings').addEventListener('click', openSettings);
   $('bookmarkBackdrop').addEventListener('click', closeOverlay);
+  // Dismiss on pointer-down, not mouse-up/click, including toolbar areas
+  // outside the overlay. Do not close while using the active panel.
+  document.addEventListener('pointerdown',event=>{
+    if(!mode)return;
+    const activeId={
+      settings:'bookmarkSettings',folder:'bookmarkFolderMenu',
+      manager:'bookmarkManager',editor:'bookmarkEditor'
+    }[mode];
+    const activePanel=activeId?$(activeId):null;
+    if(activePanel?.contains(event.target))return;
+    closeOverlay();
+  },true);
   // The website is a separate native WebView2: leaving browser chrome must
   // dismiss an open Settings/bookmark window just like clicking the backdrop.
   window.addEventListener('blur',()=>{if(mode)closeOverlay();});

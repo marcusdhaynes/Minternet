@@ -1,5 +1,7 @@
 name: Minternet Windows portable single EXE (under 50 MB)
 on:
+  pull_request:
+    branches: [main]
   # Every repository push creates a Windows build, including development
   # branches and configuration-only changes. Tags are also supported.
   push:
@@ -47,6 +49,8 @@ jobs:
           node --check ../../ui/browser-settings.js
           node --check ../../ui/tab-blank-zones.js
           node --check ../../ui/downloads-ui.js
+          node --check ../../ui/extensions-ui.js
+          node --check ../../ui/site-download-links.js
           node --check ../../ui/bookmark-model.js
           node --check ../../ui/bookmark-import.js
           node --check ../../ui/bookmark-ui.js
@@ -55,13 +59,16 @@ jobs:
           node --check ../../ui/tab-group-ui.js
           node --check ../../ui/chrome-native-menu.js
           node --check ../../ui/search-settings.js
+          node --check ../../ui/navigation-history-ui.js
           node --check ../../ui/volume-ui.js
           node --check ../../ui/audio-gain.js
           node --check ../../ui/credential-import.js
+          node --test ../../tests/release-feature-parity.test.cjs
           node --test ../../tests/updates-release.test.cjs
           node --test ../../tests/site-context-menu.test.cjs
           node --test ../../tests/native-surface-transitions.test.cjs
-          node --test ../../tests/bookmarks.test.cjs ../../tests/bookmark-import.test.cjs ../../tests/tab-groups.test.cjs ../../tests/native-menus.test.cjs ../../tests/search-settings.test.cjs ../../tests/rapid-bookmarks-volume-import.test.cjs ../../tests/tab-blank-zones.test.cjs ../../tests/browser-home-download.test.cjs ../../tests/tab-limit.test.cjs
+          node --check ../../ui/updates.js
+          node --test ../../tests/bookmarks.test.cjs ../../tests/bookmark-import.test.cjs ../../tests/tab-groups.test.cjs ../../tests/native-menus.test.cjs ../../tests/search-settings.test.cjs ../../tests/rapid-bookmarks-volume-import.test.cjs ../../tests/tab-blank-zones.test.cjs ../../tests/browser-home-download.test.cjs ../../tests/tab-limit.test.cjs ../../tests/extensions-manager.test.cjs ../../tests/settings-visual-density.test.cjs
       - name: Generate Branded Minternet App Icons
         run: |
           python -m pip install --disable-pip-version-check --quiet pillow

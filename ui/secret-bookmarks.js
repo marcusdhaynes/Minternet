@@ -748,6 +748,16 @@
   $('secretAccessCancel').addEventListener('click',cancelEntry);
   $('secretClose').addEventListener('click',close);
   $('secretBackdrop').addEventListener('click',close);
+  document.addEventListener('pointerdown',event=>{
+    if(screen.hidden)return;
+    if(event.target.closest?.('#secretScreen .secret-panel'))return;
+    // The secret panel can use several nested layouts; keep all interactions
+    // inside the visible dialog active, but dismiss on outside pointer-down.
+    const dialog=screen.querySelector('.secret-panel,.secret-bookmarks-panel,aside,[role="dialog"]');
+    if(dialog?.contains(event.target))return;
+    close();
+  },true);
+  window.addEventListener('blur',()=>{if(!screen.hidden)close();});
   $('secretLock').addEventListener('click',()=>void lock());
   $('secretAutoLockAmount').addEventListener('change',saveCloseLockPreference);
   $('secretAutoLockUnit').addEventListener('change',saveCloseLockPreference);

@@ -7,6 +7,7 @@ mod secret_bookmarks;
 mod privacy_shield;
 mod media_devices;
 mod site_context_menu;
+mod extensions;
 mod portable_updater;
 use base64::Engine as _;
 use rand::{rngs::OsRng,RngCore};
@@ -52,15 +53,19 @@ struct BrowserPreferences {
     download_folder:Option<String>,
     #[serde(default)]
     previous_download_folders:Vec<String>,
+    #[serde(default="default_download_mode")]
+    download_mode:String,
 }
 fn default_new_tab_mode()->String{"dashboard".into()}
 fn default_miniplayer_fade_seconds()->u16{5}
+fn default_download_mode()->String{"automatic".into()}
+fn valid_download_mode(mode:&str)->bool{matches!(mode,"automatic"|"ask")}
 fn valid_new_tab_mode(value:&str)->bool{matches!(value,"dashboard"|"website")}
 impl Default for BrowserPreferences{
     fn default()->Self{
         Self{homepage:DEFAULT_HOMEPAGE.into(),new_tab_mode:default_new_tab_mode(),tab_limit:0,
             miniplayer_fade_seconds:default_miniplayer_fade_seconds(),
-            download_folder:None,previous_download_folders:Vec::new()}
+            download_folder:None,previous_download_folders:Vec::new(),download_mode:default_download_mode()}
     }
 }
 struct BrowserPreferenceState(Mutex<BrowserPreferences>);
@@ -124,6 +129,7 @@ fn load_preferences(app:&tauri::AppHandle)->BrowserPreferences{
         saved.new_tab_mode=default_new_tab_mode();
     }
     saved.previous_download_folders.truncate(8);
+    if !valid_download_mode(&saved.download_mode){saved.download_mode=default_download_mode();}
     saved.tab_limit=saved.tab_limit.min(1_000_000);
     saved.miniplayer_fade_seconds=saved.miniplayer_fade_seconds.min(300);
     saved
@@ -554,52 +560,59 @@ mod download_format_tests {
     }
 }
 
-#[cfg(windows)]
-fn explicit_download_approval(tab_id:u32,url:&tauri::Url,path:&std::path::Path)->bool {
-    use windows::core::PCWSTR;
-    use windows::Win32::UI::WindowsAndMessaging::{
-        MessageBoxW, MB_YESNO, MB_ICONWARNING, MB_DEFBUTTON2, MB_SETFOREGROUND, IDYES
-    };
-    // Suppress download prompt storms from hostile ad scripts. This is
-    // intentionally a per-tab gate; a denied download is never written.
-    static LAST_PROMPT:std::sync::OnceLock<Mutex<HashMap<u32,Instant>>> =
-        std::sync::OnceLock::new();
-    let lock=LAST_PROMPT.get_or_init(||Mutex::new(HashMap::new()));
-    if let Ok(mut recent)=lock.lock(){
-        let now=Instant::now();
-        if recent.get(&tab_id).is_some_and(|t|now.duration_since(*t)<Duration::from_secs(2)){
-            return false;
+// Download events originate in a native website WebView; no website script can
+// choose the destination. The trusted profile determines automatic vs Save As.
+// Keep WebView2's source validation and completed-file signature checks.
+fn download_destination(app:&tauri::AppHandle,url:&tauri::Url,
+    suggested:&std::path::Path)->Result<Option<PathBuf>,String>{
+    let automatic=download_path(app,url,suggested)?;
+    let ask=app.state::<BrowserPreferenceState>().0.lock()
+        .map_err(|e|e.to_string())?.download_mode=="ask";
+    if !ask{return Ok(Some(automatic));}
+    // The picker blocks only this download's callback, not a global approval
+    // gate. Run the system picker on a worker, not the WebView UI thread.
+    let handle=app.clone();
+    let suggestion=automatic.clone();
+    let picked=std::thread::spawn(move||{
+        let filename=suggestion.file_name()
+            .map(|v|v.to_string_lossy().to_string()).unwrap_or_else(||"download".into());
+        let directory=suggestion.parent().unwrap_or_else(||std::path::Path::new("."));
+        handle.dialog().file().set_title("Save Download")
+            .set_directory(directory)
+            .set_file_name(&filename).blocking_save_file()
+            .and_then(|picked|picked.into_path().ok())
+    }).join().map_err(|_|"Save dialog failed".to_string())?;
+    let Some(path)=picked else{return Ok(None);};
+    if !path.is_absolute() || path.parent().is_none(){
+        return Err("Choose an absolute destination".into());
+    }
+    let parent=path.parent().ok_or("Missing destination folder")?;
+    if !parent.is_dir(){return Err("Destination folder is unavailable".into());}
+    let canonical=std::fs::canonicalize(parent).map_err(|e|e.to_string())?;
+    if !canonical.is_dir(){return Err("Invalid destination folder".into());}
+    let name=path.file_name().and_then(|n|n.to_str())
+        .ok_or("Invalid download filename")?;
+    if name!=safe_download_filename(name){return Err("Invalid download filename".into());}
+    // Never silently overwrite an existing file.
+    if path.exists(){return Err("A file with that name already exists".into());}
+    // Remember the user-selected destination to keep Open/Show in Folder
+    // available after the download completes and after application restart.
+    {
+        let state=app.state::<BrowserPreferenceState>();
+        let mut prefs=state.0.lock().map_err(|e|e.to_string())?;
+        let mut next=prefs.clone();
+        let directory=parent.to_string_lossy().to_string();
+        if next.download_folder.as_deref()!=Some(directory.as_str()){
+            next.previous_download_folders.retain(|p|p!=&directory);
+            next.previous_download_folders.push(directory);
+            if next.previous_download_folders.len()>8{
+                next.previous_download_folders.remove(0);
+            }
         }
-        recent.insert(tab_id,now);
-    }else{return false;}
-    let name=path.file_name().and_then(|s|s.to_str()).unwrap_or("download")
-        .chars().filter(|c|!c.is_control()).take(110).collect::<String>();
-    let host=url.host_str().unwrap_or("generated browser content");
-    let dangerous=matches!(path.extension().and_then(|s|s.to_str())
-        .unwrap_or("").to_ascii_lowercase().as_str(),
-        "exe"|"msi"|"msix"|"appx"|"bat"|"cmd"|"com"|"scr"|"ps1"|
-        "vbs"|"js"|"jar"|"reg"|"lnk"|"dll");
-    let warning=if dangerous {
-        "WARNING: This file could execute code on your computer.\\n\\n"
-    }else{""};
-    let message=format!(
-        "{warning}Allow this website download?\\n\\nFile: {name}\\nWebsite: {host}\\n\\nOnly choose Yes if YOU requested this exact file. Clicking Play on a video does not authorize a download.\\n\\nThe default answer is NO."
-    );
-    let wide=message.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
-    let title="Minternet — Verify Download".encode_utf16()
-        .chain(std::iter::once(0)).collect::<Vec<_>>();
-    let permitted=unsafe {
-        MessageBoxW(None,PCWSTR(wide.as_ptr()),PCWSTR(title.as_ptr()),
-            MB_YESNO|MB_ICONWARNING|MB_DEFBUTTON2|MB_SETFOREGROUND)==IDYES
-    };
-    if let Ok(mut recent)=lock.lock(){recent.insert(tab_id,Instant::now());}
-    permitted
-}
-// Fail closed on non-Windows until an equivalent trusted OS confirmation
-// dialog is implemented; the website itself cannot grant permission.
-#[cfg(not(windows))]
-fn explicit_download_approval(_tab_id:u32,_url:&tauri::Url,_path:&std::path::Path)->bool{
-    false
+        persist_preferences(app,&next)?;
+        *prefs=next;
+    }
+    Ok(Some(path))
 }
 fn is_disguised_executable(path:&std::path::Path)->bool{
     download_signature(path)==Some("exe") &&
@@ -2077,10 +2090,21 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     let for_download=app.clone();
     let shield_preferences=app.state::<privacy_shield::ShieldState>().0.lock()
         .map(|s|s.clone()).unwrap_or_default();
-    let builder = WebviewBuilder::new(label.clone(), url)
-        .incognito(private)
+    let builder=WebviewBuilder::new(label.clone(),url).incognito(private);
+    // Opt in to a separate WebView2 site profile only after a user imports
+    // an enabled extension. Keeps trusted browser chrome, credentials and
+    // its existing profile outside third-party extension scope. Without an
+    // imported extension existing cookies and sessions stay untouched.
+    #[cfg(windows)]
+    let builder=if !private && extensions::any_enabled(app){
+        builder.browser_extensions_enabled(true)
+            .data_directory(extensions::isolated_site_dir(app)?)
+            .extensions_path(extensions::active_dir(app)?)
+    }else{builder};
+    let builder = builder
         .initialization_script(privacy_shield::script(&shield_preferences))
         .initialization_script(include_str!("../../../../ui/site-media-bridge.js"))
+        .initialization_script(include_str!("../../../../ui/site-download-links.js"))
         // A remote page never receives native commands. This reserved
         // non-loading popup URL is a narrowly scoped Ctrl+F signal that
         // the native new-window handler consumes without navigating.
@@ -2153,19 +2177,23 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                     // WebView2 decides whether to render inline (PDFs, images,
                     // media) or download. Don't reject ordinary HTTP, blob:
                     // exports, data: attachments, or user-clicked .exe files.
-                    if !download_source_allowed(&for_download,id,&url){return false;}
-                    match download_path(&for_download,&url,destination.as_path()){
-                        Ok(path)=>{
-                            if !explicit_download_approval(id,&url,&path){
-                                let _=for_download.emit_to("chrome","minternet:download-blocked",
-                                    json!({"kind":"unapproved-download"}));
-                                return false;
-                            }
+                    if !download_source_allowed(&for_download,id,&url){
+                        let _=for_download.emit_to("chrome","minternet:download-blocked",
+                            json!({"reason":"This download URL was rejected by browser safety checks."}));
+                        return false;
+                    }
+                    match download_destination(&for_download,&url,destination.as_path()){
+                        Ok(Some(path))=>{
                             *destination=path.clone();
                             download_update(&for_download,&url,Some(&path),private,None);
                             true
                         },
-                        Err(_)=>false
+                        Ok(None)=>false, // User cancelled the Save As dialog.
+                        Err(error)=>{
+                            let _=for_download.emit_to("chrome","minternet:download-blocked",
+                                json!({"reason":format!("Download could not begin: {error}")}));
+                            false
+                        }
                     }
                 },
                 DownloadEvent::Finished{url,path,success}=>{
@@ -3896,7 +3924,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
     }
     if name=="volume-set" {
         let level=value.get("level").and_then(Value::as_u64)
-            .filter(|v|*v<=300).ok_or("Volume must be 0–300%")? as u16;
+            .filter(|v|*v<=600).ok_or("Volume must be 0–600%")? as u16;
         let muted=value.get("muted").and_then(Value::as_bool)
             .ok_or("Mute setting must be a boolean")?;
         let changed={
@@ -4617,6 +4645,52 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         remember_undo(&app,None);
     }
     match name.as_str() {
+        "extensions-list" => {
+            return extensions::list(&app);
+        }
+        "extensions-import" => {
+            let source=value.as_str().ok_or("Choose a source to import an extension")?.to_string();
+            if !matches!(source.as_str(),"minternet"|"firefox"|"chrome"){
+                return Err("Unsupported extension source".into());
+            }
+            #[cfg(not(windows))]
+            return Err("Local browser extension installation is available only on Windows WebView2".into());
+            #[cfg(windows)]
+            {
+                let handle=app.clone();
+                let source_for_picker=source.clone();
+                let picked=tauri::async_runtime::spawn_blocking(move||{
+                    let picker=handle.dialog().file().set_title("Import Browser Extension")
+                        .add_filter("WebExtensions",&["mext","zip","xpi","crx"]);
+                    let picked=if let Some(main)=handle.get_window("main"){
+                        picker.set_parent(&main).blocking_pick_file()
+                    }else{picker.blocking_pick_file()};
+                    picked.and_then(|file|file.into_path().ok())
+                }).await.map_err(|e|format!("Extension picker failed: {e}"))?;
+                let Some(path)=picked else{return Ok(json!({"cancelled":true}));};
+                let handle=app.clone();
+                let result=tauri::async_runtime::spawn_blocking(move||
+                    extensions::import(&handle,&source_for_picker,&path))
+                    .await.map_err(|e|format!("Extension import task failed: {e}"))??;
+                return Ok(json!({"ok":true,"extension":result,"restartRequired":true}));
+            }
+        }
+        "extensions-toggle" => {
+            let source=value.get("source").and_then(Value::as_str)
+                .ok_or("Extension source is missing")?;
+            let id=value.get("id").and_then(Value::as_str)
+                .ok_or("Extension ID is missing")?;
+            let enabled=value.get("enabled").and_then(Value::as_bool)
+                .ok_or("Extension state is missing")?;
+            return extensions::set_enabled(&app,source,id,enabled);
+        }
+        "extensions-remove" => {
+            let source=value.get("source").and_then(Value::as_str)
+                .ok_or("Extension source is missing")?;
+            let id=value.get("id").and_then(Value::as_str)
+                .ok_or("Extension ID is missing")?;
+            return extensions::remove(&app,source,id);
+        }
         "browser-preferences" => {
             let state=app.state::<BrowserPreferenceState>();
             let prefs=state.0.lock().map_err(|e|e.to_string())?;
@@ -4625,6 +4699,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             let tab_limit=prefs.tab_limit;
             let fade_seconds=prefs.miniplayer_fade_seconds;
             let system=prefs.download_folder.is_none();
+            let download_mode=prefs.download_mode.clone();
             drop(prefs);
             let destination=configured_download_folder(&app)?;
             return Ok(json!({
@@ -4633,7 +4708,8 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 "tabLimit":tab_limit,
                 "miniplayerFadeSeconds":fade_seconds,
                 "downloadFolder":destination.to_string_lossy(),
-                "usingSystemDownloads":system
+                "usingSystemDownloads":system,
+                "downloadMode":download_mode
             }));
         }
         "miniplayer-fade-set" => {
@@ -4687,6 +4763,17 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             persist_preferences(&app,&updated)?;
             *prefs=updated;
             return Ok(json!({"ok":true,"homepage":selected}));
+        }
+        "downloads-mode-set" => {
+            let mode=value.as_str().ok_or("Select download behavior")?;
+            if !valid_download_mode(mode){return Err("Choose Automatic or Ask Every Time".into());}
+            let state=app.state::<BrowserPreferenceState>();
+            let mut prefs=state.0.lock().map_err(|e|e.to_string())?;
+            let mut updated=prefs.clone();
+            updated.download_mode=mode.into();
+            persist_preferences(&app,&updated)?;
+            *prefs=updated;
+            return Ok(json!({"ok":true,"downloadMode":mode}));
         }
         "downloads-folder-set" => {
             let raw=value.as_str().ok_or("Enter an absolute Downloads folder path")?.trim();
@@ -5790,6 +5877,48 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             save_pinned(&app)?;
             activated(&app)?;
         }
+        "navigation-history-list" => {
+            let direction=value.as_str().ok_or("History direction missing")?;
+            if direction!="back" && direction!="forward"{return Err("Invalid history direction".into());}
+            let state=app.state::<Mutex<Browser>>();
+            let b=state.lock().map_err(|e|e.to_string())?;
+            let tab=b.active().ok_or("No active tab")?;
+            if tab.secret_id.is_some(){return Ok(json!([]));}
+            let indices:Vec<usize>=if direction=="back"{
+                (0..tab.at).rev().take(50).collect()
+            }else{
+                ((tab.at+1)..tab.history.len()).take(50).collect()
+            };
+            return Ok(json!(indices.into_iter().filter_map(|index|{
+                let url=tab.history.get(index)?;
+                if !is_real_page_url(url){return None;}
+                Some(json!({"index":index,"url":url,"title":title_for(url)}))
+            }).collect::<Vec<_>>()));
+        }
+        "navigation-history-jump" => {
+            let target=value.as_u64().ok_or("Invalid history index")? as usize;
+            let (id,url,label,delta)={
+                let state=app.state::<Mutex<Browser>>();
+                let mut b=state.lock().map_err(|e|e.to_string())?;
+                let tab=b.active_mut().ok_or("No active tab")?;
+                if tab.secret_id.is_some()||target>=tab.history.len()||target==tab.at{
+                    return Err("History entry is unavailable".into());
+                }
+                let url=tab.history[target].clone();
+                if !is_real_page_url(&url){return Err("History URL is unavailable".into());}
+                let delta=target as isize-tab.at as isize;
+                tab.at=target;tab.url=url.clone();tab.title=title_for(&url);
+                (tab.id,url,tab.view.clone(),delta)
+            };
+            let native=label.and_then(|label|app.get_webview(&label))
+                .map(|view|view.eval(&format!("history.go({delta})")).is_ok())
+                .unwrap_or(false);
+            if native{notify(&app);}
+            else {
+                let dest=tauri::Url::parse(&url).map_err(|e|e.to_string())?;
+                navigate_tab(&app,id,Some(dest),false)?;
+            }
+        }
         "back" | "forward" => {
             // Let WebView2 use its own BFCache/history instead of reloading the URL.
             // This preserves scroll position, page state, and avoids repeat requests.
@@ -5923,6 +6052,39 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 (tab.id,tab.url.clone(),tab.view.clone())
             };
             if url==HOME{return Ok(json!({"ok":true}));}
+            // A second Refresh within five seconds rebuilds the child WebView.
+            // This recovers a stuck/white WebView2 controller that reports a
+            // successful reload yet displays no content. The normal first
+            // Refresh still preserves live page state whenever possible.
+            static RELOAD_ATTEMPTS: std::sync::OnceLock<Mutex<HashMap<u32,Instant>>> =
+                std::sync::OnceLock::new();
+            let force_recreate={
+                let attempts=RELOAD_ATTEMPTS.get_or_init(||Mutex::new(HashMap::new()));
+                let mut guard=attempts.lock().map_err(|e|e.to_string())?;
+                guard.retain(|_,when|when.elapsed()<Duration::from_secs(5));
+                let retry=guard.get(&id).is_some();
+                if retry{guard.remove(&id);}
+                else{guard.insert(id,Instant::now());}
+                retry
+            };
+            if force_recreate {
+                if let Some(label)=label.as_ref() {
+                    if let Some(view)=app.get_webview(label){let _=view.close();}
+                }
+                {
+                    let state=app.state::<Mutex<Browser>>();
+                    let mut browser=state.lock().map_err(|e|e.to_string())?;
+                    if let Some(tab)=browser.tabs.iter_mut().find(|tab|tab.id==id){
+                        tab.view=None;
+                    }
+                }
+                let target=tauri::Url::parse(&url).map_err(|e|e.to_string())?;
+                if !matches!(target.scheme(),"http"|"https"){
+                    return Err("This page cannot be reloaded".into());
+                }
+                navigate_tab(&app,id,Some(target),false)?;
+                return Ok(json!({"ok":true,"recovered":true}));
+            }
             // Reload a live renderer; suspended tabs must recreate the
             // WebView rather than silently doing nothing.
             let mut reloaded=false;

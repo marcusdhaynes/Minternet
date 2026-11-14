@@ -102,6 +102,11 @@
   }
   $('passwordManagerOpen').addEventListener('click',open);
   $('vaultBackdrop').addEventListener('click',close);
+  document.addEventListener('pointerdown',event=>{
+    if(screen.hidden||screen.querySelector('.vault-panel')?.contains(event.target))return;
+    close();
+  },true);
+  window.addEventListener?.('blur',()=>{if(!screen.hidden)close();});
   $('vaultClose').addEventListener('click',close);
   $('vaultLock').addEventListener('click',async()=>{
     const result=await invoke('vault-lock');

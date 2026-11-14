@@ -9,6 +9,7 @@
   const home=$('homePageUrl'),saveHome=$('homePageSave');
   const folder=$('downloadFolderPath'),saveFolder=$('downloadFolderSave');
   const reset=$('downloadFolderDefault'),browse=$('downloadFolderBrowse'),status=$('browserPreferencesStatus');
+  const downloadMode=$('downloadMode');
   const tabLimit=$('tabLimit'),saveTabLimit=$('tabLimitSave');
   const miniplayerFade=$('miniplayerFadeSeconds'),miniplayerStatus=$('miniplayerFadeStatus');
   if(!home||!saveHome||!folder||!saveFolder||!reset||!status||!tabLimit||!saveTabLimit)return;
@@ -21,6 +22,7 @@
   function setBusy(busy){
     saveHome.disabled=saveFolder.disabled=reset.disabled=saveTabLimit.disabled=Boolean(busy);
     if(browse)browse.disabled=Boolean(busy);
+    if(downloadMode)downloadMode.disabled=Boolean(busy);
   }
   async function invoke(command,payload){
     const result=await api.command(command,payload);
@@ -39,6 +41,7 @@
       try {
         const result=await invoke('browser-preferences');
         home.value=result?.homepage||defaultHome;
+        if(downloadMode)downloadMode.value=result?.downloadMode==='ask'?'ask':'automatic';
         if(newTabMode)newTabMode.value=result?.newTabMode==='website'?'website':'dashboard';
         tabLimit.value=String(result?.tabLimit??0);
         if(miniplayerFade)miniplayerFade.value=String(result?.miniplayerFadeSeconds??5);
@@ -53,6 +56,7 @@
     try{
       const settings=await invoke('browser-preferences');
       home.value=settings.homepage||defaultHome;
+      if(downloadMode)downloadMode.value=settings.downloadMode==='ask'?'ask':'automatic';
       if(newTabMode)newTabMode.value=settings.newTabMode==='website'?'website':'dashboard';
       tabLimit.value=String(settings.tabLimit??0);
       if(miniplayerFade)miniplayerFade.value=String(settings.miniplayerFadeSeconds??5);
@@ -83,7 +87,7 @@
       folder.value=result.usingSystemDownloads?'':result.downloadFolder;
       folder.placeholder=result.usingSystemDownloads
         ?result.downloadFolder:'Enter absolute folder path';
-      report('Approved downloads will save to '+result.downloadFolder);
+      report('Downloads Folder: '+result.downloadFolder);
     }catch(e){report('Downloads folder was not changed: '+String(e.message||e));}
     finally{setBusy(false);}
   }
@@ -138,15 +142,20 @@
   miniplayerFade?.addEventListener('keydown',event=>{
     if(event.key==='Enter'){event.preventDefault();void updateMiniplayerFade();}
   });
-  for(const [id,url] of [
-    ['chromeExtensionStore','https://chromewebstore.google.com/'],
-    ['firefoxExtensionStore','https://addons.mozilla.org/en-US/firefox/']
-  ]){
-    $(id)?.addEventListener('click',async()=>{
-      const result=await api.command('new-url',url);
-      if(result?.message)report(result.message);
-    });
-  }
+  downloadMode?.addEventListener('change',async()=>{
+    const selected=downloadMode.value;
+    downloadMode.disabled=true;
+    try{
+      const result=await invoke('downloads-mode-set',selected);
+      if(!result?.ok)throw Error('Could not save Download Location preference');
+      report(selected==='automatic'
+        ?'Downloads will save automatically to your configured Downloads Folder.'
+        :'Each download will open Save As to choose its destination.');
+    }catch(error){
+      report('Download behavior was not changed: '+String(error.message||error));
+      await refresh();
+    }finally{downloadMode.disabled=false;}
+  });
   saveTabLimit.addEventListener('click',()=>void updateTabLimit());
   tabLimit.addEventListener('keydown',event=>{
     if(event.key==='Enter'){event.preventDefault();void updateTabLimit();}

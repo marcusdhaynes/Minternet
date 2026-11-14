@@ -133,11 +133,11 @@ test('compact Find, toolbar order, and branded new tabs',()=>{
   assert.match(css,/\.address-wrap\{flex:1 1 auto!important/);
 });
 
-test('Downloads remain guarded while site-created windows open as tabs',()=>{
+test('Downloads keep native source checks and signature validation while popups become tabs',()=>{
   const native=read('native/desktop/src-tauri/src/main.rs');
   const shield=read('native/desktop/src-tauri/src/privacy_shield.rs');
-  assert.match(native,/if !explicit_download_approval\(id,&url,&path\)/);
-  assert.match(native,/MB_YESNO\|MB_ICONWARNING\|MB_DEFBUTTON2/);
+  assert.match(native,/download_destination\(&for_download,&url,destination\.as_path\(\)\)/);
+  assert.doesNotMatch(native,/explicit_download_approval/);
   assert.match(native,/fn is_disguised_executable/);
   assert.match(native,/if is_disguised_executable\(std::path::Path::new\(&entry\.path\)\)/);
   assert.match(native,/if !download_source_allowed\(&for_download,id,&url\)/);
@@ -147,11 +147,13 @@ test('Downloads remain guarded while site-created windows open as tabs',()=>{
 });
 
 test('official extension catalogs are browsable without misleading install claims',()=>{
-  const html=read('ui/index.html'),prefs=read('ui/browser-settings.js');
+  const html=read('ui/index.html'),manager=read('ui/extensions-ui.js');
+  assert.match(html,/id="extensionsButton"/);
   assert.match(html,/id="chromeExtensionStore"/);
   assert.match(html,/id="firefoxExtensionStore"/);
-  assert.match(prefs,/https:\/\/chromewebstore\.google\.com\//);
-  assert.match(prefs,/https:\/\/addons\.mozilla\.org\/en-US\/firefox\//);
+  assert.match(manager,/https:\/\/chromewebstore\.google\.com\//);
+  assert.match(manager,/https:\/\/addons\.mozilla\.org\/en-US\/firefox\//);
+  assert.match(html,/installing from the store's own button is not currently supported/);
 });
 
 test('No fake-OAuth popup exceptions or cross-site popup blocking remain',()=>{

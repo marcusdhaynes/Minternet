@@ -138,37 +138,55 @@
     // The web companion is deployed through GitHub Pages.
     window.location.reload();
   }
-  function renderSection(el,info,status){
+  // Compact Settings presentation retained from the modern Nov 13 interface.
+  // Never replace the verified native updater or its version comparison.
+  function renderSection(el,info,status,checking=false){
     el.replaceChildren();
-    const heading=document.createElement('h2');heading.textContent='Updates';el.append(heading);
-    const version=document.createElement('p');version.textContent='Installed Version: v'+installed;el.append(version);
-    const available=document.createElement('p');
-    available.textContent='Available Version: '+(info?'v'+info.version:'—');el.append(available);
-    if(info?.notes){
-      const title=document.createElement('h3');title.textContent="What's New";
-      const notes=document.createElement('pre');notes.textContent=info.notes;notes.style.whiteSpace='pre-wrap';
-      el.append(title,notes);
+    const versions=document.createElement('div');versions.className='updates-versions';
+    function versionRow(label,value){
+      const row=document.createElement('div');row.className='updates-version-row';
+      const caption=document.createElement('span');caption.textContent=label;
+      const number=document.createElement('strong');number.textContent=value;
+      row.append(caption,number);return row;
     }
-    const message=document.createElement('p');message.setAttribute('role','status');
+    versions.append(versionRow('Installed Version','v'+installed));
+    if(info)versions.append(versionRow('Available Version','v'+info.version));
+    el.append(versions);
+    const message=document.createElement('div');message.className='updates-current-status';
+    message.setAttribute('role','status');message.setAttribute('aria-live','polite');
     message.textContent=status||'';
+    message.dataset.state=checking?'checking':
+      lastStatus?.kind==='offline'?'error':
+      lastStatus?.kind==='unpublished'?'unpublished':info?'available':'current';
     el.append(message);
-    if(lastStatus?.kind==='unpublished'){
-      const releaseLink=document.createElement('a');releaseLink.href=RELEASES;
-      releaseLink.target='_blank';releaseLink.rel='noopener';
-      releaseLink.textContent='View GitHub Releases';el.append(releaseLink);
+    if(info?.notes){
+      const notes=document.createElement('details');notes.className='updates-release-notes';
+      const summary=document.createElement('summary');summary.textContent="What's New";
+      const body=document.createElement('p');body.textContent=info.notes;
+      notes.append(summary,body);el.append(notes);
     }
-    const controls=document.createElement('div');
-    const check=document.createElement('button');check.type='button';check.textContent='Check for Updates';
-    check.addEventListener('click',()=>{void mountSection(el);});controls.append(check);
+    if(lastStatus?.kind==='unpublished'){
+      const link=document.createElement('a');link.href=RELEASES;
+      link.target='_blank';link.rel='noopener';link.textContent='View GitHub Releases';
+      el.append(link);
+    }
+    const controls=document.createElement('div');controls.className='updates-actions';
+    const check=document.createElement('button');check.type='button';
+    check.className='updates-check-button';
+    check.textContent=checking?'Checking…':'Check for Updates';
+    check.disabled=Boolean(checking);check.addEventListener('click',()=>{void mountSection(el);});
+    controls.append(check);
     if(info){
       const update=document.createElement('button');update.type='button';
-      update.textContent=info.cached?'Open Last Verified Update':'Download v'+info.version;
-      update.addEventListener('click',()=>applyUpdate(info));controls.append(update);
+      update.className='updates-install-button';
+      update.textContent=info.cached?'Install Last Verified Update':
+        window.__TAURI__?'Install & Restart · v'+info.version:'Get v'+info.version;
+      update.addEventListener('click',()=>{void applyUpdate(info);});controls.append(update);
     }
     el.append(controls);
   }
   async function mountSection(el){
-    renderSection(el,null,'Checking GitHub Releases…');
+    renderSection(el,null,'Checking GitHub Releases…',true);
     const info=await checkForUpdate();
     let status;
     if(lastStatus?.kind==='unpublished')status=lastStatus.message;

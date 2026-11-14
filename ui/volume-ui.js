@@ -5,11 +5,12 @@
   const $=id=>document.getElementById(id);
   const slider=$('volumeSlider'),button=$('volumeButton');
   const input=$('volumeNumber'),display=$('volumeValue'),hold=$('volumeHoldDelay');
-  const increment1=$('volumeIncrement1'),increment10=$('volumeIncrement10');
+  const increment1=$('volumeIncrement1'),increment10=$('volumeIncrement10'),maxSelect=$('volumeMax');
   if(!slider||!button||!input||!display||!hold||!window.minternet)return;
   const KEY='minternet.volume.v1';
-  const clamp=n=>Math.max(0,Math.min(300,Math.round(n)));
-  const anchors=[0,100,200,300];
+  let maxVolume=300;
+  const clamp=n=>Math.max(0,Math.min(maxVolume,Math.round(n)));
+  const anchors=()=>Array.from({length:maxVolume/100+1},(_,i)=>i*100);
   // Magnetic snap is deliberately stronger than before: 9% capture,
   // 13% release hysteresis. Keyboard and exact-value entry retain 1% control.
   let magnet=null;
@@ -18,7 +19,7 @@
     if(!isPointer){magnet=null;return n;}
     if(magnet!==null&&Math.abs(n-magnet)<=13)return magnet;
     magnet=null;
-    for(const anchor of anchors){
+    for(const anchor of anchors()){
       if(Math.abs(n-anchor)<=9){magnet=anchor;return anchor;}
     }
     return n;
@@ -26,14 +27,15 @@
   let level=100,muted=false,holdSeconds=0.25,increments=10;
   try{
     const saved=JSON.parse(localStorage.getItem(KEY)||'null');
-    if(Number.isInteger(saved?.level)&&saved.level>=0&&saved.level<=300)level=saved.level;
+    if([100,200,300,400,500,600].includes(saved?.maxVolume))maxVolume=saved.maxVolume;
+    if(Number.isInteger(saved?.level)&&saved.level>=0&&saved.level<=600)level=Math.min(saved.level,maxVolume);
     if(typeof saved?.muted==='boolean')muted=saved.muted;
     if(saved?.increments===1||saved?.increments===10)increments=saved.increments;
     if(Number.isFinite(saved?.holdSeconds)&&saved.holdSeconds>=0.1&&saved.holdSeconds<=2)
       holdSeconds=saved.holdSeconds;
   }catch{}
   const persist=()=>{
-    try{localStorage.setItem(KEY,JSON.stringify({level,muted,holdSeconds,increments}));}catch{}
+    try{localStorage.setItem(KEY,JSON.stringify({level,muted,holdSeconds,increments,maxVolume}));}catch{}
   };
   let pending=false,dirty=false;
   async function flush(){
@@ -57,6 +59,22 @@
     requestAnimationFrame(()=>{frame=false;void flush();});
   }
   function render(){
+    slider.max=String(maxVolume);
+    input.max=String(maxVolume);
+    slider.setAttribute('aria-label','Browser Volume from 0 to '+maxVolume+' Percent');
+    if(maxSelect)maxSelect.value=String(maxVolume);
+    const wrap=typeof slider.closest==='function'?slider.closest('.volume-slider-wrap'):null;
+    if(wrap){
+      wrap.querySelectorAll('.volume-tick').forEach(tick=>tick.remove());
+      for(let pct=100;pct<maxVolume;pct+=100){
+        const tick=document.createElement('span');
+        tick.className='volume-tick';
+        tick.setAttribute('aria-hidden','true');
+        // Account for the range thumb's half-width at either end.
+        tick.style.left='calc('+((pct/maxVolume)*100)+'% + '+(7*(1-2*pct/maxVolume))+'px)';
+        wrap.append(tick);
+      }
+    }
     slider.value=String(level);
     // Native step stays 1 to allow exact typed values; pointer and keyboard
     // selection are quantized below using the selected step of 1 or 10.
@@ -135,7 +153,7 @@
       update(clamp(level+keys[event.key]));
     }else if(event.key==='Home'||event.key==='End'){
       event.preventDefault();
-      update(event.key==='Home'?0:300);
+      update(event.key==='Home'?0:maxVolume);
     }
   });
   function setIncrements(value){
@@ -146,6 +164,12 @@
   }
   increment1?.addEventListener('click',()=>setIncrements(1));
   increment10?.addEventListener('click',()=>setIncrements(10));
+  maxSelect?.addEventListener('change',()=>{
+    const next=Number(maxSelect.value);
+    if(![100,200,300,400,500,600].includes(next))return;
+    maxVolume=next;level=Math.min(level,maxVolume);magnet=null;
+    render();persist();requestApply();
+  });
   input.addEventListener('keydown',event=>{
     if(event.key==='Enter'){event.preventDefault();closeEdit(true);button.focus();}
     if(event.key==='Escape'){event.preventDefault();closeEdit(false);button.focus();}
@@ -162,5 +186,5 @@
   hold.addEventListener('change',changeHold);
   render();
   requestApply();
-  window.minternetVolume={get:()=>({level,muted,holdSeconds,increments})};
+  window.minternetVolume={get:()=>({level,muted,holdSeconds,increments,maxVolume})};
 })();

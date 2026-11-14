@@ -74,7 +74,7 @@
     const host=suggestionHost();
     host.replaceChildren();
     for(const [i,entry] of entries.entries()){
-      const row=document.createElement('button');row.type='button';row.className='history-suggestion';
+      const row=document.createElement('div');row.className='history-suggestion';
       row.id='address-suggestion-'+i;row.setAttribute('role','option');
       row.title=entry.url;
       const icon=document.createElement('span');icon.className='history-suggestion-symbol';
@@ -82,9 +82,30 @@
       const text=document.createElement('span');text.className='history-suggestion-text';
       const title=document.createElement('strong');title.textContent=entry.title||compact(entry.url);
       const subtitle=document.createElement('small');subtitle.textContent=entry.url;
-      text.append(title,subtitle);row.append(icon,text);
-      row.addEventListener('pointerdown',event=>event.preventDefault());
-      row.addEventListener('click',()=>choose(entry.url));
+      text.append(title,subtitle);
+      const open=document.createElement('button');
+      open.type='button';open.className='history-suggestion-open';
+      open.append(icon,text);
+      open.addEventListener('pointerdown',event=>event.preventDefault());
+      open.addEventListener('click',()=>choose(entry.url));
+      row.append(open);
+      if(!entry.bookmark&&!privateActive()){
+        const remove=document.createElement('button');
+        remove.type='button';remove.className='history-suggestion-remove';
+        remove.textContent='×';remove.title='Delete this history entry';
+        remove.setAttribute('aria-label','Delete '+(entry.title||entry.url)+' from history');
+        remove.addEventListener('pointerdown',event=>event.preventDefault());
+        remove.addEventListener('click',async event=>{
+          event.stopPropagation();
+          const result=await command('history-remove',entry.url);
+          if(result?.ok){
+            entries=entries.filter(item=>item.url!==entry.url);
+            if(document.activeElement===address)void updateSuggestions();
+            else hideSuggestions();
+          }
+        });
+        row.append(remove);
+      }
       host.append(row);
     }
     positionSuggestions();
@@ -217,6 +238,7 @@
     document.addEventListener('keydown',escape,true);
     await renderHistory();
   }
+  window.addEventListener?.('blur',()=>{if(manager)closeHistory();});
   historyButton.addEventListener('click',()=>void openHistory());
   window.addEventListener('keydown',event=>{
     if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='h'){

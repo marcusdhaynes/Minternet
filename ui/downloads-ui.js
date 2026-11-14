@@ -220,7 +220,14 @@
     position();
   }
   button.addEventListener('click',()=>{void open();});
+  window.addEventListener('blur',()=>{if(panel)close();});
   if(window.__TAURI__?.event?.listen){
+    window.__TAURI__.event.listen('minternet:download-blocked',event=>{
+      // Make silent native failures visible without showing approval dialogs.
+      const reason=event?.payload?.reason;
+      window.minternetToast?.(typeof reason==='string'&&reason.length<350
+        ?reason:'This download could not be started.');
+    }).catch(()=>{});
     window.__TAURI__.event.listen('minternet:downloads',event=>{
       if(Array.isArray(event.payload)){
         entries=event.payload;

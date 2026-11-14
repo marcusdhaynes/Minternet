@@ -181,6 +181,7 @@
     await refresh();
   }
   trigger.addEventListener('click',()=>void open());
+  window.addEventListener('blur',()=>{if(panel)close();});
   window.minternetMediaDevices={open,close};
   window.addEventListener('resize',position);
   function onState(state){

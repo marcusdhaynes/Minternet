@@ -15,7 +15,7 @@ let focusTargetTabId=null;
 let addressEditedSinceNew=false;
 function focusNewTabAddress(){
   const target=snapshot.activeId;
-  if(target===focusTargetTabId&&!focusCancelled)return;
+  if(target===focusTargetTabId&&!focusCancelled&&document.activeElement===byId('address'))return;
   focusTargetTabId=target;
   addressEditedSinceNew=false;
   byId('address')?.removeAttribute('data-minternet-typed');
@@ -27,6 +27,7 @@ function focusNewTabAddress(){
     // In a multi-WebView2 window, document.activeElement can still be the
     // input while the OS keyboard focus is actually owned by a site child.
     // Always reclaim the native chrome controller during the short lease.
+    if(document.activeElement instanceof HTMLElement && document.activeElement.matches('input:not(#address),textarea,[contenteditable="true"]')){focusCancelled=true;return;}
     if(window.__TAURI__)void api.command('focus-address').catch(()=>{});
     field?.focus({preventScroll:true});
     if(!addressEditedSinceNew)field?.select();
@@ -37,7 +38,7 @@ function focusNewTabAddress(){
   for(const delay of [80,220,480,850,1350,2100,3300,5200])setTimeout(tryFocus,delay);
 }
 document.addEventListener('pointerdown',event=>{
-  if(!event.target.closest('#newTab,#newPrivate,#addressForm,#tabs')) {
+  if(!event.target.closest('#newTab,#newPrivate,#addressForm')) {
     focusCancelled=true;
   }
 },true);
@@ -375,6 +376,9 @@ function render(data) {
     byId('back').disabled = !active?.canBack;
   byId('forward').disabled = !active?.canForward;
   byId('reload').disabled = !active || active.secretTab || active.url === 'about:blank';
+  byId('reload').classList.toggle('refresh-spinning',Boolean(active?.loading));
+  if(!active?.loading)byId('reload').removeAttribute('aria-busy');
+  else byId('reload').setAttribute('aria-busy','true');
   const isBlank = !active || (active.url === 'about:blank'&&!active.secretTab);
   byId('homeScreen').hidden = !isBlank;
   byId('address').setAttribute('aria-label', active?.url?.startsWith('http://') ? 'Insecure HTTP address' : 'Search or enter address');
@@ -396,9 +400,9 @@ function render(data) {
 }
 api.onState(render);
 api.onFocusAddress(() => byId('address').focus());
-const bind = (id, name) => byId(id).addEventListener('click', () => command(name));
+const bind = (id, name) => byId(id).addEventListener('click', () => {if(name==='reload')byId('reload').classList.add('refresh-spinning');void command(name);});
 for (const [id, name] of [
-  ['newTab','new'],['newPrivate','new-private'],['dashboardButton','deselect'],['back','back'],['forward','forward'],
+  ['newTab','new'],['newPrivate','new-private'],['dashboardButton','deselect'],
   ['reload','reload'],['tor','tor'],
   ['minimize','minimize'],['maximize','maximize'],['quit','quit']
 ]) bind(id,name);

@@ -24,7 +24,7 @@ test('all browser downloads honor a configurable trusted destination',()=>{
   assert.match(native,/url\.scheme\(\)=="blob"/);
   assert.match(native,/address && matches!\(url\.scheme\(\),"blob"\|"data"\)/);
   assert.match(native,/DownloadEvent::Requested/);
-  assert.match(native,/download_path\(&for_download,&url,destination\.as_path\(\)\)/);
+  assert.match(native,/download_destination\(&for_download,&url,destination\.as_path\(\)\)/);
   assert.match(native,/downloads-folder-set/);
   assert.match(native,/allowed_download_folders\(/);
 });
@@ -83,4 +83,66 @@ test('browser preference UI persists only through the native settings bridge',as
   elements.downloadFolderDefault.dispatch('click');
   for(let i=0;i<8;i++)await Promise.resolve();
   assert(events.some(([name,value])=>name==='downloads-folder-set'&&value===''));
+});
+
+test('Download Location offers automatic and Save As without custom approval prompts',()=>{
+  const settings=read('ui/browser-settings.js');
+  assert.match(index,/id="downloadMode"/);
+  assert.match(index,/value="automatic"/);
+  assert.match(index,/value="ask"/);
+  assert.match(settings,/downloads-mode-set/);
+  assert.match(native,/fn default_download_mode\(\)->String/);
+  assert.match(native,/fn download_destination\(/);
+  assert.match(native,/blocking_save_file\(/);
+  assert.match(native,/"downloads-mode-set" =>/);
+  assert.doesNotMatch(native,/Minternet — Verify Download/);
+  assert.doesNotMatch(native,/explicit_download_approval\(/);
+});
+
+test('download links stay in the originating WebView and native failures are visible',()=>{
+  const linkBridge=read('ui/site-download-links.js');
+  const downloads=read('ui/downloads-ui.js');
+  assert.match(native,/initialization_script\(include_str!\("\.\.\/\.\.\/\.\.\/\.\.\/ui\/site-download-links\.js"\)\)/);
+  assert.match(linkBridge,/generated\(uri\)/);
+  assert.match(linkBridge,/link\.target='_self'/);
+  assert.match(linkBridge,/oaiusercontent/);
+  assert.match(native,/minternet:download-blocked/);
+  assert.match(downloads,/minternet:download-blocked/);
+});
+test('back and forward use click to navigate and configurable hold to show history',()=>{
+  const nav=read('ui/navigation-history-ui.js');
+  const settings=read('ui/settings-sections.js');
+  assert.match(nav,/api\.command\(side\)/);
+  assert.match(nav,/holdSeconds\*1000/);
+  assert.match(nav,/void open\(side\)/);
+  assert.match(nav,/pointercancel/);
+  assert.match(index,/id="navigationHistoryHoldDelay"/);
+  assert.match(settings,/move\(tabs,'navigationHistoryHoldDelay'/);
+});
+test('Maximum Volume sits inside Audio accordion without losing volume preferences',()=>{
+  const settings=read('ui/settings-sections.js');
+  const volume=read('ui/volume-ui.js');
+  assert.match(settings,/move\(audio,'volumeMax'/);
+  assert.match(settings,/move\(audio,'volumeIncrement10'/);
+  assert.match(settings,/move\(audio,'volumeHoldDelay'/);
+  assert.match(volume,/maxSelect=\$\('volumeMax'\)/);
+  assert.match(volume,/maxVolume/);
+});
+test('Settings and context panels close on outside pointer-down or window blur',()=>{
+  const bookmarks=read('ui/bookmark-ui.js');
+  const secrets=read('ui/secret-bookmarks.js');
+  const navigation=read('ui/navigation-history-ui.js');
+  for(const code of [bookmarks,secrets]){
+    assert.match(code,/document\.addEventListener\('pointerdown'/);
+  }
+  for(const code of [bookmarks,secrets,navigation,
+    read('ui/search-settings.js'),read('ui/downloads-ui.js'),
+    read('ui/media-devices-ui.js'),read('ui/chrome-native-menu.js'),
+    read('ui/password-ui.js'),read('ui/payment-ui.js'),
+    read('ui/identity-ui.js'),read('ui/privacy-shield-ui.js'),
+    read('ui/history-ui.js'),read('ui/tab-group-ui.js')]){
+    assert.match(code,/window\.addEventListener(?:\?\.)?\('blur'/);
+  }
+  assert.match(bookmarks,/activePanel\?\.contains\(event\.target\)/);
+  assert.match(secrets,/dialog\?\.contains\(event\.target\)/);
 });

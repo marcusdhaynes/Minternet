@@ -73,7 +73,7 @@
   }
   function setLevel(raw){
     const n=Number(raw);
-    if(!Number.isFinite(n)||n<0||n>3)return;
+    if(!Number.isFinite(n)||n<0||n>6)return;
     state.level=n;
     // Gain is updated on all previously connected elements without changing
     // media.volume or site mute settings.
