@@ -1869,14 +1869,13 @@ fn display_active(app: &tauri::AppHandle) {
         }){targets.insert(label);}
     }
     refresh_layout(app);
-    let (to_hide,to_show)={
+    let (to_hide,to_show,mut actual)={
         let cache=app.state::<Mutex<LayoutCache>>();
-        let Ok(mut state)=cache.lock() else{return};
+        let Ok(state)=cache.lock() else{return};
         if state.shown==targets {notify(app);return;}
-        let hidden=state.shown.difference(&targets).cloned().collect::<Vec<_>>();
-        let shown=targets.difference(&state.shown).cloned().collect::<Vec<_>>();
-        state.shown=targets.clone();
-        (hidden,shown)
+        (state.shown.difference(&targets).cloned().collect::<Vec<_>>(),
+         targets.difference(&state.shown).cloned().collect::<Vec<_>>(),
+         state.shown.clone())
     };
     // Show the incoming surface before retiring the previous one. This
     // prevents the host background from appearing between two site frames.
@@ -1884,12 +1883,26 @@ fn display_active(app: &tauri::AppHandle) {
     // on every switch, which forces an unnecessary WebView2 repaint.
     for label in &to_show{
         if let Some(view)=app.get_webview(label){
-            let _=view.show();
-            notify_native_compositor(&view);
+            if view.show().is_ok(){
+                actual.insert(label.clone());
+                notify_native_compositor(&view);
+            }
         }
     }
-    for label in &to_hide{
-        if let Some(view)=app.get_webview(label){let _=view.hide();}
+    // If the new controller cannot be shown, do NOT hide the last working
+    // frame. Cache only completed transitions, so later events may retry.
+    let ready=targets.iter().all(|label|actual.contains(label));
+    if ready{
+        for label in &to_hide{
+            if let Some(view)=app.get_webview(label){
+                if view.hide().is_ok(){actual.remove(label);}
+            }else{
+                actual.remove(label);
+            }
+        }
+    }
+    if let Ok(mut cache)=app.state::<Mutex<LayoutCache>>().lock(){
+        cache.shown=actual;
     }
     notify(app);
 }
