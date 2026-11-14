@@ -53,7 +53,13 @@ Minternet requires unlocking it again.
 Important limitations: This is a **development preview, not a complete
 Chrome/Firefox/Brave-equivalent password manager**. There is currently no
 automatic credential-capture/"Save password?" prompt, password import/export,
-passkey support, password breach checking, or independent security audit.
+passkey storage, password breach checking, or independent security audit.
+Passkey access is separately available under **User Data → Logins → Passkeys**
+through the operating system's credential provider (where supported by the
+WebView engine). Native Windows Hello capability detection and a real
+WebView2 WebAuthn readiness smoke test are provided, but actual passkey
+registration/sign-in on each device is not yet certified. See
+[OAuth and passkey compatibility](docs/OAUTH-PASSKEYS.md).
 Automatic filling may miss dynamically mounted forms or sites using unusual
 login controls. The master password is not recoverable; losing it makes saved
 credentials inaccessible. Passwords should not be entrusted to this preview
