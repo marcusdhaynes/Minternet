@@ -9,7 +9,7 @@ on:
     branches: [main]
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   portable:
     outputs:
@@ -425,4 +425,31 @@ jobs:
           if-no-files-found: error
           retention-days: 90
           compression-level: 6
-
+      # Uploading an Actions artifact is not publishing a GitHub Release.
+      # The in-app update checker requires a completed public Release.
+      - name: Publish verified portable EXE as a GitHub Release
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.package.outputs.version_label }}
+          RELEASE_EXE: ${{ steps.package.outputs.exe_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:RELEASE_TAG
+          $exe = Join-Path 'versioned-release' $env:RELEASE_EXE
+          $hashFile = Join-Path 'versioned-release' 'SHA256SUMS.txt'
+          if (!(Test-Path -LiteralPath $exe) -or !(Test-Path -LiteralPath $hashFile)) {
+            throw 'Cannot publish update: verified EXE or checksum missing.'
+          }
+          $asset = Get-Item -LiteralPath $exe
+          if ($asset.Length -lt 100000 -or $asset.Length -ge 50000000) {
+            throw 'Cannot publish invalid portable EXE.'
+          }
+          $note = "Verified Minternet Windows build from $env:GITHUB_SHA. SHA-256 checksum included."
+          gh release create "$tag" "$exe" "$hashFile" --repo "$env:GITHUB_REPOSITORY" --title "$tag" --notes "$note" --target "$env:GITHUB_SHA" --latest
+          $published = @(gh release view "$tag" --repo "$env:GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          if (!($published -contains $env:RELEASE_EXE)) {
+            throw 'Update release is missing its portable Windows EXE.'
+          }
+          "PASS: published GitHub Release $tag with verified Windows executable." >> $env:GITHUB_STEP_SUMMARY
