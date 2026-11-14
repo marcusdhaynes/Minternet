@@ -28,6 +28,11 @@
     if(!info||typeof info.version!=='string')return;
     CURRENT_VERSION=info.version;
     CURRENT_BUILD=info.buildId && info.buildId!=='0' ? String(info.buildId) : '';
+    var currentRow=document.querySelector('#updatesSection .updates-version-row strong');
+    if(currentRow){
+      currentRow.textContent='v'+CURRENT_VERSION+
+        (CURRENT_BUILD?' · build '+CURRENT_BUILD:'');
+    }
     if(window.MuseUpdates){
       window.MuseUpdates.CURRENT_VERSION=CURRENT_VERSION;
       window.MuseUpdates.CURRENT_BUILD=CURRENT_BUILD;
@@ -179,12 +184,13 @@
       'font-size:12px;line-height:1.4;background:rgba(127,127,127,.16);' +
       'border:1px solid rgba(127,127,127,.35);backdrop-filter:blur(6px);cursor:pointer;';
     var label = document.createElement('span');
-    label.textContent = 'Update available · v' + info.version;
+    label.textContent = 'Update available · v' + info.version +
+      (info.buildId ? ' · build ' + info.buildId : '');
     var close = document.createElement('button');
     close.type = 'button'; close.textContent = '×'; close.setAttribute('aria-label', 'Dismiss this update');
     close.style.cssText = 'background:none;border:none;color:inherit;cursor:pointer;padding:0 4px;font-size:12px;';
     close.addEventListener('click', function (e) {
-      e.stopPropagation(); dismissVersion(info.version); ribbon.remove();
+      e.stopPropagation(); dismissVersion(info.tag||info.version); ribbon.remove();
     });
     ribbon.appendChild(label); ribbon.appendChild(close);
     ribbon.addEventListener('click', function () { applyUpdate(info); });
@@ -202,9 +208,14 @@
   // Live wiring entry point: a no-op on pages without the mount points.
   function init() {
     var section = document.getElementById('updatesSection');
+    if(window.__TAURI__ && window.minternet?.command){
+      window.minternet.command('updates-installed').then(function(info){
+        if(!info?.message)applyInstalled(info);
+      }).catch(function(){});
+    }
     if (section) mountSection(section);
     checkForUpdate().then(function (info) {
-      if (info && !isDismissed(info.version)) mountRibbon(info);
+      if (info && !isDismissed(info.tag||info.version)) mountRibbon(info);
     }).catch(function () { /* silent */ });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
