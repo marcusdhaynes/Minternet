@@ -2887,9 +2887,18 @@ const FORM_FIELD_CONTEXT_JS:&str=r#"(function(){
   const hasPassword=[...document.querySelectorAll('input[type="password"]')]
     .filter(e=>!e.disabled&&e.getBoundingClientRect().width>0);
   const loginUser=document.querySelector('input[autocomplete="username"],input[type="email"],input[name*="user" i],input[id*="user" i]');
-  const login=hasPassword.length===1 &&
-    (field.type==='password'||auto.includes('username')||
-      (loginUser===field));
+  const signinRoute=/(?:login|log-in|signin|sign-in|auth|session|account|identify)/i
+    .test(location.pathname);
+  const registrationRoute=/(?:register|signup|sign-up|create-account|reset-password|forgot-password)/i
+    .test(location.pathname);
+  const usernameFirst=(auto.includes('username') ||
+    (field.type==='email' && signinRoute) ||
+    (field.type==='text' && signinRoute && /user|email|login/i.test(desc)));
+  const login=!registrationRoute && (
+    (hasPassword.length===1 && (field.type==='password' ||
+      auto.includes('username') || loginUser===field)) ||
+    (hasPassword.length===0 && usernameFirst)
+  );
   let kind='',key='';
   if(login){kind='login';key='login';}
   else if(auto.some(x=>x.startsWith('cc-'))||/credit.?card|card.?number|cc.?number|expir/i.test(desc)){
