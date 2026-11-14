@@ -1,7 +1,5 @@
 name: Minternet Windows portable single EXE (under 50 MB)
 on:
-  pull_request:
-    branches: [main]
   # Every repository push creates a Windows build, including development
   # branches and configuration-only changes. Tags are also supported.
   push:
