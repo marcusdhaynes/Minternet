@@ -408,12 +408,16 @@ jobs:
           New-Item -ItemType Directory -Path $destinationDir -Force | Out-Null
           $destination = Join-Path $destinationDir $exeName
           Copy-Item -LiteralPath $source -Destination $destination -Force
+          # Stable filename for users and the in-app updater. The versioned
+          # asset stays alongside it for auditability and rollback.
+          Copy-Item -LiteralPath $source -Destination (Join-Path $destinationDir "Minterest.exe") -Force
           $size = (Get-Item -LiteralPath $destination).Length
           if ($size -lt 100000 -or $size -ge 50000000) {
             throw "Portable EXE size outside the 100 KB to 50 MB bounds: $size"
           }
           $hash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $exeName" | Set-Content -Encoding ascii (Join-Path $destinationDir "SHA256SUMS.txt")
+          "$hash  Minterest.exe" | Add-Content -Encoding ascii (Join-Path $destinationDir "SHA256SUMS.txt")
           "version_label=$label" >> $env:GITHUB_OUTPUT
           "artifact_name=$artifactName" >> $env:GITHUB_OUTPUT
           "exe_name=$exeName" >> $env:GITHUB_OUTPUT
