@@ -2095,18 +2095,39 @@ fn attach_webview_process_recovery(app:&tauri::AppHandle,id:u32,view:&tauri::Web
                     // is necessary and doing so could discard unsaved input.
                     return Ok(());
                 }
-                // Avoid triggering repeated recovery for the same process
-                // crash; all WebView2 callbacks must complete before rebuild.
-                static RECENT:std::sync::OnceLock<Mutex<HashMap<u32,Instant>>>=
+                // Never enter an indefinite renderer-crash/reload loop.
+                // Rapid cycling can create high-contrast flashes even when
+                // native blank surfaces are dark. Permit at most two
+                // automatic recoveries per tab per 60 seconds, with a
+                // two-second debounce for duplicate WebView2 callbacks.
+                static RECENT:std::sync::OnceLock<
+                    Mutex<HashMap<u32,(Instant,u8,Instant)>>>=
                     std::sync::OnceLock::new();
-                let should_recover={
+                let (should_recover,blocked)={
                     let recent=RECENT.get_or_init(||Mutex::new(HashMap::new()));
                     if let Ok(mut history)=recent.lock(){
-                        if history.get(&id).is_some_and(|time|
-                            time.elapsed()<Duration::from_secs(10)){false}
-                        else{history.insert(id,Instant::now());true}
-                    }else{false}
+                        let now=Instant::now();
+                        let record=history.entry(id).or_insert((now,0,now-Duration::from_secs(3)));
+                        if now.duration_since(record.0)>Duration::from_secs(60){
+                            *record=(now,0,now-Duration::from_secs(3));
+                        }
+                        if now.duration_since(record.2)<Duration::from_secs(2){
+                            (false,false)
+                        }else if record.1>=2{
+                            (false,true)
+                        }else{
+                            record.1+=1;
+                            record.2=now;
+                            (true,false)
+                        }
+                    }else{(false,false)}
                 };
+                if blocked{
+                    let _=handle.emit_to("chrome","minternet:surface-warning",
+                        json!({"tabId":id,"message":
+                            "This webpage has repeatedly crashed. Automatic reload was stopped to prevent flashing. You can close the tab or retry manually."}));
+                    return Ok(());
+                }
                 if should_recover{
                     let worker=handle.clone();
                     std::thread::spawn(move||{
