@@ -15,6 +15,7 @@ test('Updates checks native verified prereleases and reads actual installed buil
   const win={__TAURI__:{},minternet:{command:async(name,value)=>{
     calls.push({name,value});
     if(name==='updates-check')return {installed,update:release};
+    if(name==='updates-apply')return {started:true};
     return {ok:true};
   }},location:{reload:()=>{throw Error('Update must not reload active session');}}};
   const dom={readyState:'loading',addEventListener:()=>{},querySelector:()=>null};
@@ -25,10 +26,13 @@ test('Updates checks native verified prereleases and reads actual installed buil
   assert.equal(update.buildId,'851');
   assert.equal(win.MuseUpdates.CURRENT_VERSION,'0.3.0');
   assert.equal(win.MuseUpdates.CURRENT_BUILD,'850');
-  win.MuseUpdates.applyUpdate(update);
+  await win.MuseUpdates.applyUpdate(update);
   await new Promise(resolve=>setImmediate(resolve));
   assert.ok(calls.some(call=>call.name==='updates-check'));
-  assert.ok(calls.some(call=>call.name==='new-url'&&call.value===release.url));
+  assert.ok(calls.some(call=>call.name==='updates-apply'));
+  assert.ok(!calls.some(call=>call.name==='new-url'));
+  assert.ok(!calls.some(call=>call.name==='location.reload'));
+  assert.match(read('ui/updates.js'),/Install & Restart/);
 });
 test('Web preview checks prereleases instead of stable-only latest endpoint',async()=>{
   const tag='minternet-build-999';
@@ -71,7 +75,7 @@ test('Renderer crashes recover without clearing cookies and extension selection 
   assert.doesNotMatch(source,/let _=view\.hide\(\);\s*let _=view\.show\(\);/);
   assert.match(source,/minternet-empty-document-once/);
   assert.doesNotMatch(source,/remove_dir_all\(.*extension-sites/);
-  assert.match(updates,/RELEASES_API.*releases\?per_page=30/);
+  assert.match(updates,/RELEASES_API.*releases\?per_page=100/);
   assert.match(updates,/fn acceptable_asset/);
   assert.match(updates,/fn installed/);
 });
