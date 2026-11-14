@@ -14,7 +14,7 @@ const MAX_EXE:u64=50_000_000;
 // allowing Actions to reject packages whose embedded version differs from
 // their GitHub Release tag. This never opens a browser or modifies user data.
 pub fn maybe_version_smoke()->bool{
-    if !std::env::args_os().any(|a|a=="--minternet-build-version-smoke") {
+    if !std::env::args_os().any(|a|a==std::ffi::OsStr::new("--minternet-build-version-smoke")) {
         return false;
     }
     let marker=std::env::temp_dir()
