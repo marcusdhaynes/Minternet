@@ -23,6 +23,7 @@
       height:Math.max(innerHeight,dragViewport?.height||0)};
   }
   let splitPaneIds=[];
+  let splitThreeLeft=false;
   const ungroupTarget=$('tabUngroupDrop');
   const tabStrip=$('tabs');
   const groupUndoJson=()=>JSON.stringify({
@@ -480,9 +481,12 @@
     const row=y<top+(viewport.height-top)/2?0:2;
     return col+row;
   }
-  function visibleSplitSlot(count,quadrant){
+  function visibleSplitSlot(count,quadrant,sideLeft=false){
     if(count<=2)return quadrant%2;
-    if(count===3)return quadrant%2===0?0:quadrant<2?1:2;
+    if(count===3){
+      return sideLeft?(quadrant%2===0?(quadrant<2?0:1):2):
+        (quadrant%2===0?0:quadrant<2?1:2);
+    }
     return quadrant;
   }
   function updateSplitPreview(x,y,top){
@@ -493,11 +497,19 @@
       splitPreview.setAttribute('aria-hidden','true');
       document.body.append(splitPreview);
     }
-    if(Number(splitPreview.dataset.panes)!==count){
+    const viewport=dropViewport();
+    // When adding a third pane the pointer chooses WHICH side is divided.
+    // Preserve existing panes on the opposite side.
+    const sideLeft=count===3?
+      (splitPaneIds.length===2?x<viewport.width/2:splitThreeLeft):false;
+    if(Number(splitPreview.dataset.panes)!==count||
+       (count===3&&splitPreview.dataset.side!==(sideLeft?'left':'right'))){
       splitPreview.dataset.panes=String(count);
+      splitPreview.dataset.side=sideLeft?'left':'right';
       splitPreview.replaceChildren();
       const labels=count===2?['Left','Right']:
-        count===3?['Left','Upper Right','Lower Right']:
+        count===3?(sideLeft?['Upper Left','Lower Left','Right']:
+                        ['Left','Upper Right','Lower Right']):
         ['Upper Left','Upper Right','Lower Left','Lower Right'];
       for(const label of labels){
         const zone=document.createElement('div');
@@ -506,11 +518,10 @@
         splitPreview.append(zone);
       }
     }
-    const viewport=dropViewport();
     splitPreview.style.top=Math.round(top)+'px';
     splitPreview.style.width=Math.round(viewport.width)+'px';
     splitPreview.style.height=Math.round(Math.max(0,viewport.height-top))+'px';
-    const slot=visibleSplitSlot(count,draggedQuadrant(x,y,top));
+    const slot=visibleSplitSlot(count,draggedQuadrant(x,y,top),sideLeft);
     [...splitPreview.children].forEach((zone,i)=>zone.classList.toggle('active',i===slot));
     ghost.textContent='◫  Drop in '+splitPreview.children[slot]?.textContent;
   }
@@ -540,6 +551,7 @@
         if(gesture?.active&&gesture.id===draggingTabId &&
            Array.isArray(status?.ids)){
           splitPaneIds=status.ids.filter(Number.isSafeInteger);
+          splitThreeLeft=status.splitLeft===true;
         }
       });
       document.body.classList.add('tab-dragging');
