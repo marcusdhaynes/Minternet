@@ -91,5 +91,5 @@ test('Windows build embeds release run number to avoid suggesting the installed 
   assert.match(workflow,/MINTERNET_BUILD_RUN_ID:/);
   assert.match(workflow,/MINTERNET_BUILD_SHA:/);
   assert.match(workflow,/Upload uniquely versioned Windows portable artifact/);
-  assert.match(workflow,/Publish verified Windows build to GitHub Releases/);
+  assert.match(read('.github/workflows/publish-current-portable.yml'),/Archive every successful Minternet build to GitHub Releases/);
 });
