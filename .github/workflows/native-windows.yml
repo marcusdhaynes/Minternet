@@ -61,6 +61,7 @@ jobs:
           node --test ../../tests/single-branch-policy.test.cjs
           node --test ../../tests/release-feature-parity.test.cjs
           node --test ../../tests/updates-release.test.cjs
+          node --test ../../tests/context-menu-position.test.cjs
           node --test ../../tests/site-context-menu.test.cjs
           node --test ../../tests/native-surface-transitions.test.cjs
           node --check ../../ui/updates.js
