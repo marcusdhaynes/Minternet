@@ -8,6 +8,7 @@ mod privacy_shield;
 mod media_devices;
 mod site_context_menu;
 mod extensions;
+mod updates;
 use base64::Engine as _;
 use rand::{rngs::OsRng,RngCore};
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -4613,6 +4614,13 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         remember_undo(&app,None);
     }
     match name.as_str() {
+        "updates-installed" => {
+            return Ok(updates::installed());
+        }
+        "updates-check" => {
+            return tauri::async_runtime::spawn_blocking(updates::check)
+                .await.map_err(|error|format!("Update check could not finish: {error}"))?;
+        }
         "extensions-list" => {
             return extensions::list(&app);
         }
