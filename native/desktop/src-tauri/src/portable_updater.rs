@@ -185,7 +185,7 @@ pub fn maybe_run_helper()->bool{
             // Never leave a previously usable EXE closed when a write-lock,
             // antivirus, permission, or startup failure aborts installation.
             if let Some(target)=fallback.filter(|p|
-                p.is_file() && p.extension().is_some_and(|x|x.eq_ignore_ascii_case("exe"))) {
+                p.is_file() && p.extension().and_then(|x|x.to_str()).is_some_and(|x|x.eq_ignore_ascii_case("exe"))) {
                 let _=Command::new(target).spawn();
             }
         }
