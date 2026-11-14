@@ -68,7 +68,7 @@ test('Renderer crashes recover without clearing cookies and extension selection 
   assert.match(source,/COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED/);
   assert.match(source,/SITE_EXTENSION_PROFILE/);
   assert.match(source,/extensions::isolated_site_dir\(app\)\.map\(\|dir\|dir\.exists\(\)\)/);
-  assert.match(source,/let _=view\.hide\(\);\s*let _=view\.show\(\);/);
+  assert.doesNotMatch(source,/let _=view\.hide\(\);\s*let _=view\.show\(\);/);
   assert.match(source,/minternet-empty-document-once/);
   assert.doesNotMatch(source,/remove_dir_all\(.*extension-sites/);
   assert.match(updates,/RELEASES_API.*releases\?per_page=30/);
