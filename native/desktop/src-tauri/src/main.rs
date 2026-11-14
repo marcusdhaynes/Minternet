@@ -725,7 +725,7 @@ struct SplitState(Mutex<Vec<u32>>);
 // false: full left + two right; true: two left + full right.
 struct SplitThreeLeft(Mutex<bool>);
 struct SplitRatios(Mutex<(f64,f64)>);
-struct UndoState { tabs: Vec<Tab>, active_id:u32, split_ids:Vec<u32>, ratios:(f64,f64), ui:Option<Value> }
+struct UndoState { tabs: Vec<Tab>, active_id:u32, split_ids:Vec<u32>, split_left:bool, ratios:(f64,f64), ui:Option<Value> }
 struct UndoHistory(Mutex<VecDeque<UndoState>>);
 
 fn remember_undo(app:&tauri::AppHandle, ui:Option<Value>) {
@@ -748,7 +748,8 @@ fn remember_undo(app:&tauri::AppHandle, ui:Option<Value>) {
     };
     let split_ids=app.state::<SplitState>().0.lock().map(|s|s.clone()).unwrap_or_default();
     let ratios=app.state::<SplitRatios>().0.lock().map(|r|*r).unwrap_or((0.5,0.5));
-    let snapshot=UndoState{tabs,active_id,split_ids,ratios,ui};
+    let split_left=app.state::<SplitThreeLeft>().0.lock().map(|v|*v).unwrap_or(false);
+    let snapshot=UndoState{tabs,active_id,split_ids,split_left,ratios,ui};
     let history=app.state::<UndoHistory>();
     if let Ok(mut list)=history.0.lock(){
         if list.len()>=100{list.pop_front();}
@@ -792,6 +793,7 @@ fn undo_last(app:&tauri::AppHandle)->Result<Option<Value>,String> {
     // Undo brings back their opaque tab identity.
     app.state::<AuthorizedSecrets>().items.lock().map_err(|e|e.to_string())?.clear();
     *app.state::<SplitState>().0.lock().map_err(|e|e.to_string())?=entry.split_ids;
+    *app.state::<SplitThreeLeft>().0.lock().map_err(|e|e.to_string())?=entry.split_left;
     *app.state::<SplitRatios>().0.lock().map_err(|e|e.to_string())?=entry.ratios;
     invalidate_layout(app);
     save_pinned(app)?;
@@ -1503,7 +1505,10 @@ fn place_new_split_pane(split:&mut Vec<u32>,id:u32,quadrant:usize,
             Ok(())
         }
         _=>{
-            let slot=split_drop_target((split.len()+usize::from(!split.contains(&id))).min(4),quadrant);
+            let count=(split.len()+usize::from(!split.contains(&id))).min(4);
+            let slot=if count==3&&*split_left {
+                if quadrant%2==0 {if quadrant<2 {0}else{1}}else{2}
+            }else{split_drop_target(count,quadrant)};
             assign_split_slot(split,id,slot)
         }
     }
