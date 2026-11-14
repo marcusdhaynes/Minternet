@@ -82,7 +82,7 @@ pub fn open_settings() -> Result<Value,String> {
         // OS Settings owns credential enumeration/deletion; Minternet must
         // never impersonate an authenticator or ask for private-key material.
         std::process::Command::new("explorer.exe")
-            .arg("ms-settings:accounts-passkeys")
+            .arg("ms-settings:savedpasskeys")
             .spawn()
             .map_err(|e|format!("Could not open Windows Passkeys settings: {e}"))?;
         return Ok(json!({"ok":true}));
