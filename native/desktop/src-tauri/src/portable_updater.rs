@@ -10,6 +10,18 @@ static RUNNING:AtomicBool=AtomicBool::new(false);
 const API:&str="https://api.github.com/repos/marcusdhaynes/Minternet/releases/latest";
 const MAX_EXE:u64=50_000_000;
 
+// Small CI-only marker. The EXE itself reports the compiled build identity,
+// allowing Actions to reject packages whose embedded version differs from
+// their GitHub Release tag. This never opens a browser or modifies user data.
+pub fn maybe_version_smoke()->bool{
+    if !std::env::args_os().any(|a|a=="--minternet-build-version-smoke") {
+        return false;
+    }
+    let marker=std::env::temp_dir()
+        .join(format!("minternet-version-{}.txt",std::process::id()));
+    let _=fs::write(marker,installed_version());
+    true
+}
 pub fn installed_version()->String {
     let version=env!("CARGO_PKG_VERSION");
     match (option_env!("MINTERNET_BUILD_RUN_ID"),option_env!("MINTERNET_BUILD_SHA")) {
