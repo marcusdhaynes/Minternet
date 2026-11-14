@@ -1994,16 +1994,37 @@ fn reconcile_visible_child_bounds(app:&tauri::AppHandle)->bool {
 // the page just to fix a child surface, preserving logins and unsaved work.
 fn schedule_startup_bounds_reconciliation(app:&tauri::AppHandle){
     let original=app.clone();
+    // Native WebView2 child creation, first navigation, window maximization,
+    // per-monitor DPI initialization and Windows snap may settle at different
+    // points. Validate the ACTUAL child rectangle repeatedly during startup,
+    // but only change its bounds if they diverge. This does not reload pages
+    // or trigger unnecessary compositor updates.
     std::thread::spawn(move||{
-        for (index,delay) in [200u64,550,1100].into_iter().enumerate(){
+        for (index,delay) in [150u64,250,400,600,1000,1500,2000].into_iter().enumerate(){
             std::thread::sleep(Duration::from_millis(delay));
             let handle=original.clone();
             let _=original.run_on_main_thread(move||{
+                let Some(window)=handle.get_window("main") else{return};
+                if window.is_minimized().unwrap_or(true){return;}
                 if index==0{
                     invalidate_layout(&handle);
                     refresh_layout(&handle);
                 }
                 reconcile_visible_child_bounds(&handle);
+            });
+        }
+    });
+}
+// A page can create its native child after the first parent-window layout.
+// Check its geometry following navigation without changing a correct surface.
+fn schedule_page_bounds_reconciliation(app:&tauri::AppHandle){
+    let original=app.clone();
+    std::thread::spawn(move||{
+        for delay in [45u64,180,500]{
+            std::thread::sleep(Duration::from_millis(delay));
+            let task=original.clone();
+            let _=original.run_on_main_thread(move||{
+                reconcile_visible_child_bounds(&task);
             });
         }
     });
@@ -2500,7 +2521,10 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                         .is_some_and(|browser|browser.active_id==id);
                     // Layout/shows from inside a WebView2 load callback can
                     // re-enter its COM controller. Queue a repaint instead.
-                    if is_active {schedule_surface_restore(&for_load);}
+                    if is_active {
+                        schedule_surface_restore(&for_load);
+                        schedule_page_bounds_reconciliation(&for_load);
+                    }
                     record_page_history(&for_load,id,event.url().as_str(),None);
                     #[cfg(windows)]
                     if event.url().scheme()=="https" || event.url().scheme()=="http" {
