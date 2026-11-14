@@ -92,16 +92,58 @@
   function dismissVersion(version) {
     try { localStorage.setItem(dismissedKey(version), '1'); } catch (e) { /* ignore */ }
   }
-  function applyUpdate(info) {
-    // Updates are explicit: open the verified GitHub release in a new tab
-    // for the user to download. Never reload a live session or silently
-    // replace the running EXE.
-    if(!info?.url?.startsWith('https://github.com/marcusdhaynes/Minternet/releases/'))return;
-    if(window.__TAURI__ && window.minternet?.command){
-      window.minternet.command('new-url',info.url).catch(function(){
-        window.open(info.url,'_blank','noopener');
-      });
-    }else window.open(info.url,'_blank','noopener');
+  var updating=false;
+  function updateStatus(message,percent){
+    var el=document.querySelector('#updatesSection .updates-current-status');
+    if(el){
+      el.textContent=message;
+      el.dataset.state='checking';
+    }
+    var button=document.querySelector('#updatesSection .updates-install-button');
+    if(button){
+      button.disabled=updating;
+      button.textContent=updating && Number.isFinite(percent)
+        ? 'Installing… ' + percent + '%'
+        : updating ? 'Installing…' : 'Install & Restart';
+    }
+    var ribbon=document.getElementById('museUpdateRibbon');
+    if(ribbon && updating){
+      ribbon.style.pointerEvents='none';
+      ribbon.querySelector('span').textContent=message;
+    }
+  }
+  async function applyUpdate(info) {
+    if(updating)return;
+    // A static web preview cannot replace an EXE. No GitHub navigation.
+    if(!window.__TAURI__ || !window.minternet?.command){
+      window.minternetToast?.('Automatic updates are available in the Windows portable app.');
+      return;
+    }
+    if(!info?.tag?.startsWith('minternet-build-'))return;
+    updating=true;
+    updateStatus('Preparing verified in-place update…');
+    try{
+      // No download URL or file path is accepted from the UI. Rust independently
+      // selects the latest trusted release, verifies its SHA-256, and performs
+      // a safe after-exit replacement at the existing EXE path.
+      var result=await window.minternet.command('updates-apply');
+      if(result?.message)throw new Error(result.message);
+      if(!result?.started)throw new Error('The update helper did not start');
+      updateStatus('Verified. Closing and restarting Minternet…',100);
+    }catch(error){
+      updating=false;
+      var message='Update failed: '+String(error?.message||error).slice(0,240);
+      updateStatus(message);
+      window.minternetToast?.(message);
+    }
+  }
+  function listenForProgress(){
+    if(!window.__TAURI__?.event?.listen)return;
+    window.__TAURI__.event.listen('minternet:update-progress',function(event){
+      var details=event?.payload;
+      if(!details||typeof details.message!=='string')return;
+      updateStatus(details.message,Number.isFinite(details.percent)?details.percent:undefined);
+    }).catch(function(){});
   }
 
   // Render using the same small, native-style rows as other Settings
@@ -157,7 +199,9 @@
       var update = document.createElement('button');
       update.type = 'button';
       update.className = 'updates-install-button';
-      update.textContent = 'Get v' + info.version;
+      update.textContent = 'Install & Restart';
+      update.title = 'Download, verify, replace this portable EXE in its original folder, and reopen Minternet';
+      update.disabled = !(window.__TAURI__ && window.minternet?.command) || updating;
       update.addEventListener('click', function () { applyUpdate(info); });
       actions.appendChild(update);
     }
@@ -208,6 +252,7 @@
   // Live wiring entry point: a no-op on pages without the mount points.
   function init() {
     var section = document.getElementById('updatesSection');
+    listenForProgress();
     if(window.__TAURI__ && window.minternet?.command){
       window.minternet.command('updates-installed').then(function(info){
         if(!info?.message)applyInstalled(info);
