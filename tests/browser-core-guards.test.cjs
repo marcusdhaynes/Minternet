@@ -6,24 +6,20 @@ const path=require('node:path');
 const root=path.join(__dirname,'..');
 const source=name=>fs.readFileSync(path.join(root,name),'utf8');
 
-test('Privacy Shield toolbar, settings and trusted JS controller stay connected',()=>{
+test('retired Privacy Shield is uninstalled from native code and UI',()=>{
+  const native=source('native/desktop/src-tauri/src/main.rs');
   const html=source('ui/index.html');
-  const ui=source('ui/privacy-shield-ui.js');
-  const section=source('ui/settings-sections.js');
-  const ids=[
-    'shieldButton','shieldSettings','shieldEnabled','shieldMode','shieldAds',
-    'shieldTrackers','shieldVideoAds','shieldAnnoyances',
-    'shieldSubscriptions','shieldAllowSites','shieldBlockedDomains','shieldSave','shieldStatus'
-  ];
-  for(const id of ids){
-    assert.match(html,new RegExp('id="'+id+'"'),'Missing '+id);
-    assert.match(ui,new RegExp("['\"]"+id+"['\"]"),'UI disconnected from '+id);
-  }
-  assert.match(html,/privacy-shield-ui\.js/);
-  assert.match(section,/move\(privacy,'shieldSettings'\)/);
-  assert.match(ui,/shield-get/);
-  assert.match(ui,/shield-set/);
-  new (require('node:vm').Script)(ui,{filename:'ui/privacy-shield-ui.js'});
+  const styles=source('ui/styles.css');
+  const sections=source('ui/settings-sections.js');
+  assert.doesNotMatch(native,/mod privacy_shield|privacy_shield::|minternet:shield-blocked|name=="shield-(get|set)"/);
+  assert.doesNotMatch(html,/shieldButton|shieldSettings|privacy-shield-ui\.js|shieldMode|shieldSave|shieldPopup/);
+  assert.doesNotMatch(styles,/\.shield-popup|\.shield-settings|#shieldButton/);
+  assert.doesNotMatch(sections,/shieldSettings/);
+  assert.match(native,/remove_file\(folder\.join\("privacy-shield\.v1\.json"\)\)/);
+  assert.match(native,/initialization_script\(include_str!\("..\/..\/..\/..\/ui\/site-media-bridge\.js"\)\)/);
+  assert.match(native,/initialization_script\(include_str!\("..\/..\/..\/..\/ui\/site-download-links\.js"\)\)/);
+  assert.match(native,/auth_popup::preserve_opener/);
+  assert.match(html,/id="extensionsButton"/);
 });
 
 test('Downloads acknowledgement persists across reviews, restarts and refreshing',()=>{
@@ -41,7 +37,6 @@ test('Downloads acknowledgement persists across reviews, restarts and refreshing
 test('regular site windows use Minternet tabs, authenticated OAuth windows preserve the opener',()=>{
   const main=source('native/desktop/src-tauri/src/main.rs');
   const context=source('native/desktop/src-tauri/src/site_context_menu.rs');
-  const shield=source('native/desktop/src-tauri/src/privacy_shield.rs');
   const a=main.indexOf('.on_new_window(move |url, _features|');
   const b=main.indexOf('.on_page_load(move |view, event|',a);
   assert.ok(a>0&&b>a);
@@ -59,7 +54,6 @@ test('regular site windows use Minternet tabs, authenticated OAuth windows prese
   assert.match(main,/"open-new-browser-window"/);
   assert.match(context,/ContextMenuRequestedEventHandler/);
   assert.match(context,/SetHandled\(true\)/);
-  assert.match(shield,/pub fn block_navigation/);
 });
 
 test('Favicons are restored from validated persistent bytes, never persisted for private-only sites',()=>{
@@ -86,15 +80,11 @@ test('Password autofill uses unlocked unique HTTPS-origin logins and does not ov
   assert.match(vault,/if matches\.next\(\)\.is_some\(\)\{return None;\}/);
 });
 
-test('Injected popup and login scripts compile before they are sent to WebView2',()=>{
+test('Injected login script compiles before it is sent to WebView2',()=>{
   const vm=require('node:vm');
-  const shield=source('native/desktop/src-tauri/src/privacy_shield.rs');
   const main=source('native/desktop/src-tauri/src/main.rs');
-  const popupScript=shield.match(/const SCRIPT:&str=r###"([\s\S]*?)"###;/);
   const loginScript=main.match(/const LOGIN_FILL_JS:&str=r###"([\s\S]*?)"###;/);
-  assert.ok(popupScript,'Missing injected popup script');
   assert.ok(loginScript,'Missing injected autofill script');
-  new vm.Script(popupScript[1],{filename:'privacy_shield.document_start.js'});
   new vm.Script(loginScript[1],{filename:'login_form_autofill.js'});
 });
 

@@ -4,7 +4,6 @@ mod browsing_history;
 mod google_account;
 mod firefox_bookmarks;
 mod secret_bookmarks;
-mod privacy_shield;
 mod media_devices;
 mod site_context_menu;
 mod extensions;
@@ -2440,8 +2439,6 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     let for_title = app.clone();
     let for_popup = app.clone();
     let for_download=app.clone();
-    let shield_preferences=app.state::<privacy_shield::ShieldState>().0.lock()
-        .map(|s|s.clone()).unwrap_or_default();
     // Leave HTML5 drag-and-drop owned by WebView2. Tauri's default native
     // DragDropEvent handler replaces WebView2's Windows IDropTarget and
     // prevents File/DataTransfer drops on ChatGPT, Muse, upload targets,
@@ -2461,7 +2458,6 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
             .extensions_path(extensions::active_dir(app)?)
     }else{builder};
     let builder = builder
-        .initialization_script(privacy_shield::script(&shield_preferences))
         .initialization_script(include_str!("../../../../ui/site-media-bridge.js"))
         .initialization_script(include_str!("../../../../ui/site-download-links.js"))
         // A remote page never receives native commands. This reserved
@@ -2529,12 +2525,8 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                 return false;
             }
             if matches!(url.scheme(), "https"|"http") {
-                let blocked=for_navigation.state::<privacy_shield::ShieldState>().0.lock()
-                    .map(|settings|privacy_shield::block_navigation(&settings,url)).unwrap_or(false);
-                if blocked {
-                    let _=for_navigation.emit_to("chrome","minternet:shield-blocked",json!({"kind":"navigation"}));
-                    return false;
-                }
+                // No bundled content filter: ordinary web requests are handled
+                // directly by WebView2, retaining existing URL safety checks.
                 return url.host_str().is_some();
             }
             if url.scheme()=="blob" {
@@ -4770,25 +4762,6 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         }
         return Ok(json!({"ok":true}));
     }
-    if name=="shield-get"{
-        let current=app.state::<privacy_shield::ShieldState>().0.lock()
-            .map_err(|e|e.to_string())?.clone();
-        return Ok(serde_json::to_value(current).map_err(|e|e.to_string())?);
-    }
-    if name=="shield-set"{
-        let next=privacy_shield::parse_config(&value)?;
-        privacy_shield::save(&app,&next)?;
-        *app.state::<privacy_shield::ShieldState>().0.lock()
-            .map_err(|e|e.to_string())?=next.clone();
-        // Apply immediately to existing pages. New WebViews receive it at
-        // document start, without granting remote sites access to native APIs.
-        let injection=privacy_shield::script(&next);
-        let labels=app.state::<Mutex<Browser>>().lock()
-            .map_err(|e|e.to_string())?.tabs.iter()
-            .filter_map(|t|t.view.clone()).collect::<Vec<_>>();
-        for label in labels {if let Some(view)=app.get_webview(&label){let _=view.eval(&injection);}}
-        return Ok(json!({"ok":true}));
-    }
     if name=="passkey-status"{
         // The OS probe does not assert WebView2 registration works. Private
         // keys stay owned by Windows Hello or the selected passkey provider.
@@ -6738,7 +6711,6 @@ fn main() {
         .manage(FindBarState(Mutex::new(false)))
         .manage(LocalMediaSelection::default())
         .manage(LocalMediaPath::default())
-        .manage(privacy_shield::ShieldState(Mutex::new(privacy_shield::ShieldConfig::default())))
         .invoke_handler(tauri::generate_handler![browser_action, browser_snapshot])
         .setup(|app| {
             let real_launch=new_window_startup().is_none()&&
@@ -6746,9 +6718,10 @@ fn main() {
                     arg.starts_with("--minternet-")&&(arg.ends_with("-smoke")||arg.ends_with("-reopen")));
             if real_launch {install_panic_diagnostics(app.handle());}
             let previous_crash=real_launch&&start_crash_guard(app.handle());
-            let shield=privacy_shield::load(app.handle());
-            if let Ok(mut state)=app.state::<privacy_shield::ShieldState>().0.lock(){
-                *state=shield;
+            // Uninstall migration: discard retired Privacy Shield settings only.
+            // Other profile data (cookies, logins, extensions, history) is untouched.
+            if let Ok(folder)=app.path().app_data_dir(){
+                let _=std::fs::remove_file(folder.join("privacy-shield.v1.json"));
             }
             media_devices::load(app.handle());
             let preferences=load_preferences(app.handle());

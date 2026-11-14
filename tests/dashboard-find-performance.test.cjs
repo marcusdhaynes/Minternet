@@ -136,13 +136,11 @@ test('compact Find, toolbar order, and branded new tabs',()=>{
 
 test('Downloads keep native source checks and signature validation while popups become tabs',()=>{
   const native=read('native/desktop/src-tauri/src/main.rs');
-  const shield=read('native/desktop/src-tauri/src/privacy_shield.rs');
   assert.match(native,/download_destination\(&for_download,&url,destination\.as_path\(\)\)/);
   assert.doesNotMatch(native,/explicit_download_approval/);
   assert.match(native,/fn is_disguised_executable/);
   assert.match(native,/if is_disguised_executable\(std::path::Path::new\(&entry\.path\)\)/);
   assert.match(native,/if !download_source_allowed\(&for_download,id,&url\)/);
-  assert.doesNotMatch(shield,/pub fn block_popup|pub fn block_blank_popup/);
   assert.match(native,/open_site_popup_tab/);
   assert.match(native,/NewWindowResponse::Deny/);
 });
