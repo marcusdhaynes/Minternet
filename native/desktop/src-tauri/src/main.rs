@@ -9,6 +9,7 @@ mod media_devices;
 mod site_context_menu;
 mod extensions;
 mod updates;
+mod self_update;
 use base64::Engine as _;
 use rand::{rngs::OsRng,RngCore};
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -4773,6 +4774,48 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             return tauri::async_runtime::spawn_blocking(updates::check)
                 .await.map_err(|error|format!("Update check could not finish: {error}"))?;
         }
+        "updates-apply" => {
+            #[cfg(not(windows))]
+            return Err("Automatic portable EXE replacement is supported on Windows only".into());
+            #[cfg(windows)]
+            {
+                use std::sync::atomic::{AtomicBool,Ordering};
+                static APPLYING:AtomicBool=AtomicBool::new(false);
+                if APPLYING.swap(true,Ordering::AcqRel){
+                    return Err("A Minternet update is already being downloaded".into());
+                }
+                // Preserve ordinary tabs and web sessions before giving a
+                // verified helper permission to replace the running EXE.
+                refresh_session_urls(&app);
+                if let Err(error)=save_session(&app){
+                    APPLYING.store(false,Ordering::Release);
+                    return Err(format!("Could not save browser session before update: {error}"));
+                }
+                let handle=app.clone();
+                let result=tauri::async_runtime::spawn_blocking(move||{
+                    let checked=updates::check()?;
+                    let release=checked.get("update")
+                        .filter(|entry|!entry.is_null())
+                        .ok_or("Minternet is already up to date")?;
+                    self_update::download_and_start(&handle,release)
+                }).await.map_err(|error|format!("Update task failed: {error}"))?;
+                if result.is_err(){APPLYING.store(false,Ordering::Release);}
+                let details=result?;
+                // Do not reset AppData, website profiles, vaults, or cookies.
+                // The helper waits for this process to exit, copies over the
+                // currently running executable *at its existing full path*,
+                // then relaunches that same path.
+                refresh_session_urls(&app);
+                let _=save_session(&app);
+                clear_crash_guard(&app);
+                let exiting=app.clone();
+                std::thread::spawn(move||{
+                    std::thread::sleep(Duration::from_millis(500));
+                    exiting.exit(0);
+                });
+                return Ok(details);
+            }
+        }
         "extensions-list" => {
             return extensions::list(&app);
         }
@@ -6332,6 +6375,9 @@ fn install_panic_diagnostics(app:&tauri::AppHandle){
     }));
 }
 fn main() {
+    // The staged, verified replacement EXE runs in helper mode and NEVER
+    // creates an ordinary browser window or opens a website.
+    if self_update::maybe_run_helper(){return;}
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
