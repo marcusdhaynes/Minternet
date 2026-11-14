@@ -267,7 +267,7 @@ fn replace_with_rollback(source:&Path,target:&Path,expected:&str)->Result<PathBu
     Ok(old)
 }
 #[cfg(windows)]
-fn run_helper(pid:u32,target:&Path,expected:&str)->Result<(),String>{
+fn run_helper(pid:u32,target:&Path,expected:&str,smoke:Option<&Path>)->Result<(),String>{
     if !validate_hash(expected){return Err("Invalid update hash".into());}
     if !target.is_absolute() ||
        !target.extension().is_some_and(|ext|ext.to_string_lossy().eq_ignore_ascii_case("exe")){
@@ -284,7 +284,15 @@ fn run_helper(pid:u32,target:&Path,expected:&str)->Result<(),String>{
     if hash_file(&source)?!=expected{
         return Err("Update helper EXE has changed since it was downloaded".into());
     }
-    wait_for_previous_process(pid)?;
+    if let Some(marker)=smoke{
+        if pid!=0 || !target.starts_with(std::env::temp_dir()) ||
+           !marker.starts_with(std::env::temp_dir()) ||
+           marker.extension().and_then(|s|s.to_str())!=Some("ok"){
+            return Err("Updater smoke-test paths are not isolated".into());
+        }
+    }else{
+        wait_for_previous_process(pid)?;
+    }
     // If Windows/antivirus retains an executable lock briefly after exit,
     // retry the transaction. Never delete the old file before a backup exists.
     let mut backup=None;
@@ -298,7 +306,11 @@ fn run_helper(pid:u32,target:&Path,expected:&str)->Result<(),String>{
         }
     }
     let old=backup.ok_or("Update could not install replacement")?;
-    let spawn=Command::new(target)
+    let mut relaunch=Command::new(target);
+    if let Some(marker)=smoke{
+        relaunch.arg("--minternet-updater-smoke").arg(marker);
+    }
+    let spawn=relaunch
         .current_dir(target.parent().ok_or("Missing target folder")?)
         .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
         .spawn();
@@ -307,6 +319,9 @@ fn run_helper(pid:u32,target:&Path,expected:&str)->Result<(),String>{
             // A process that fails immediately after starting is not treated
             // as a successful installation. Restore the prior working EXE.
             std::thread::sleep(Duration::from_secs(3));
+            if let Some(marker)=smoke{
+                if marker.exists(){return Ok(());}
+            }
             if app.try_wait().map_err(|e|e.to_string())?.is_some(){
                 let _=fs::remove_file(target);
                 fs::rename(&old,target).map_err(|e|
@@ -330,12 +345,15 @@ pub fn maybe_run_helper()->bool{
     let args=std::env::args_os().collect::<Vec<_>>();
     if args.get(1).map(|a|a==UPDATE_SWITCH)!=Some(true){return false;}
     let result=(||{
-        if args.len()!=5{return Err("Update helper received incorrect arguments".into());}
+        let smoke=if args.len()==7 && args[5]=="--smoke"{
+            Some(PathBuf::from(&args[6]))
+        }else if args.len()==5{None}
+        else{return Err("Update helper received incorrect arguments".into());};
         let pid=args[2].to_string_lossy().parse::<u32>()
             .map_err(|_|"Invalid original process ID")?;
         let target=PathBuf::from(&args[3]);
         let digest=args[4].to_string_lossy().to_string();
-        run_helper(pid,&target,&digest)
+        run_helper(pid,&target,&digest,smoke.as_deref())
     })();
     if let Err(error)=result{
         let log=std::env::temp_dir().join("Minterest-update-error.txt");
@@ -352,6 +370,23 @@ pub fn maybe_run_helper()->bool{
     }
     true
 }
+#[cfg(windows)]
+pub fn maybe_run_updater_smoke()->bool{
+    let args=std::env::args_os().collect::<Vec<_>>();
+    if args.get(1).map(|a|a=="--minternet-updater-smoke")!=Some(true){return false;}
+    // Test-only restart proof: no window, no browser profile changes.
+    if args.len()==3{
+        let marker=PathBuf::from(&args[2]);
+        if marker.starts_with(std::env::temp_dir()) &&
+           marker.extension().and_then(|s|s.to_str())==Some("ok"){
+            let _=fs::write(marker,b"Minternet updater restarted installed EXE successfully");
+        }
+    }
+    true
+}
+#[cfg(not(windows))]
+pub fn maybe_run_updater_smoke()->bool{false}
+
 #[cfg(not(windows))]
 pub fn maybe_run_helper()->bool{false}
 
