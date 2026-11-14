@@ -2250,3 +2250,15 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { di
 .bookmark-settings .updates-actions .updates-install-button{
   background:#625087;border-color:#957ec5;color:#fff
 }
+
+/* Passkey controls are part of Logins, but never require unlocking the
+   password vault (keys are owned and managed by the OS/passkey provider). */
+.vault-passkeys{border:1px solid #48445f;background:#211f32;border-radius:8px;
+  padding:10px;margin:8px 0 12px;display:flex;flex-direction:column;gap:7px}
+.vault-passkeys .vault-list-head{margin:0;font-weight:650}
+.vault-passkeys p{margin:0;color:#bdb6d0;font-size:11px;line-height:1.45;overflow-wrap:anywhere}
+.vault-passkey-actions{display:flex;gap:6px;flex-wrap:wrap}
+.vault-passkey-actions button{font:inherit;font-size:10px;line-height:1.2;cursor:pointer;
+  padding:7px 8px;color:#f5f0ff;background:#342c4b;border:1px solid #6b5c91;border-radius:5px}
+.vault-passkey-actions button:hover{background:#493960}
+.vault-passkeys #passkeyStatus{color:#d0c5e7}
