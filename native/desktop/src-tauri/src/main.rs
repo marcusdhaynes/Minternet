@@ -1437,9 +1437,77 @@ fn split_rect(index:usize,count:usize,width:f64,height:f64,top:f64,
     }
 }
 
+// A drop target refers to a visible pane, not an insertion point in an
+// arbitrary list. Two-pane layout has left/right halves, three-pane layout
+// has a full-height left pane and right upper/lower panes; four has the
+// four distinct quadrants. The preview uses exactly this same mapping.
+fn split_drop_target(count:usize,quadrant:usize)->usize {
+    let q=quadrant.min(3);
+    match count {
+        0|1|2 => q%2,
+        3 => if q%2==0 {0} else if q<2 {1} else {2},
+        _ => q,
+    }
+}
+
+// Put the dragged tab in the selected visible slot, minimizing other
+// movements. An existing pane swaps directly with the target. A new pane
+// displaces only the occupant of the selected slot into the newly opened
+// slot, rather than shifting every subsequent pane to another quadrant.
+fn assign_split_slot(split:&mut Vec<u32>,id:u32,target:usize)->Result<(),String>{
+    if let Some(source)=split.iter().position(|pane|*pane==id){
+        let dest=target.min(split.len().saturating_sub(1));
+        split.swap(source,dest);
+        return Ok(());
+    }
+    if split.len()>=4{
+        return Err("Split view supports four tabs maximum".into());
+    }
+    if target>=split.len(){split.push(id);}else{
+        let displaced=std::mem::replace(&mut split[target],id);
+        split.push(displaced);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod split_layout_tests {
-    use super::split_rect;
+    use super::{split_rect,split_drop_target,assign_split_slot};
+    #[test]
+    fn requested_fourth_quadrant_is_exact_and_others_stay_in_place(){
+        let mut slots=vec![1,2,3]; // full left, upper right, lower right
+        assign_split_slot(&mut slots,4,2).unwrap(); // bottom left
+        assert_eq!(slots,vec![1,2,4,3]);
+        // Repositioning an existing pane swaps only its destination.
+        assign_split_slot(&mut slots,3,0).unwrap();
+        assert_eq!(slots,vec![3,2,4,1]);
+    }
+    #[test]
+    fn new_pane_displaces_only_the_selected_occupant(){
+        let mut slots=vec![1,2];
+        assert_eq!(split_drop_target(3,3),2);
+        assign_split_slot(&mut slots,3,0).unwrap();
+        assert_eq!(slots,vec![3,2,1]);
+        assign_split_slot(&mut slots,3,2).unwrap();
+        assert_eq!(slots,vec![1,2,3]);
+    }
+    #[test]
+    fn split_targets_follow_actual_pane_shapes(){
+        assert_eq!((0..4).map(|q|split_drop_target(2,q)).collect::<Vec<_>>(),
+                   vec![0,1,0,1]);
+        assert_eq!((0..4).map(|q|split_drop_target(3,q)).collect::<Vec<_>>(),
+                   vec![0,1,0,2]);
+        assert_eq!((0..4).map(|q|split_drop_target(4,q)).collect::<Vec<_>>(),
+                   vec![0,1,2,3]);
+    }
+    #[test]
+    fn four_panes_never_exceed_limit_or_lose_existing_panes(){
+        let mut slots=vec![1,2,3,4];
+        assert!(assign_split_slot(&mut slots,5,0).is_err());
+        assert_eq!(slots,vec![1,2,3,4]);
+        assign_split_slot(&mut slots,4,1).unwrap();
+        assert_eq!(slots,vec![1,4,3,2]);
+    }
     #[test]
     fn two_way_split_fills_entire_page() {
         assert_eq!(split_rect(0,2,1000.0,800.0,52.0,0.5,0.5),
@@ -5523,30 +5591,22 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                     if previous!=0 && previous!=id {split.push(previous);}
                     else if let Some(other)=companion {split.push(other);}
                 }
-                if !split.contains(&id){
-                    if split.len()>=4{return Err("Split view supports four tabs maximum".into());}
-                    let size=split.len()+1;
-                    let target=match size {
-                        2=>if nx<0.5{0}else{1},
-                        3=>if nx<0.5{0}else if ny<0.5{1}else{2},
-                        _=>if ny<0.5{if nx<0.5{0}else{1}}
-                           else if nx<0.5{2}else{3}
-                    };
-                    let insert_at=target.min(split.len());
-                    split.insert(insert_at,id);
-                }else if split.len()>1{
-                    let old=split.iter().position(|x|*x==id).unwrap_or(0);
-                    split.remove(old);
-                    let size=split.len()+1;
-                    let target=match size {
-                        2=>if nx<0.5{0}else{1},
-                        3=>if nx<0.5{0}else if ny<0.5{1}else{2},
-                        _=>if ny<0.5{if nx<0.5{0}else{1}}
-                           else if nx<0.5{2}else{3}
-                    };
-                    let insert_at=target.min(split.len());
-                    split.insert(insert_at,id);
+                if split.is_empty(){
+                    return Err("Open a second webpage before creating split view".into());
                 }
+                let next_count=if split.contains(&id) {
+                    split.len()
+                } else {
+                    (split.len()+1).min(4)
+                };
+                // The frontend provides the exact highlighted quadrant. Keep
+                // normalized coordinates for older browser chrome builds.
+                let quadrant=value.get("quadrant").and_then(Value::as_u64)
+                    .filter(|q|*q<4).map(|q|q as usize)
+                    .unwrap_or(if ny<0.5 {if nx<0.5 {0} else {1}}
+                               else if nx<0.5 {2} else {3});
+                let slot=split_drop_target(next_count,quadrant);
+                assign_split_slot(&mut split,id,slot)?;
             }
             let ids=app.state::<SplitState>().0.lock().map_err(|e|e.to_string())?.clone();
             // Prepare only the participating panes, never load unrelated tabs.
