@@ -5521,6 +5521,10 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             return Ok(json!({"zoom":zoom}));
         }
         "prepare-tab" => { prepare_active(&app)?; }
+        // Read the actual installed binary's version, never a stale frontend constant.
+        "app-version" => {
+            return Ok(json!({"version":app.package_info().version.to_string()}));
+        }
         "focus-address" => {focus_address_bar(&app);return Ok(json!({"ok":true}));}
         "find-bar-set" => {
             let visible=value.as_bool().ok_or("Expected true/false")?;
