@@ -15,6 +15,12 @@ use webview2_com::Microsoft::Web::WebView2::Win32::{
 };
 use windows::core::BOOL;
 
+pub fn smoke_stage(stage:&'static str){
+  if !std::env::args().any(|s|s=="--minternet-blank-render-smoke"){return;}
+  let path=std::env::temp_dir().join(format!("minternet-blank-stage-{}.txt",std::process::id()));
+  let _=std::fs::write(path,stage);
+}
+
 // This runs only in the currently active document, at most twice after a
 // finished navigation. It returns a boolean. No DOM text is returned to the
 // browser chrome, native logs, or an external service.
@@ -144,6 +150,7 @@ pub fn schedule_blank_probe(app:&tauri::AppHandle,id:u32,expected_url:String){
     if !origin.is_some_and(|url|
         url.host_str()==Some("chatgpt.com") ||
         (smoke&&url.host_str()==Some("example.com"))){return;}
+    smoke_stage("probe-scheduled");
     let owner=app.clone();
     std::thread::spawn(move||{
         // SPA hydration must have a generous chance. A second probe also
@@ -153,20 +160,23 @@ pub fn schedule_blank_probe(app:&tauri::AppHandle,id:u32,expected_url:String){
             let task=owner.clone();
             let expected=expected_url.clone();
             let _=owner.run_on_main_thread(move||{
+                smoke_stage("probe-wait");
                 let label={
                     let store=task.state::<Mutex<super::Browser>>();
                     let Ok(browser)=store.lock() else{return};
-                    if browser.active_id!=id{return;}
+                    if browser.active_id!=id{smoke_stage("inactive");return;}
                     let Some(tab)=browser.tabs.iter().find(|tab|tab.id==id)else{return};
-                    if tab.url!=expected||tab.loading{return;}
+                    if tab.url!=expected{smoke_stage("url-changed");return;}
+                    if tab.loading{smoke_stage("loading");return;}
                     tab.view.clone()
                 };
-                let Some(label)=label else{return};
-                let Some(view)=task.get_webview(&label)else{return};
+                let Some(label)=label else{smoke_stage("view-missing");return};
+                let Some(view)=task.get_webview(&label)else{smoke_stage("view-missing");return};
                 let callback=task.clone();
                 let address=expected.clone();
                 let result=view.eval_with_callback(BLANK_PROBE,move|result|{
-                    if result.trim()!="true"{return;}
+                    if result.trim()!="true"{smoke_stage("probe-false");return;}
+                    smoke_stage("probe-true");
                     record(&callback,id,"blank-document");
                     // Defer teardown out of the COM ExecuteScript callback.
                     let closer=callback.clone();
@@ -180,7 +190,7 @@ pub fn schedule_blank_probe(app:&tauri::AppHandle,id:u32,expected_url:String){
                         });
                     });
                 });
-                if result.is_err(){record(&task,id,"script-probe-error");}
+                if result.is_err(){smoke_stage("script-failed");record(&task,id,"script-probe-error");}
             });
         }
     });

@@ -152,6 +152,7 @@ jobs:
           $exe = "$env:RUNNER_TEMP\minternet-portable\Minternet-Portable-x64.exe"
           $p = Start-Process -FilePath $exe -ArgumentList "--minternet-blank-render-smoke" -PassThru
           $marker = Join-Path $env:TEMP "minternet-blank-render-$($p.Id).ok"
+          $stage = Join-Path $env:TEMP "minternet-blank-stage-$($p.Id).txt"
           try {
             $passed = $false
             for ($i=0; $i -lt 40; $i++) {
@@ -161,7 +162,8 @@ jobs:
               if (Test-Path $marker) { $passed = $true; break }
             }
             if (!$passed) {
-              throw "A real blank native WebView2 document was not restored to Example Domain"
+              $last = if (Test-Path -LiteralPath $stage) { Get-Content -LiteralPath $stage -Raw } else { "no stage reached" }
+              throw "A real blank native WebView2 document was not restored to Example Domain; last stage: $last"
             }
             $proof = Get-Content -LiteralPath $marker -Raw
             if($proof -notmatch "PASS: recovered empty DOM and retained real WebView2 cookie plus localStorage"){
@@ -170,7 +172,7 @@ jobs:
             "PASS: intentionally blanked HTTPS page was rebuilt and text returned without clearing the browser profile." >> $env:GITHUB_STEP_SUMMARY
           } finally {
             if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
-            Remove-Item $marker -Force -ErrorAction SilentlyContinue
+            Remove-Item $marker,$stage -Force -ErrorAction SilentlyContinue
           }
       - name: Reproduce and repair off-center WebView2 startup after maximization
         shell: pwsh
