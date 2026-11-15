@@ -54,7 +54,14 @@ test('Crash recovery preserves tabs and does not automatically load a previously
   assert.match(main,/if previous_crash \{/);
   assert.match(main,/b\.active_id=0/);
   assert.match(main,/clear_crash_guard\(&handle\)/);
-  assert.match(main,/All saved tabs were preserved/);
+  assert.match(main,/Saved tabs were recovered from an interrupted session/);
+  assert.doesNotMatch(main,/Previous session ended unexpectedly/);
+  const lifecycle=read('native/desktop/src-tauri/src/session_lifecycle.rs');
+  assert.match(lifecycle,/minternet-running\.v2\./);
+  assert.match(lifecycle,/scan_prior\(dir,pid,is_running\)/);
+  assert.match(lifecycle,/legacy update marker/i);
+  const updater=read('native/desktop/src-tauri/src/portable_updater.rs');
+  assert.match(updater,/super::clear_crash_guard\(&handle\);\s*handle\.exit\(0\)/);
   assert.doesNotMatch(main,/panic payloads in logs.*writeln!\([^;]*info\.payload\(/s);
 });
 

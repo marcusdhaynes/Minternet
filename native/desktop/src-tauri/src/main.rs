@@ -8,6 +8,7 @@ mod media_devices;
 mod site_context_menu;
 mod extensions;
 mod portable_updater;
+mod session_lifecycle;
 mod auth_popup;
 mod passkey_support;
 use base64::Engine as _;
@@ -6649,21 +6650,17 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
     Ok(json!({"ok": true}))
 }
 
-// A previous process that disappeared without a CloseRequested event may
-// have been killed by the OS or crashed in WebView2. Preserve every saved URL
-// but avoid automatically reopening the suspect site on the next start.
-fn running_guard(app:&tauri::AppHandle)->Option<PathBuf>{
-    app.path().app_data_dir().ok().map(|dir|dir.join("minternet-running.v1"))
-}
+// A real previous interruption is distinguished from ordinary updates and
+// concurrently open browser windows via one process-owned lifecycle marker.
+// Legacy v1 markers were ambiguous and are discarded without a warning.
 fn start_crash_guard(app:&tauri::AppHandle)->bool{
-    let Some(path)=running_guard(app) else{return false};
-    if let Some(parent)=path.parent(){let _=std::fs::create_dir_all(parent);}
-    let prior=path.exists();
-    let _=std::fs::write(&path,format!("pid={}\\n",std::process::id()));
-    prior
+    app.path().app_data_dir().ok()
+        .is_some_and(|dir|session_lifecycle::mark_started(&dir))
 }
 fn clear_crash_guard(app:&tauri::AppHandle){
-    if let Some(path)=running_guard(app){let _=std::fs::remove_file(path);}
+    if let Ok(dir)=app.path().app_data_dir(){
+        session_lifecycle::mark_clean_exit(&dir);
+    }
 }
 fn install_panic_diagnostics(app:&tauri::AppHandle){
     use std::io::Write;
@@ -6817,7 +6814,7 @@ fn main() {
                         if matches!(event.event(), PageLoadEvent::Finished) {
                             if previous_crash {
                                 let _=view.eval(r#"setTimeout(() =>
-                                    window.minternetToast?.('Previous session ended unexpectedly. All saved tabs were preserved. Select a tab to reopen it.'),400)"#);
+                                    window.minternetToast?.('Saved tabs were recovered from an interrupted session. Select a tab to reopen it.'),400)"#);
                             }
                             if stability_smoke {
                                 // Exercise the real trusted-chrome IPC, native

@@ -158,6 +158,10 @@ fn prepare(app:&AppHandle)->Result<(),String>{
         }
         // A separately running, SHA-verified new binary now handles the
         // replacement and rollback; only this point exits the old browser.
+        // app.exit bypasses WindowEvent::CloseRequested. Mark this
+        // intentional update restart clean BEFORE exiting the old binary,
+        // otherwise the replacement wrongly announces a crash.
+        super::clear_crash_guard(&handle);
         handle.exit(0);
     }).map_err(|e|e.to_string())?;
     Ok(())
