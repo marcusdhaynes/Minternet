@@ -42,10 +42,10 @@ test('CI corrupts real native rectangle and viewport instead of only Tauri coord
 });
 test('ChatGPT no longer auto reloads while its layout or compositor is white',()=>{
   const src=get('native/desktop/src-tauri/src/main.rs');
-  const section=src.slice(src.indexOf('if event.url().host_str()==Some("chatgpt.com")'),
-    src.indexOf('// CI: write/read a persistent cookie',src.indexOf('if event.url().host_str()==Some("chatgpt.com")')));
+  const section=src.slice(src.indexOf('// WebView2 PageLoadEvent::Finished does NOT establish'),
+    src.indexOf('// CI: write/read a persistent cookie'));
   assert.doesNotMatch(section,/location\.reload\(\)/);
-  assert.match(section,/minternet-surface\.invalid\/__repair/);
+  assert.match(section,/render_health::schedule_blank_probe/);
   assert.match(src,/background_color\(tauri::webview::Color\(13,17,29,255\)\)/);
   assert.match(src,/url\.as_str\(\)=="https:\/\/minternet-surface\.invalid\/__repair"/);
 });
