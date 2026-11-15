@@ -68,8 +68,9 @@ pub async fn prepare(id:u32)->Result<(),String>{
                 if !peer.ip().is_loopback(){continue;}
                 let client=isolated.clone();
                 tokio::spawn(async move{
-                    let _=tokio::time::timeout(Duration::from_secs(300),
-                        serve(socket,client)).await;
+                    // Long-lived downloads and streaming sessions must not
+                    // disconnect after an arbitrary five-minute deadline.
+                    let _=serve(socket,client).await;
                 });
             }
         });
