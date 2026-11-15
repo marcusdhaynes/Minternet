@@ -162,7 +162,22 @@ fn prepare(app:&AppHandle)->Result<(),String>{
         // intentional update restart clean BEFORE exiting the old binary,
         // otherwise the replacement wrongly announces a crash.
         super::clear_crash_guard(&handle);
-        handle.exit(0);
+        // Ask WebView2 to close its normal browser window before terminating
+        // the process so its persistent cookie jar and localStorage can flush.
+        // The helper can only replace the EXE once this process exits. If an
+        // OAuth popup or secondary window holds the process open, close the
+        // remaining app after a brief bounded flush interval.
+        let window_closed=handle.get_window("main")
+            .is_some_and(|window|window.close().is_ok());
+        if window_closed {
+            let closing=handle.clone();
+            std::thread::spawn(move||{
+                std::thread::sleep(Duration::from_millis(450));
+                closing.exit(0);
+            });
+        }else{
+            handle.exit(0);
+        }
     }).map_err(|e|e.to_string())?;
     Ok(())
 }
