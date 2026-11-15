@@ -287,6 +287,8 @@ struct Snapshot {
     tabs: Vec<PublicTab>,
     active_id: u32,
     extensions_count: usize,
+    split_ids: Vec<u32>,
+    split_left: bool,
 }
 
 // Opening the folder alone never authorizes opening individual sites.
@@ -874,6 +876,7 @@ impl Browser {
         Snapshot {
             active_id: self.active_id,
             extensions_count: 0,
+            split_ids:Vec::new(),split_left:false,
             tabs: self.tabs.iter().map(|t| PublicTab {
                 id:t.id,
                 title:if t.secret_id.is_some(){"Secret Tab".into()}else{t.title.clone()},
@@ -1072,9 +1075,16 @@ fn restore_session(app: &tauri::AppHandle) {
 }
 
 fn snapshot(app: &tauri::AppHandle) -> Result<Snapshot, String> {
-    let browser = app.state::<Mutex<Browser>>();
-    let b = browser.lock().map_err(|e| e.to_string())?;
-    Ok(b.snapshot())
+    let ids=app.state::<SplitState>().0.lock()
+        .map(|split|split.clone()).unwrap_or_default();
+    let left=app.state::<SplitThreeLeft>().0.lock()
+        .map(|side|*side).unwrap_or(false);
+    let browser=app.state::<Mutex<Browser>>();
+    let b=browser.lock().map_err(|e|e.to_string())?;
+    let mut state=b.snapshot();
+    state.split_ids=if ids.len()>1{ids}else{Vec::new()};
+    state.split_left=left;
+    Ok(state)
 }
 
 struct SessionSaveQueued(AtomicBool);
@@ -1100,10 +1110,18 @@ fn schedule_session_save(app:&tauri::AppHandle){
     });
 }
 fn notify(app: &tauri::AppHandle) {
+    // Include native split position changes in the state diff. Read these
+    // locks before Browser to avoid inversion with split manipulation.
+    let ids=app.state::<SplitState>().0.lock()
+        .map(|split|split.clone()).unwrap_or_default();
+    let left=app.state::<SplitThreeLeft>().0.lock()
+        .map(|side|*side).unwrap_or(false);
     let state = {
         let storage = app.state::<Mutex<Browser>>();
         let Ok(mut b) = storage.lock() else { return };
-        let state = b.snapshot();
+        let mut state = b.snapshot();
+        state.split_ids=if ids.len()>1{ids}else{Vec::new()};
+        state.split_left=left;
         if b.last_notified.as_ref() == Some(&state) { return; }
         b.last_notified = Some(state.clone());
         state

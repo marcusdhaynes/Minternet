@@ -345,8 +345,12 @@
       state.restoredOrder=null;
     }
     eligibleFallback();
+    const splitIds=window.MinternetSuperTab?.ordered(data.splitIds,data.splitLeft)||[];
+    const splitSet=new Set(splitIds);
+    const splitTabs=splitIds.map(id=>data.tabs.find(tab=>tab.id===id)).filter(Boolean);
+    if(splitTabs.length<2)splitSet.clear();
     const signature=JSON.stringify([
-      data.activeId,
+      data.activeId,data.splitIds||[],Boolean(data.splitLeft),
       data.tabs.map(t=>[t.id,t.title,t.url,t.private,t.pinned,t.loading,t.suspended,t.audioPlaying,t.audioMuted,t.secretTab,t.secretPending,t.syncId,
         t.secretTab?window.minternetSecretTabNames?.get(t.id):'']),
       state.order,
@@ -359,13 +363,20 @@
     try {const stored=JSON.parse(model.serialize(state));Object.assign(stored,savedTabSlots(data.tabs));const updated=JSON.stringify(stored);if(updated!==lastStoredGroupJson){localStorage.setItem(KEY,updated);lastStoredGroupJson=updated;}}catch{}
     const items=[];
     // Chrome/Firefox-style pinned tabs precede groups and show no close X.
-    for(const tab of model.sortedTabs(state,data.tabs).filter(t=>t.pinned)){
+    for(const tab of model.sortedTabs(state,data.tabs).filter(t=>t.pinned&&!splitSet.has(t.id))){
       if(model.findTab(state,tab.id))model.assign(state,tab.id,null);
       items.push(takeTab(tab,tab.id===data.activeId));
     }
+    if(splitTabs.length>1){
+      items.push(window.MinternetSuperTab.build(splitTabs,data.activeId,
+        window.minternetRenderSplitIcon,
+        id=>window.minternet?.command('activate',id),
+        (id,point)=>window.minternetMenus?.tab(id,point)));
+    }
     for(const g of state.groups){
       if(!g.visible)continue;
-      const members=model.tabsIn(state,g.id,data.tabs).filter(t=>!t.pinned);
+      const members=model.tabsIn(state,g.id,data.tabs)
+        .filter(t=>!t.pinned&&!splitSet.has(t.id));
       items.push(takeChip(g,members));
       if(!g.collapsed){
         for(const tab of members){
@@ -382,7 +393,7 @@
       }
     }
     for(const tab of model.sortedTabs(state,data.tabs)){
-      if(tab.pinned||model.findTab(state,tab.id))continue;
+      if(tab.pinned||splitSet.has(tab.id)||model.findTab(state,tab.id))continue;
       items.push(takeTab(tab,tab.id===data.activeId));
     }
     // Minimal keyed reconciliation: do not detach and recreate every tab

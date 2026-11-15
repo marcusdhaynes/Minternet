@@ -248,6 +248,8 @@ function renderSiteIcon(tab,slot){
     discoverSiteIcon(host,tab.url);
   }
 }
+// Split pane icons use the same native/cached favicon as regular tabs.
+window.minternetRenderSplitIcon=renderSiteIcon;
 // WebView2 supplies the actual favicon image bytes from its own browser cache.
 // There is no guessing or cross-site probe required for an opened Windows tab.
 if(window.__TAURI__?.event){

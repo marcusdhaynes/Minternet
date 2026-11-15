@@ -72,7 +72,7 @@
     return list;
   }
   function tabIdsInVisualOrder(){
-    const visible=[...document.querySelectorAll('#tabs .tab[data-tab-id]')]
+    const visible=[...document.querySelectorAll('#tabs .tab[data-tab-id],#tabs .split-super-pane[data-tab-id]')]
       .map(el=>Number(el.dataset.tabId)).filter(Number.isSafeInteger);
     const remaining=groups()?.getLatest().tabs.map(t=>t.id).filter(id=>!visible.includes(id))||[];
     return [...visible,...remaining];
