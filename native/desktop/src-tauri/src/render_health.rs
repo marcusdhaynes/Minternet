@@ -15,31 +15,43 @@ use webview2_com::Microsoft::Web::WebView2::Win32::{
 };
 use windows::core::BOOL;
 
-pub fn smoke_stage(stage:&'static str){
+pub fn smoke_stage(stage:&str){
   if !std::env::args().any(|s|s=="--minternet-blank-render-smoke"){return;}
+  // Only fixed stage labels and a seven-bit health flag reach this log.
+  // Do not record any page text, URL, cookies or account information.
   let path=std::env::temp_dir().join(format!("minternet-blank-stage-{}.txt",std::process::id()));
-  let _=std::fs::write(path,stage);
+  if let Ok(mut output)=std::fs::OpenOptions::new().create(true).append(true).open(path){
+    let _=writeln!(output,"{stage}");
+  }
 }
 
 // This runs only in the currently active document, at most twice after a
 // finished navigation. It returns a boolean. No DOM text is returned to the
 // browser chrome, native logs, or an external service.
+// A numeric *bitmask* makes a false result explainable without disclosing
+// page content. 1=ready, 2=visible, 4=body exists, 8=no editor, 16=no busy
+// indicator, 32=no media/dialog, 64=almost no visible text.
+// All seven means the page is genuinely blank and settled. Only a browser
+// already verifying the active tab can act on this bitmask.
 pub const BLANK_PROBE:&str=r#"(() => {
   try {
-    if(document.readyState!=='complete'||document.visibilityState!=='visible')
-      return false;
     const body=document.body;
-    if(!body)return false;
+    let bits=0;
+    if(document.readyState==='complete')bits|=1;
+    if(document.visibilityState==='visible')bits|=2;
+    if(body)bits|=4;
     const hasUsableEditor=!!document.querySelector(
       'textarea,input:not([type="hidden"]),[contenteditable="true"],[role="textbox"]');
-    const visibleText=(body.innerText||'').trim().length;
+    if(!hasUsableEditor)bits|=8;
     const busy=!!document.querySelector(
       '[role="progressbar"],[aria-busy="true"],progress,.loading,.spinner');
+    if(!busy)bits|=16;
     const media=!!document.querySelector('video,canvas,[role="dialog"]');
-    // An almost empty fully settled SPA with no UI is not a usable page.
-    // A real user form, media or spinner MUST block automatic replacement.
-    return !hasUsableEditor&&!busy&&!media&&visibleText<25;
-  } catch (_) { return false; }
+    if(!media)bits|=32;
+    const visibleText=body?(body.innerText||'').trim().length:999;
+    if(visibleText<25)bits|=64;
+    return bits;
+  } catch (_) { return 0; }
 })()"#;
 
 // A failed renderer may have already discarded the page. A user-typed or
@@ -175,7 +187,9 @@ pub fn schedule_blank_probe(app:&tauri::AppHandle,id:u32,expected_url:String){
                 let callback=task.clone();
                 let address=expected.clone();
                 let result=view.eval_with_callback(BLANK_PROBE,move|result|{
-                    if result.trim()!="true"{smoke_stage("probe-false");return;}
+                    let flags=result.trim().parse::<u8>().unwrap_or(0);
+                    smoke_stage(&format!("probe-flags:{flags}"));
+                    if flags!=127{return;}
                     smoke_stage("probe-true");
                     record(&callback,id,"blank-document");
                     // Defer teardown out of the COM ExecuteScript callback.

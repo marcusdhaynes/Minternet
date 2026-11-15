@@ -24,7 +24,8 @@ test('a truly blank SPA gets one bounded recovery without clearing user data',()
  assert.match(src,/document\.visibilityState/);
  assert.match(src,/visibleText<25/);
  assert.match(src,/hasUsableEditor/);
- assert.match(src,/if result\.trim\(\)!="true"/);
+ assert.match(src,/if flags!=127\{return;\}/);
+ assert.match(src,/smoke_stage\(&format!\("probe-flags:\{flags\}"\)\)/);
  assert.match(src,/if map\.get\(&id\)\.is_some_and/);
  assert.match(main,/recover_stalled_site_if_url/);
  assert.match(main,/cache\.shown\.remove\(label\)/);
@@ -35,7 +36,9 @@ test('a truly blank SPA gets one bounded recovery without clearing user data',()
 });
 test('blank UI recovery does not accidentally destroy a populated editor or GPU process',()=>{
  const src=read('native/desktop/src-tauri/src/render_health.rs');
- assert.match(src,/!hasUsableEditor&&!busy&&!media/);
+ assert.match(src,/if\(!hasUsableEditor\)bits\|=8/);
+ assert.match(src,/if\(!busy\)bits\|=16/);
+ assert.match(src,/if\(!media\)bits\|=32/);
  assert.match(src,/assert!\(!recoverable_failure\(COREWEBVIEW2_PROCESS_FAILED_KIND_GPU_PROCESS_EXITED\)\)/);
 });
 test('real Windows CI intentionally blanks HTTPS content and verifies recovery',()=>{
