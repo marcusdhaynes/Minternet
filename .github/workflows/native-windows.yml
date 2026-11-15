@@ -164,7 +164,7 @@ jobs:
               throw "A real blank native WebView2 document was not restored to Example Domain"
             }
             $proof = Get-Content -LiteralPath $marker -Raw
-            if($proof -notmatch "PASS: recovered empty DOM using new site renderer"){
+            if($proof -notmatch "PASS: recovered empty DOM and retained real WebView2 cookie plus localStorage"){
               throw "Unexpected page recovery marker: $proof"
             }
             "PASS: intentionally blanked HTTPS page was rebuilt and text returned without clearing the browser profile." >> $env:GITHUB_STEP_SUMMARY
