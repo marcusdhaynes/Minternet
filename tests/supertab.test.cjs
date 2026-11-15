@@ -68,7 +68,7 @@ test('native snapshots, groups and tab menus treat panes as exactly one supertab
  assert.match(native,/state\.split_ids=if ids\.len\(\)>1/);
  assert.match(group,/MinternetSuperTab\.build\(splitTabs/);
  assert.match(group,/!splitSet\.has\(t\.id\)/);
- assert.match(group,/!splitSet\.has\(tab\.id\)/);
+ assert.match(group,/filter\(t=>!t\.pinned&&!splitSet\.has\(t\.id\)\)/);
  assert.match(group,/splitSet\.has\(tab\.id\)/);
  assert.match(menu,/#tabs \.split-super-pane\[data-tab-id\]/);
  assert.match(html,/src="\.\/supertab\.js"/);

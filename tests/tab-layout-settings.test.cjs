@@ -15,6 +15,7 @@ function harness(backing=new Map()){
   const elements={};
   for(const id of ['groupTabWidth','regularTabWidth','pinnedTabWidth',
     'groupTabPadding','regularTabPadding','pinnedTabPadding',
+    'supertabIconGap','supertabSidePadding',
     'showTabBarAppIcon','resetTabWidths']){
     elements[id]={
       value:'',checked:true,handlers:{},
@@ -61,7 +62,9 @@ test('three independent pixel widths apply immediately and survive a restart',()
     ['--minternet-pinned-tab-width','42px'],
     ['--minternet-group-tab-padding','5px'],
     ['--minternet-regular-tab-padding','2px'],
-    ['--minternet-pinned-tab-padding','2px']
+    ['--minternet-pinned-tab-padding','2px'],
+    ['--minternet-supertab-gap','0px'],
+    ['--minternet-supertab-padding','1px']
   ]);
   const saved=JSON.parse(h.backing.get('minternet.tab-layout.v1'));
   assert.equal(saved.group,92);assert.equal(saved.regular,120);assert.equal(saved.pinned,42);
@@ -175,4 +178,20 @@ test('tab-appearance controls are a three-row table with equal-side padding appl
     assert.match(geometry,new RegExp('padding-left:var\\(--minternet-'+kind+'-tab-padding\\)!important;'));
     assert.match(geometry,new RegExp('padding-right:var\\(--minternet-'+kind+'-tab-padding\\)!important;'));
   }
+});
+
+test('supertab gap and side padding persist and reset independently',()=>{
+ const h=harness();
+ assert.equal(h.elements.supertabIconGap.value,'0');
+ assert.equal(h.elements.supertabSidePadding.value,'1');
+ h.elements.supertabIconGap.value='3';h.elements.supertabIconGap.fire('input');
+ h.elements.supertabSidePadding.value='0';h.elements.supertabSidePadding.fire('input');
+ assert.equal(h.values.get('--minternet-supertab-gap'),'3px');
+ assert.equal(h.values.get('--minternet-supertab-padding'),'0px');
+ const fresh=harness(h.backing);
+ assert.equal(fresh.elements.supertabIconGap.value,'3');
+ assert.equal(fresh.elements.supertabSidePadding.value,'0');
+ fresh.elements.resetTabWidths.fire('click');
+ assert.equal(fresh.values.get('--minternet-supertab-gap'),'0px');
+ assert.equal(fresh.values.get('--minternet-supertab-padding'),'1px');
 });
