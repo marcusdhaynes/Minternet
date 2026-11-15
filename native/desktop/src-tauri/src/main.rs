@@ -2945,38 +2945,99 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                             });
                         });
                     }
-                    // A real Windows smoke test deliberately erases a known
-                    // document, then verifies the health monitor restores the
-                    // actual website, rather than merely checking geometry.
+                    // CI: only blank an ALREADY RENDERED HTTPS document.
+                    // PageLoadEvent::Finished can fire while a redirect or
+                    // document commit is still settling. The old smoke marked
+                    // the page blank *before its ExecuteScript had succeeded*,
+                    // so later healthy navigations looked like failed repair.
                     #[cfg(windows)]
                     if event.url().host_str()==Some("example.com") &&
                         std::env::args().any(|a|a=="--minternet-blank-render-smoke"){
-                        static BLANK_STAGED:AtomicBool=AtomicBool::new(false);
+                        static BLANK_PHASE:std::sync::atomic::AtomicU8=
+                            std::sync::atomic::AtomicU8::new(0);
                         render_health::smoke_stage("load-finished");
-                        if !BLANK_STAGED.swap(true,Ordering::AcqRel){
-                            let _=view.eval_with_callback(r#"(function(){
-                                document.cookie='minternet_render_repair=retained; Max-Age=1800; Path=/; SameSite=Lax; Secure';
-                                localStorage.setItem('minternet_render_repair','retained');
-                                document.body.replaceChildren();
-                                document.body.style.background='white';
-                                return document.body.childElementCount===0;
-                            })();"#,|response|{
-                                render_health::smoke_stage(if response.trim()=="true"{"blanked"}else{"blank-failed"});
+                        let phase=BLANK_PHASE.load(Ordering::Acquire);
+                        if phase==0 &&
+                          BLANK_PHASE.compare_exchange(0,1,Ordering::AcqRel,Ordering::Acquire).is_ok(){
+                            // Deferred out of WebView2's navigation-completed
+                            // COM callback. Verify expected content before
+                            // mutating or arming the blank-state flag.
+                            let app=for_load.clone();
+                            let label=view.label().to_string();
+                            std::thread::spawn(move||{
+                                std::thread::sleep(Duration::from_millis(550));
+                                let task=app.clone();
+                                let _=app.run_on_main_thread(move||{
+                                    let Some(view)=task.get_webview(&label) else {
+                                        BLANK_PHASE.store(0,Ordering::Release);
+                                        render_health::smoke_stage("view-missing");
+                                        return;
+                                    };
+                                    let status=view.eval_with_callback(r#"(function(){
+                                      try{
+                                        if(document.readyState!=='complete' ||
+                                           !document.body?.innerText?.includes('Example Domain')){
+                                          return 0;
+                                        }
+                                        document.cookie='minternet_render_repair=retained; Max-Age=1800; Path=/; SameSite=Lax; Secure';
+                                        localStorage.setItem('minternet_render_repair','retained');
+                                        if(!document.cookie.includes('minternet_render_repair=retained') ||
+                                           localStorage.getItem('minternet_render_repair')!=='retained'){
+                                          return 2;
+                                        }
+                                        document.body.replaceChildren();
+                                        document.body.style.background='white';
+                                        return document.body.childElementCount===0?1:2;
+                                      }catch(_){return 2;}
+                                    })();"#,move|response|{
+                                        match response.trim(){
+                                          "1"=>{
+                                            BLANK_PHASE.store(2,Ordering::Release);
+                                            render_health::smoke_stage("blanked");
+                                          },
+                                          "0"=>{
+                                            BLANK_PHASE.store(0,Ordering::Release);
+                                            render_health::smoke_stage("not-ready");
+                                          },
+                                          _=>{
+                                            BLANK_PHASE.store(0,Ordering::Release);
+                                            render_health::smoke_stage("blank-failed");
+                                          }
+                                        }
+                                    });
+                                    if status.is_err(){
+                                        BLANK_PHASE.store(0,Ordering::Release);
+                                        render_health::smoke_stage("script-failed");
+                                    }
+                                });
                             });
-                        }else{
+                        }else if phase==2{
+                            // On actual renderer recreation the website loads
+                            // again. Probe after its document commits, and
+                            // insist on both DOM content and persistent state.
                             render_health::smoke_stage("second-load");
-                            let target=std::env::temp_dir().join(format!(
-                                "minternet-blank-render-{}.ok",std::process::id()));
-                            let _=view.eval_with_callback(
-                                "(document.body?.innerText?.includes('Example Domain')===true)&&document.cookie.includes('minternet_render_repair=retained')&&localStorage.getItem('minternet_render_repair')==='retained'",
-                                move|proof|{
-                                    if proof.trim()=="true"{
-                                        render_health::smoke_stage("proof-passed");
-                                        let _=std::fs::write(&target,
-                                          "PASS: recovered empty DOM and retained real WebView2 cookie plus localStorage");
-                                    }else{render_health::smoke_stage("verification-failed");}
-                                }
-                            );
+                            let app=for_load.clone();
+                            let label=view.label().to_string();
+                            std::thread::spawn(move||{
+                                std::thread::sleep(Duration::from_millis(550));
+                                let task=app.clone();
+                                let _=app.run_on_main_thread(move||{
+                                    let Some(view)=task.get_webview(&label)else{return};
+                                    let marker=std::env::temp_dir().join(format!(
+                                        "minternet-blank-render-{}.ok",std::process::id()));
+                                    let _=view.eval_with_callback(
+                                        "(document.body?.innerText?.includes('Example Domain')===true)&&document.cookie.includes('minternet_render_repair=retained')&&localStorage.getItem('minternet_render_repair')==='retained'",
+                                        move|proof|{
+                                            if proof.trim()=="true"{
+                                                BLANK_PHASE.store(3,Ordering::Release);
+                                                render_health::smoke_stage("proof-passed");
+                                                let _=std::fs::write(&marker,
+                                                  "PASS: recovered empty DOM and retained real WebView2 cookie plus localStorage");
+                                            }else{render_health::smoke_stage("verification-failed");}
+                                        }
+                                    );
+                                });
+                            });
                         }
                     }
                     // WebView2 PageLoadEvent::Finished does NOT establish
