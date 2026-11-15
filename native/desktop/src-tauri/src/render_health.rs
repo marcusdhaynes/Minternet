@@ -167,7 +167,10 @@ pub fn schedule_blank_probe(app:&tauri::AppHandle,id:u32,expected_url:String){
     std::thread::spawn(move||{
         // SPA hydration must have a generous chance. A second probe also
         // catches pages which never reached a useful UI after load.
-        for delay in if smoke{vec![1100u64]}else{vec![14000u64,12000]} {
+        // In smoke mode the test empties the DOM after its initial content is
+        // ready (~2.5 seconds after navigation). Probe afterward, never
+        // before the deliberate fault is injected.
+        for delay in if smoke{vec![5100u64]}else{vec![14000u64,12000]} {
             std::thread::sleep(Duration::from_millis(delay));
             let task=owner.clone();
             let expected=expected_url.clone();
