@@ -141,6 +141,31 @@ mod windows_menu {
         entries
     }
 
+    // Stable WebView2 exposes some spellcheck commands with only the generic
+    // label "Spellcheck". Those command IDs *do* apply real suggestions, but
+    // displaying generic text misleads the user about which word will replace
+    // the misspelling. In that case let Chromium render its native spelling
+    // suggestions rather than presenting fabricated or unlabeled corrections.
+    fn has_generic_spellcheck(items:&ICoreWebView2ContextMenuItemCollection,depth:u8)->bool{
+        if depth>8{return false;}
+        let mut count=0u32;
+        if (unsafe{items.Count(&mut count)}).is_err(){return false;}
+        for index in 0..count.min(160){
+            let Ok(item)=(unsafe{items.GetValueAtIndex(index)})else{continue};
+            let name=read_string(|p|unsafe{item.Name(p)});
+            let label=read_string(|p|unsafe{item.Label(p)});
+            if name.eq_ignore_ascii_case("spellcheck")
+                && matches!(label.trim().to_ascii_lowercase().as_str(),
+                    "spellcheck"|"spell check"|"spelling"){
+                return true;
+            }
+            if let Ok(children)=unsafe{item.Children()}{
+                if has_generic_spellcheck(&children,depth+1){return true;}
+            }
+        }
+        false
+    }
+
     pub(super) fn attach(app:&AppHandle,id:u32,view:&tauri::Webview){
         let handle=app.clone();
         let _=view.with_webview(move |native|{
@@ -148,9 +173,18 @@ mod windows_menu {
             let Ok(ext)=core.cast::<ICoreWebView2_11>()else{return};
             let handler=webview2_com::ContextMenuRequestedEventHandler::create(Box::new(move |_,args|{
                 let Some(args)=args else{return Ok(())};
-                // Suppress OS/Edge menu, but retain its native commands.
-                let _=unsafe{args.SetHandled(true)};
+                // A stable WebView2 spellcheck command can be named
+                // "Spellcheck" instead of its recommended replacement word.
+                // Only in that case use the genuine browser spellcheck menu,
+                // which knows the suggestion text and keeps editor focus.
+                // Other context menus still use Minternet's custom surface.
                 clear();
+                if unsafe{args.MenuItems()}.ok()
+                    .is_some_and(|items|has_generic_spellcheck(&items,0)){
+                    let _=unsafe{args.SetHandled(false)};
+                    return Ok(());
+                }
+                let _=unsafe{args.SetHandled(true)};
                 let request_id=NEXT_REQUEST.fetch_add(1,Ordering::Relaxed);
                 let mut point=POINT::default();
                 let _=unsafe{args.Location(&mut point)};
