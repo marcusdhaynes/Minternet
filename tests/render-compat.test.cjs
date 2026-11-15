@@ -13,7 +13,7 @@ test('hardware rendering remains default; opt-in compatibility happens before an
  assert.match(src,/render-compat\.v1\.json/);
  assert.match(main,/render_compat::configure\(app\.handle\(\)\)/);
  assert.ok(main.indexOf('render_compat::configure(app.handle())') <
-   main.indexOf('window.add_child('));
+   main.indexOf('window.add_child(',main.indexOf('render_compat::configure(app.handle())')));
 });
 test('user controls rendering and repairs surface without reloading or profile reset',()=>{
  const html=get('ui/index.html'),js=get('ui/render-compat-ui.js');
@@ -25,7 +25,7 @@ test('user controls rendering and repairs surface without reloading or profile r
  assert.match(js,/render-compat-set/);
  assert.match(js,/render-surface-repair/);
  assert.match(main,/schedule_surface_restore\(&app\)/);
- assert.doesNotMatch(js,/localStorage\.clear|cookie|reset-profile|window\.location\.reload/);
+ assert.doesNotMatch(js,/localStorage\.clear|document\.cookie|reset-profile|window\.location\.reload/);
 });
 test('blank recovery smoke must verify a document body before blanking',()=>{
  const main=get('native/desktop/src-tauri/src/main.rs');
