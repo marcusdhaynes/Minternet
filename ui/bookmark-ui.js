@@ -10,6 +10,8 @@
   // Persist compact, site-specific 24px thumbnails. They are read before the
   // first paint, so known bookmarks never wait for network favicon requests.
   const thumbs=new Map(),thumbnailJobs=new Set();
+  const pendingIconRequests=new Set();
+  let torBookmarkMode=false;
   try{
     const cached=JSON.parse(localStorage.getItem(ICON_STORE)||'{}');
     for(const [address,png] of Object.entries(cached||{}).slice(-220))
@@ -24,6 +26,7 @@
     try{localStorage.setItem(ICON_STORE,JSON.stringify(Object.fromEntries(thumbs)));}catch{}
   }
   async function cacheIconThumbnail(address,source){
+    if(torBookmarkMode)return;
     if(!window.__TAURI__||thumbs.has(address)||thumbnailJobs.has(address))return;
     if(thumbs.has(source)){rememberThumb(address,thumbs.get(source));return;}
     thumbnailJobs.add(address);
@@ -166,6 +169,7 @@
     }catch{return root?[root]:[];}
   }
   function iconSources(address){
+    if(torBookmarkMode)return Promise.resolve([]);
     const safe=model.url(address);
     if(!safe)return Promise.resolve([]);
     if(faviconGood.has(safe))return Promise.resolve([faviconGood.get(safe)]);
@@ -204,6 +208,7 @@
     return promise;
   }
   function tryIcon(slot,address,candidates,index=0){
+    if(torBookmarkMode)return;
     // Keep the site-specific host-letter icon when no usable favicon exists.
     if(index>=candidates.length)return;
     const candidate=candidates[index];
@@ -213,6 +218,8 @@
     img.decoding='async';
     img.referrerPolicy='no-referrer';
     img.addEventListener('load',()=>{
+      pendingIconRequests.delete(img);
+      if(torBookmarkMode)return;
       faviconGood.set(address,candidate);
       slot.replaceChildren(img);
       slot.classList.remove('bookmark-site-fallback');
@@ -220,9 +227,11 @@
       void cacheIconThumbnail(address,candidate);
     },{once:true});
     img.addEventListener('error',()=>{
+      pendingIconRequests.delete(img);
       faviconBad.add(candidate);
       tryIcon(slot,address,candidates,index+1);
     },{once:true});
+    pendingIconRequests.add(img);
     img.src=candidate;
   }
   function iconNode(item,isFolder=item?.kind==='folder'){
@@ -234,6 +243,10 @@
       img.src=value;img.alt='';
       slot.append(img);
     }else if(/^https:\/\//i.test(value)){
+      if(torBookmarkMode&&!thumbs.has(value)){
+        slot.textContent=isFolder?'📁':'🔖';
+        return slot;
+      }
       const img=document.createElement('img');
       img.alt='';img.referrerPolicy='no-referrer';
       const thumbnail=thumbs.get(value);
@@ -241,8 +254,15 @@
         img.decoding='sync';img.src=thumbnail;
       }else{
         img.decoding='async';
-        img.addEventListener('load',()=>void cacheIconThumbnail(value,value),{once:true});
-        img.addEventListener('error',()=>{slot.textContent=isFolder?'📁':'🔖';},{once:true});
+        img.addEventListener('load',()=>{
+          pendingIconRequests.delete(img);
+          if(!torBookmarkMode)void cacheIconThumbnail(value,value);
+        },{once:true});
+        img.addEventListener('error',()=>{
+          pendingIconRequests.delete(img);
+          slot.textContent=isFolder?'📁':'🔖';
+        },{once:true});
+        pendingIconRequests.add(img);
         img.src=value;
       }
       slot.append(img);
@@ -1248,6 +1268,17 @@
   };
   api.onState(state => {
     const tab = state.tabs.find(t => t.id === state.activeId);
+    const nextTor=Boolean(tab?.tor);
+    if(nextTor!==torBookmarkMode){
+      torBookmarkMode=nextTor;
+      if(torBookmarkMode){
+        for(const img of pendingIconRequests){img.removeAttribute('src');}
+        pendingIconRequests.clear();
+      }
+      renderBar();
+      if(mode==='manager')renderManager();
+      if(mode==='folder')renderFolder();
+    }
     currentUrl = tab?.url || '';
     currentTitle = tab?.title || '';
     openBookmarkUrls=new Set((state.tabs||[]).filter(t=>!t.secretTab)
