@@ -7,7 +7,7 @@
 - Windows: local Tauri \`chrome\` capability is scoped to one webview. Remote HTTPS pages receive no native command privileges. Dangerous permission types are default denied.
 - Android: no \`addJavascriptInterface\`; file/content access disabled, strict SSL error cancellation, safe browsing enabled, no mixed content; private mode uses a separate Android process and isolated WebView directory.
 - iOS: WKWebView, App Transport Security defaults, and per-private-tab \`WKWebsiteDataStore.nonPersistent()\`.
-- Tor/extension code execution is **not** silently enabled. A third-party extension with broad host access or a misconfigured Tor SOCKS proxy could undo privacy protections.
+- Tor is **explicit opt-in** for a separate desktop tab only. Its network transport uses embedded Arti and private per-tab SOCKS5 listeners; extensions are excluded. A misconfigured proxy, browser engine or unexpected direct helper request could still expose information.
 
 ## Security practices implemented
 - Origin/protocol restrictions at navigation boundaries, restrictive CSP in local desktop chrome, no arbitrary HTTP downgrade.

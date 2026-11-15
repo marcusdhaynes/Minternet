@@ -28,7 +28,7 @@ For Windows, download **Minternet-Portable-Windows-x64** from a successful run, 
 
 ## Requested capabilities still not complete
 
-- **Built-in Tor anonymity:** Not provided. Tor's maintainers explicitly warn that sending a normal browser through a Tor SOCKS proxy can leak identifying information. True Tor Browser-like anonymity requires hardened browser-engine and fingerprinting protections, not just a proxy toggle.
+- **Tor transport (experimental, Windows/Linux desktop):** The Tor button now creates a private tab with an Arti-powered per-tab isolated SOCKS5 proxy and a separate WebView data directory. **This is not Tor Browser-like anonymity.** Fingerprinting, complete network leak resistance, and browser-engine hardening have not been verified; mobile and macOS Tor modes are not implemented. Do not use this experimental mode for sensitive anonymity. See [Tor integration and validation](docs/TOR.md).
 - **Full Firefox XPI + Chrome extension compatibility:** Not provided. Standard OS webviews have different extension APIs and cannot run every Firefox and Chrome add-on. WebView2 has limited unpacked Chromium extension capability requiring additional native integration; Firefox XPI is a distinct ecosystem.
 - **Security certification:** No independently verified production audit, signed automatic updates, penetration testing, or system-wide leak study has been done.
 - **Physical-device cross-platform testing:** Compiler/packaging CI is not hardware testing. Emulator/simulator testing helps but does not prove real-world functionality.

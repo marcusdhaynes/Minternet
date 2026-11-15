@@ -13,7 +13,7 @@
 - No Supabase connection or transmission of visited pages.
 
 ## Not implemented or guaranteed
-- Tor transport, circuit isolation, fingerprint protection, DNS/WebRTC leak guarantees.
+- Tor transport now has an experimental Arti implementation for Windows/Linux desktop, with per-tab SOCKS routing and isolated Tor clients. **Not guaranteed:** successful native packaging, full DNS/WebRTC leak prevention, fingerprint protection, actual browser anonymity, or a real-browser leak audit. Arti routing is not Tor Browser hardening.
 - Firefox XPI compatibility, full Chrome Web Store API compatibility, extension safety audit.
 - Automatic verified security updates, signed installers, malware scanning, phishing protection, native Android/iOS engines, penetration tests.
 - Unsigned development installers are not a production-secure delivery method. ASAR validation and Electron fuses are enabled in packaging configuration, but full packaged builds require validation.

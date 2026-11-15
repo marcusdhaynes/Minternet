@@ -11,7 +11,7 @@ The local navigation chrome occupies the full window on a blank tab, then shrink
 `cd native/desktop && npm install && npm run build` produces `src-tauri/target/release/minternet_native.exe`. The [portable Windows GitHub Actions workflow](../../.github/workflows/native-windows.yml) renames that binary `Minternet-Portable-x64.exe`, copies it to an empty standalone test directory, and launches it with `--minternet-smoke`. The smoke checks whether the local chrome IPC successfully navigates to `https://example.com` and whether the native child webview observes the page title `Example Domain`. This is more meaningful than merely checking the window opened, but it is not hardware testing, exhaustive browsing QA, or a penetration test.
 
 ## Limitations
-Normal browsing persists cookies/cache under Windows app data; no browser can operate fully without the OS web engine and its runtime dependencies. No Tor anonymity, full Chrome/Firefox add-on support, independent security audit or verified signed auto-updates yet.
+Normal browsing persists cookies/cache under Windows app data; no browser can operate fully without the OS web engine and its runtime dependencies. An experimental Arti-backed Tor transport exists for Windows/Linux desktop only; it **is not Tor Browser** and has not passed an independent IP/DNS/WebRTC/fingerprinting audit. Full Chrome/Firefox add-on support, independent security audit and verified signed auto-updates are also unavailable.
 
 ## Turbo responsiveness (0.4 preview)
 
@@ -52,12 +52,12 @@ These optimizations reduce Minternet's overhead, not the destination site's netw
 - Tabs have a stable 71px width; drag to a group chip or a grouped tab to add, beside an ungrouped tab to remove, and to either side of a tab to reorder.
 - Bookmark folders/subfolders no longer offer a redundant Bookmark This Page menu action. Context menus use the dark OS window theme when supported, with polished compact fallback styling.
 - The Home button and keyboard shortcut label at the address-bar end are removed; Favorites star sits at the right edge.
-- Normal and Tor controls are always visibly labeled. **Tor is still only an informational control; Tor routing has not been implemented.**
+- The Tor button creates a separate Tor-routed private tab using a local Arti SOCKS5 listener once bootstrapped; build and leak-test status determines whether it is usable. It is **not** Tor Browser.
 
 ## Pointer tabs and search settings (v0.6 preview)
 - Move a tab onto a group header or another group's tab to join it; move onto an ordinary tab or blank tab-strip area to ungroup. A floating, pointer-tracked tab chip and insertion markers replace HTML5 drag-and-drop, avoiding WebView2's prohibited-drop cursor. Native tabs stay alive during reordering.
 - The Minternet M logo is farthest left. Bookmark Bar items are adjacent, the status footer is gone, and only the Tor information icon remains alongside the settings gear. The eye-icon new-private-tab feature remains available.
-- Tor itself is not connected or advertised as an anonymizing mode.
+- Tor is an experimental **network transport only**. It is not advertised as an equivalent of Tor Browser anonymity; browser fingerprinting defenses remain incomplete.
 - Plain text entered in the address bar or home search is routed inside the native WebView2 to Google by default; ordinary HTTPS websites remain direct website navigations.
 - Settings > Default Search Engine supports Google, DuckDuckGo, Bing, Brave Search, Startpage, and Ecosia. The trusted chrome stores this under `minternet.search-engine.v1`. Each navigation includes the selected enum, validated by the native backend against its allowlist.
 - The GitHub Pages UI companion is not a fully functional browser and never auto-launches restricted websites in the OS browser.
