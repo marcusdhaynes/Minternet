@@ -29,9 +29,8 @@ Current limitation: Find uses WebView2 page JavaScript window.find as a first pa
 - Find appears in a 22-pixel row, right aligned and without a separate text label.
 - Tab row buttons and toolbar actions are aligned; new tabs show the Minternet icon.
 - Windows shortcut artwork is enlarged 10% inside the .ico output.
-- Balanced/Strict Shield now deny unapproved cross-site popups and about:blank popunders. Some legitimate third-party popup experiences may require a user site exception.
 - Windows website downloads require a native Yes/No confirmation with No as the default. Unapproved downloads are canceled before saving. Potentially executable formats are explicitly flagged; PE executables disguised as non-EXE files are removed on completion.
 - Native login popups cannot download files. Non-Windows site-initiated downloads fail closed until trusted OS consent UI is implemented.
 - Chrome Web Store and Firefox Add-ons can be browsed, but their browser-specific install buttons are not working Minternet installers. Supporting full Chrome/Firefox ecosystems requires a distinct browser engine or additional safe extension hosting architecture.
 
-Windows users can still intentionally open cross-origin links using Ctrl+click. Popup URLs that merely resemble OAuth endpoints on unknown domains no longer bypass the privacy shield; common recognized identity providers and same-origin OAuth handlers retain their related-window support.
+Windows users can intentionally open cross-origin links using Ctrl+click. Ordinary site-created windows open as Minternet tabs. Authentication popups that need an opener preserve their WebView2 window relationship for OAuth callbacks, subject to existing HTTPS restrictions.
