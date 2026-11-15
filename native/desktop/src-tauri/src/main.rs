@@ -2953,16 +2953,21 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                         std::env::args().any(|a|a=="--minternet-blank-render-smoke"){
                         static BLANK_STAGED:AtomicBool=AtomicBool::new(false);
                         if !BLANK_STAGED.swap(true,Ordering::AcqRel){
-                            let _=view.eval("document.body.replaceChildren();document.body.style.background='white';");
+                            let _=view.eval(r#"(function(){
+                                document.cookie='minternet_render_repair=retained; Max-Age=1800; Path=/; SameSite=Lax; Secure';
+                                localStorage.setItem('minternet_render_repair','retained');
+                                document.body.replaceChildren();
+                                document.body.style.background='white';
+                            })();"#);
                         }else{
                             let target=std::env::temp_dir().join(format!(
                                 "minternet-blank-render-{}.ok",std::process::id()));
                             let _=view.eval_with_callback(
-                                "document.body?.innerText?.includes('Example Domain')===true",
+                                "(document.body?.innerText?.includes('Example Domain')===true)&&document.cookie.includes('minternet_render_repair=retained')&&localStorage.getItem('minternet_render_repair')==='retained'",
                                 move|proof|{
                                     if proof.trim()=="true"{
                                         let _=std::fs::write(target,
-                                          "PASS: recovered empty DOM using new site renderer with profile preserved");
+                                          "PASS: recovered empty DOM and retained real WebView2 cookie plus localStorage");
                                     }
                                 }
                             );
