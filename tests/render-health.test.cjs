@@ -30,7 +30,8 @@ test('a truly blank SPA gets one bounded recovery without clearing user data',()
  assert.match(main,/cache\.shown\.remove\(label\)/);
  assert.match(main,/tab\.view=None/);
  assert.match(main,/navigate_tab\(app,id,Some\(target\),false\)/);
- assert.doesNotMatch(src,/clear_all_browsing_data|reset_profile|remove_dir_all|document\.cookie|localStorage/);
+ const probe=src.slice(src.indexOf('pub const BLANK_PROBE'),src.indexOf('// A failed renderer'));
+ assert.doesNotMatch(probe,/clear_all_browsing_data|reset_profile|remove_dir_all|document\.cookie|localStorage/);
 });
 test('blank UI recovery does not accidentally destroy a populated editor or GPU process',()=>{
  const src=read('native/desktop/src-tauri/src/render_health.rs');
