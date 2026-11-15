@@ -23,7 +23,7 @@ hmac = "0.12"
 # Extract only the verified FFmpeg executable from the on-demand codec ZIP.
 zip = { version = "9.4", default-features = false, features = ["deflate"] }
 # Read only the Firefox bookmark-folder subtree explicitly dragged by the user.
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-dialog = "2"
 
