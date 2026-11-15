@@ -2735,9 +2735,11 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
         // (FedCM and Storage Access). Denying it globally silently breaks
         // third-party Google sign-in. Keep explicit dangerous permissions
         // denied; let WebView2 handle identity permissions normally.
-        .on_permission_request(|_view, kind| match kind {
+        .on_permission_request(move |_view, kind| match kind {
             // Media sites must reach WebView2's native, origin-scoped consent
             // prompt. A blanket Deny here permanently breaks getUserMedia.
+            PermissionKind::Microphone | PermissionKind::Camera if tor =>
+                PermissionResponse::Deny,
             PermissionKind::Microphone | PermissionKind::Camera =>
                 PermissionResponse::Default,
             PermissionKind::Other => PermissionResponse::Default,
@@ -4454,6 +4456,21 @@ mod local_media_tests{
     }
 }
 
+#[cfg(any(windows,target_os="linux"))]
+async fn prepare_new_tor_tab(app:&tauri::AppHandle,id:u32)->Result<(),String>{
+    if let Err(error)=tor_transport::prepare(id).await {
+        tor_transport::release(id);
+        if let Ok(mut browser)=app.state::<Mutex<Browser>>().lock(){
+            browser.tabs.retain(|tab|tab.id!=id);
+            if browser.active_id==id{browser.active_id=0;}
+        }
+        display_active(app);
+        notify(app);
+        return Err(error);
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn browser_snapshot(app: tauri::AppHandle) -> Result<Snapshot,String> { snapshot(&app) }
 
@@ -4537,6 +4554,9 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             let source=value.get("sourceTabId").and_then(Value::as_u64)
                 .and_then(|id|state.tabs.iter().find(|tab|tab.id as u64==id))
                 .or_else(||state.tabs.iter().find(|tab|tab.id==state.active_id));
+            if source.is_some_and(|tab|tab.tor){
+                return Err("Opening a Tor link in an ordinary browser window is blocked".into());
+            }
             source.is_some_and(|tab|tab.private||tab.secret_id.is_some())
         };
         spawn_browser_window(address,private)?;
@@ -4558,13 +4578,20 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             }
         }
         // Right-click link actions use a background tab beside the opener.
-        let new_id={
+        let (new_id,tor)={
             let state=app.state::<Mutex<Browser>>();
             let mut browser=state.lock().map_err(|e|e.to_string())?;
-            let private=browser.tabs.iter().find(|t|t.id==tab_id)
-                .is_some_and(|t|t.private||t.secret_id.is_some());
-            browser.add_after(private,tab_id,true)?
+            let original=browser.tabs.iter().find(|t|t.id==tab_id).ok_or("Source tab closed")?;
+            let private=original.private||original.secret_id.is_some();
+            let tor=original.tor;
+            let id=browser.add_after(private,tab_id,true)?;
+            if let Some(t)=browser.tabs.iter_mut().find(|t|t.id==id){t.tor=tor;}
+            (id,tor)
         };
+        #[cfg(any(windows,target_os="linux"))]
+        if tor{prepare_new_tor_tab(&app,new_id).await?;}
+        #[cfg(not(any(windows,target_os="linux")))]
+        if tor{return Err("Tor transport unavailable".into());}
         navigate_tab(&app,new_id,Some(target),true)?;
         notify(&app);
         return Ok(json!({"ok":true,"tabId":new_id}));
@@ -6513,18 +6540,24 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                     return Err("Only secure HTTPS pages may open in a new tab".into());
                 }
             }
-            let id={
+            let (id,tor)={
                 let state=app.state::<Mutex<Browser>>();
                 let mut b=state.lock().map_err(|e|e.to_string())?;
                 if background {
-                    // Prefer the actual source WebView (split views included).
-                    // A stale or malicious source ID cannot insert across tabs.
+                    // Preserve the original network mode when opening a link.
                     let claimed=value.get("openerTabId").and_then(Value::as_u64).map(|id|id as u32);
                     let opener=claimed.filter(|id|b.tabs.iter().any(|t|t.id==*id))
                         .unwrap_or(b.active_id);
-                    b.add_after(private,opener,true)?
-                }else{b.add(private)?}
+                    let tor=b.tabs.iter().find(|t|t.id==opener).is_some_and(|t|t.tor);
+                    let id=b.add_after(private || tor,opener,true)?;
+                    if let Some(tab)=b.tabs.iter_mut().find(|t|t.id==id){tab.tor=tor;}
+                    (id,tor)
+                }else{(b.add(private)?,false)}
             };
+            #[cfg(any(windows,target_os="linux"))]
+            if tor{prepare_new_tor_tab(&app,id).await?;}
+            #[cfg(not(any(windows,target_os="linux")))]
+            if tor{return Err("Tor transport unavailable".into());}
             if let Some(url)=address {
                 navigate_tab(&app,id,Some(url),true)?;
             } else if name=="new" || name=="new-private" {
@@ -6567,18 +6600,24 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         }
         "duplicate" => {
             let id=value.as_u64().ok_or("Invalid tab")? as u32;
-            let (url,private)={
+            let (url,private,tor)={
                 let state=app.state::<Mutex<Browser>>();
                 let browser=state.lock().map_err(|e|e.to_string())?;
                 let tab=browser.tabs.iter().find(|t|t.id==id).ok_or("Unknown tab")?;
                 if tab.secret_id.is_some(){return Err("Secret tabs cannot be duplicated outside the vault".into());}
-                (tab.url.clone(),tab.private)
+                (tab.url.clone(),tab.private,tab.tor)
             };
             let new_id={
                 let state=app.state::<Mutex<Browser>>();
                 let mut browser=state.lock().map_err(|e|e.to_string())?;
-                browser.add(private)?
+                let new_id=browser.add(private || tor)?;
+                if let Some(tab)=browser.tabs.iter_mut().find(|tab|tab.id==new_id){tab.tor=tor;}
+                new_id
             };
+            #[cfg(any(windows,target_os="linux"))]
+            if tor{prepare_new_tor_tab(&app,new_id).await?;}
+            #[cfg(not(any(windows,target_os="linux")))]
+            if tor{return Err("Tor transport unavailable".into());}
             if url!=HOME {
                 let parsed=tauri::Url::parse(&url).map_err(|e|e.to_string())?;
                 if parsed.scheme()!="https" {return Err("Blocked unsafe duplicate URL".into());}
