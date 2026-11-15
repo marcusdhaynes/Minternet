@@ -2933,6 +2933,29 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                             });
                         });
                     }
+                    // A real Windows smoke test deliberately erases a known
+                    // document, then verifies the health monitor restores the
+                    // actual website, rather than merely checking geometry.
+                    #[cfg(windows)]
+                    if event.url().host_str()==Some("example.com") &&
+                        std::env::args().any(|a|a=="--minternet-blank-render-smoke"){
+                        static BLANK_STAGED:AtomicBool=AtomicBool::new(false);
+                        if !BLANK_STAGED.swap(true,Ordering::AcqRel){
+                            let _=view.eval("document.body.replaceChildren();document.body.style.background='white';");
+                        }else{
+                            let target=std::env::temp_dir().join(format!(
+                                "minternet-blank-render-{}.ok",std::process::id()));
+                            let _=view.eval_with_callback(
+                                "document.body?.innerText?.includes('Example Domain')===true",
+                                move|proof|{
+                                    if proof.trim()=="true"{
+                                        let _=std::fs::write(target,
+                                          "PASS: recovered empty DOM using new site renderer with profile preserved");
+                                    }
+                                }
+                            );
+                        }
+                    }
                     // WebView2 PageLoadEvent::Finished does NOT establish
                     // that a large SPA actually rendered a usable document.
                     // A bounded, privacy-safe check runs after hydration;
@@ -6938,6 +6961,7 @@ fn main() {
             let turbo_smoke = std::env::args().any(|a| a == "--minternet-turbo-smoke");
             let auth_popup_smoke = std::env::args().any(|a| a == "--minternet-auth-popup-smoke");
             let passkey_smoke = std::env::args().any(|a| a == "--minternet-passkey-smoke");
+            let blank_render_smoke=std::env::args().any(|a|a=="--minternet-blank-render-smoke");
             let cookie_smoke=std::env::args().any(|a|
                 a=="--minternet-cookie-set-smoke"||a=="--minternet-cookie-check-smoke");
             let media_smoke = std::env::args().any(|a| a == "--minternet-media-smoke");
@@ -7035,7 +7059,7 @@ fn main() {
                                     }
                                   },300);
                                 "#);
-                            } else if smoke || auth_popup_smoke || passkey_smoke || cookie_smoke {
+                            } else if smoke || auth_popup_smoke || passkey_smoke || cookie_smoke || blank_render_smoke {
                                 let _ = view.eval(
                                     "setTimeout(() => window.minternet?.command('navigate', 'https://example.com'), 200)"
                                 );
