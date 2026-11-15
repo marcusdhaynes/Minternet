@@ -154,6 +154,23 @@ mod windows_menu {
             .flat_map(|ch|ch.to_lowercase()).collect::<String>();
         compact=="spellcheck"
     }
+    #[cfg(test)]
+    mod spelling_detection_tests {
+        use super::looks_like_spellcheck;
+        #[test]
+        fn command_name_only_when_label_is_missing() {
+            // Regression for three entries shown literally as "spellcheck".
+            assert!(looks_like_spellcheck("spellCheck"));
+            assert!(looks_like_spellcheck("spellcheck"));
+            assert!(looks_like_spellcheck(" Spell check "));
+            assert!(looks_like_spellcheck("spell_check"));
+            assert!(looks_like_spellcheck("spell-check"));
+            assert!(!looks_like_spellcheck(""));
+            assert!(!looks_like_spellcheck("recommended"));
+            assert!(!looks_like_spellcheck("addToDictionary"));
+        }
+    }
+
     fn has_generic_spellcheck(items:&ICoreWebView2ContextMenuItemCollection,depth:u8)->bool{
         if depth>8{return false;}
         let mut count=0u32;
