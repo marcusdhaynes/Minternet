@@ -2280,7 +2280,19 @@ fn display_active(app: &tauri::AppHandle) {
     let (to_hide,to_show,mut actual)={
         let cache=app.state::<Mutex<LayoutCache>>();
         let Ok(state)=cache.lock() else{return};
-        if state.shown==targets {notify(app);return;}
+        if state.shown==targets {
+            // Cache equality is not physical WebView2 visibility. A
+            // restarted renderer can have the same tab label but a hidden
+            // CoreWebView2Controller. Verify it without toggling healthy views.
+            #[cfg(windows)]
+            for label in &targets{
+                if let Some(view)=app.get_webview(label){
+                    native_surface::ensure_visible(&view);
+                }
+            }
+            notify(app);
+            return;
+        }
         (state.shown.difference(&targets).cloned().collect::<Vec<_>>(),
          targets.difference(&state.shown).cloned().collect::<Vec<_>>(),
          state.shown.clone())

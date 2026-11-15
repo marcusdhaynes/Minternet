@@ -13,6 +13,8 @@ test('real Windows child HWND is measured independently from cached Tauri bounds
   assert.match(src,/controller\.Bounds\(&mut viewport\)/);
   assert.match(src,/SetWindowPos\(hwnd,None,x,y,w,h,SWP_NOACTIVATE\|SWP_NOZORDER\)/);
   assert.match(src,/controller\.SetBounds\(RECT\{/);
+  assert.match(src,/controller\.IsVisible\(&mut visible\)/);
+  assert.match(src,/controller\.SetIsVisible\(true\)/);
   assert.match(src,/NotifyParentWindowPositionChanged/);
   assert.match(src,/if fixed\{/);
   assert.doesNotMatch(src,/location\.reload|clear_all_browsing_data|view\.hide\(|view\.navigate\(/);

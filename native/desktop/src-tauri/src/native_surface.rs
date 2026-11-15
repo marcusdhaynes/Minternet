@@ -2,7 +2,7 @@
 //! cached Webview::position/size can be correct while WebView2 displays an
 //! offset, undersized white/black compositor rectangle.
 #![cfg(windows)]
-use windows::Win32::Foundation::{HWND,POINT,RECT};
+use windows::Win32::Foundation::{BOOL,HWND,POINT,RECT};
 use windows::Win32::Graphics::Gdi::ScreenToClient;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowRect, SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER,
@@ -61,6 +61,20 @@ pub fn verify(view:&tauri::Webview,parent:isize,wanted:Bounds){
         let mut hwnd=HWND::default();
         if unsafe{controller.ParentWindow(&mut hwnd)}.is_ok(){
             let _=correct(hwnd,HWND(parent as _),&controller,wanted);
+        }
+    });
+}
+
+/// A cached "shown" label does not prove its controller remains visible.
+/// WebView2 can reset IsVisible after a renderer/browser process failure or
+/// child re-parent. Repair only a false state; don't repeatedly toggle healthy
+/// controllers (which would cause white flashes).
+pub fn ensure_visible(view:&tauri::Webview){
+    let _=view.with_webview(|native|{
+        let controller=native.controller();
+        let mut visible=BOOL::default();
+        if unsafe{controller.IsVisible(&mut visible)}.is_ok() && !visible.as_bool(){
+            let _=unsafe{controller.SetIsVisible(true)};
         }
     });
 }
