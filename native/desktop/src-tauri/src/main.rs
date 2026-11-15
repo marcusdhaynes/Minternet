@@ -2595,7 +2595,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     #[cfg(not(any(windows,target_os="linux")))]
     if tor{return Err("Tor network integration is not supported on this platform".into());}
     let builder=WebviewBuilder::new(label.clone(),url)
-        .incognito(private || tor)
+        .incognito(private)
         // A dark native fallback avoids a seizure-like white flash before
         // the website commits its own first painted frame.
         .background_color(tauri::webview::Color(13,17,29,255))
