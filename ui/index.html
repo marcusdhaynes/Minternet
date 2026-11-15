@@ -256,6 +256,12 @@
             <tr><th scope="row">Pinned</th><td><label class="tab-size-entry"><input id="pinnedTabWidth" type="number" inputmode="numeric" min="24" max="200" step="1" value="27" aria-label="Pinned tab width in pixels"><span>px</span></label></td><td><label class="tab-size-entry"><input id="pinnedTabPadding" type="number" inputmode="numeric" min="0" max="64" step="1" value="2" aria-label="Pinned tab left and right padding in pixels"><span>px</span></label></td></tr>
           </tbody>
         </table>
+        <div class="supertab-settings" role="group" aria-label="Split Supertab Spacing">
+          <strong>Split Supertab</strong>
+          <small>All split panes share one condensed tab. Icons follow their screen positions.</small>
+          <label>Icon Gap <input id="supertabIconGap" type="number" min="0" max="12" step="1" value="0" inputmode="numeric"> px</label>
+          <label>Side Padding <input id="supertabSidePadding" type="number" min="0" max="12" step="1" value="1" inputmode="numeric"> px</label>
+        </div>
         <label class="bookmark-toggle tab-icon-toggle"><span><strong>Show App Icon in Tab Bar</strong><small>Hide the M icon to shift the group launcher and tabs left</small></span><input id="showTabBarAppIcon" type="checkbox" checked></label>
         <button id="resetTabWidths" class="tab-size-reset" type="button">Reset Width &amp; Padding</button>
       </section>
@@ -289,6 +295,22 @@
       <button class="bookmark-menu-action" id="passwordManagerOpen">⚿ Logins <span>›</span></button>
       <button class="bookmark-menu-action" id="paymentManagerOpen">▣ Payment Methods <span>›</span></button>
       <button class="bookmark-menu-action" id="historyManagerOpen">◷ Browsing History <span>›</span></button>
+      <section class="bookmark-import-settings" aria-label="Import Bookmarks">
+        <strong>Import Bookmarks</strong>
+        <small>Import Chrome, Firefox, Edge, Safari, or Minternet bookmark HTML/JSON. Folders, subfolders, order, and the exported Bookmark Bar are preserved. Your existing bookmarks are retained unless you choose Replace.</small>
+        <div class="bookmark-import-actions">
+          <label class="bookmark-import-trigger" for="importBookmarksFile">Import Bookmarks
+            <input id="importBookmarksFile" type="file" accept=".html,.htm,.json,.url,.txt,text/html,application/json" aria-label="Choose a bookmark export file">
+          </label>
+          <label for="bookmarkImportMode">Mode
+            <select id="bookmarkImportMode" aria-label="Bookmark import mode">
+              <option value="merge" selected>Merge</option>
+              <option value="replace">Replace Bookmark Bar</option>
+            </select>
+          </label>
+        </div>
+        <small id="bookmarkImportStatus" role="status" aria-live="polite"></small>
+      </section>
       <section class="credential-import-settings" aria-label="Import Saved Credentials">
         <strong>Import From Other Browsers</strong>
         <small>Choose a password or card export you made yourself. Unlock the encrypted vault before importing. Imported files never leave this device.</small>

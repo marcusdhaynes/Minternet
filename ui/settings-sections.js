@@ -70,6 +70,7 @@
   secrets.append(openSecret);
   move(secrets,'secretGroupNameSettings','.auto-unload-setting');
   const imports=section('Import & Export',userData);
+  move(imports,'importBookmarksFile','.bookmark-import-settings');
   move(imports,'importPasswords','.credential-import-settings');
   const privacy=section('Privacy & History');
   move(privacy,'historyManagerOpen');

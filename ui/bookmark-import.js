@@ -157,6 +157,27 @@
    }
    return [];
  }
+ // Recognize an exported browser toolbar only at the top level. Its
+ // contents belong directly on Minternet's Bookmark Bar, NOT inside a second
+ // "Bookmarks bar" folder. All other folder names and their nested children
+ // remain untouched, and their original order is preserved.
+ const barNames=/^(bookmarks?\s*(bar|toolbar)|favorites?\s*(bar|toolbar)|personal\s*toolbar\s*folder|links)$/i;
+ function normalizeBrowserRoots(rawItems){
+   if(!Array.isArray(rawItems))return [];
+   let roots=rawItems;
+   if(roots.length===1 && roots[0]?.kind==='folder'
+     && /^(bookmarks|favorites)$/i.test(roots[0].name||'')
+     && roots[0].children?.some(n=>n?.kind==='folder'&&barNames.test(n.name||''))){
+       roots=roots[0].children;
+   }
+   const flattened=[];
+   for(const node of roots){
+     if(node?.kind==='folder'&&barNames.test(node.name||'')){
+       flattened.push(...(Array.isArray(node.children)?node.children:[]));
+     }else if(node)flattened.push(node);
+   }
+   return flattened;
+ }
  function parseFile(name,text){
    const lower=String(name).toLowerCase();
    if(lower.endsWith('.html')||lower.endsWith('.htm'))return parseHtml(text);
@@ -165,5 +186,5 @@
    if(lower.endsWith('.txt'))return parseUrlList(text);
    return [];
  }
- return {parseHtml,parseJson,parseTransfer,parseFile,parseUrlList,parseMozillaDrag,mozillaFolderReference,link};
+ return {parseHtml,parseJson,parseTransfer,parseFile,parseUrlList,parseMozillaDrag,mozillaFolderReference,normalizeBrowserRoots,link};
 });

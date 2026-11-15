@@ -519,7 +519,7 @@
   // bookmark-place objects, or file/directory entries depending on the source.
   // Import into a detached validated tree and save once: one Undo operation.
   const imported=window.MinternetBookmarkImport;
-  function appendImported(items,parentId=null){
+  function appendImported(items,parentId=null,replaceBar=false){
     if(!imported||!Array.isArray(items)||!items.length)return 0;
     // All-or-nothing capacity check: never create an empty or half-imported
     // folder when Firefox supplied a large nested tree.
@@ -534,11 +534,12 @@
     };
     const destinationDepth=parentId==null?1:(model.location(data,parentId)?.depth??0)+1;
     measure(items,destinationDepth);
-    if(model.count(data)+total>model.MAX_ITEMS||maxDepth>=13){
+    if((replaceBar?0:model.count(data))+total>model.MAX_ITEMS||maxDepth>=13){
       toast('Folder cannot fit: too many bookmarks or nested folder levels.');
       return 0;
     }
-    const draftState=model.hydrate(JSON.stringify(data));
+    const draftState=replaceBar?model.blank():model.hydrate(JSON.stringify(data));
+    if(replaceBar)draftState.visible=data.visible;
     let added=0;
     const limit=2000;
     function insert(node,parent,depth){
@@ -563,6 +564,24 @@
     data=draftState;
     persist();
     return added;
+  }
+  async function importBookmarkFile(file){
+    const status=$('bookmarkImportStatus');
+    const report=message=>{if(status)status.textContent=message;toast(message);};
+    if(!file)return;
+    if(file.size>2_000_000){report('Bookmark export exceeds the 2 MB import limit; nothing changed.');return;}
+    try{
+      const parsed=await readImportedFile(file);
+      if(!parsed.length){report('No supported bookmarks found. Use an HTML or JSON bookmark export.');return;}
+      const normalized=imported.normalizeBrowserRoots(parsed);
+      const replacement=$('bookmarkImportMode')?.value==='replace';
+      const added=appendImported(normalized,model.BOOKMARK_BAR_ID,replacement);
+      if(added){
+        report('Imported '+added+' bookmark items and folders into Bookmark Bar'+
+          (replacement?' (replacement).':'. Existing items preserved.'));
+        renderManager();renderBar();
+      }else report('Bookmark import could not be completed; existing bookmarks were preserved.');
+    }catch(error){report('Bookmark import failed: '+String(error?.message||error));}
   }
   async function readImportedFile(file){
     if(!file||file.size>2_000_000)return [];
@@ -1078,6 +1097,11 @@
     if (!model.icon(result)) throw new Error('Image is too complex to store as a small icon.');
     return result;
   }
+  $('importBookmarksFile')?.addEventListener('change',async event=>{
+    const file=event.target.files?.[0];
+    event.target.value='';
+    await importBookmarkFile(file);
+  });
   $('bookmarkThisPage').addEventListener('click', toggleBookmark);
   $('bookmarkThisPage').addEventListener('contextmenu', event => {
     event.preventDefault();

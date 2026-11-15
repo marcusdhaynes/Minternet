@@ -4,14 +4,16 @@
 (() => {
   const root=document.documentElement;
   const key='minternet.tab-layout.v1';
-  const defaults={group:56,regular:38,pinned:27,groupPadding:5,regularPadding:2,pinnedPadding:2,showAppIcon:true};
+  const defaults={group:56,regular:38,pinned:27,groupPadding:5,regularPadding:2,pinnedPadding:2,supertabGap:0,supertabPadding:1,showAppIcon:true};
   const specs=[
     {id:'groupTabWidth',key:'group',css:'--minternet-group-tab-width',min:32,max:320},
     {id:'regularTabWidth',key:'regular',css:'--minternet-regular-tab-width',min:32,max:320},
     {id:'pinnedTabWidth',key:'pinned',css:'--minternet-pinned-tab-width',min:24,max:200},
     {id:'groupTabPadding',key:'groupPadding',css:'--minternet-group-tab-padding',min:0,max:64},
     {id:'regularTabPadding',key:'regularPadding',css:'--minternet-regular-tab-padding',min:0,max:64},
-    {id:'pinnedTabPadding',key:'pinnedPadding',css:'--minternet-pinned-tab-padding',min:0,max:64}
+    {id:'pinnedTabPadding',key:'pinnedPadding',css:'--minternet-pinned-tab-padding',min:0,max:64},
+    {id:'supertabIconGap',key:'supertabGap',css:'--minternet-supertab-gap',min:0,max:12},
+    {id:'supertabSidePadding',key:'supertabPadding',css:'--minternet-supertab-padding',min:0,max:12}
   ];
   const $=id=>document.getElementById(id);
   const usable=(v,s)=>Number.isInteger(v)&&v>=s.min&&v<=s.max;
