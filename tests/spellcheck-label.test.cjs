@@ -6,8 +6,9 @@ const path=require('node:path');
 const src=fs.readFileSync(path.join(__dirname,'..','native/desktop/src-tauri/src/site_context_menu.rs'),'utf8');
 test('a generic "Spellcheck" is never passed to Minternet as a purported correction',()=>{
  assert.match(src,/fn has_generic_spellcheck/);
- assert.match(src,/name\.eq_ignore_ascii_case\("spellcheck"\)/);
- assert.match(src,/"spellcheck"\|"spell check"\|"spelling"/);
+ assert.match(src,/looks_like_spellcheck\(&name\)\|\|looks_like_spellcheck\(&label\)/);
+ assert.match(src,/compact=="spellcheck"/);
+ assert.match(src,/let label=read_string\(\|p\|unsafe\{item.Label\(p\)\}\)/);
  const block=src.slice(src.indexOf('// A stable WebView2 spellcheck command'),src.indexOf('let request_id=NEXT_REQUEST'));
  assert.match(block,/has_generic_spellcheck\(&items,0\)/);
  assert.match(block,/args\.SetHandled\(false\)/);

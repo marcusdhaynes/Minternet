@@ -146,6 +146,14 @@ mod windows_menu {
     // displaying generic text misleads the user about which word will replace
     // the misspelling. In that case let Chromium render its native spelling
     // suggestions rather than presenting fabricated or unlabeled corrections.
+    fn looks_like_spellcheck(value:&str)->bool{
+        // Name can be "spellCheck", "spellcheck", or entirely empty;
+        // Label may be empty even when the command applies a real correction.
+        let compact=value.trim().chars()
+            .filter(|ch|!ch.is_whitespace()&&*ch!='-'&&*ch!='_')
+            .flat_map(|ch|ch.to_lowercase()).collect::<String>();
+        compact=="spellcheck"
+    }
     fn has_generic_spellcheck(items:&ICoreWebView2ContextMenuItemCollection,depth:u8)->bool{
         if depth>8{return false;}
         let mut count=0u32;
@@ -154,9 +162,10 @@ mod windows_menu {
             let Ok(item)=(unsafe{items.GetValueAtIndex(index)})else{continue};
             let name=read_string(|p|unsafe{item.Name(p)});
             let label=read_string(|p|unsafe{item.Label(p)});
-            if name.eq_ignore_ascii_case("spellcheck")
-                && matches!(label.trim().to_ascii_lowercase().as_str(),
-                    "spellcheck"|"spell check"|"spelling"){
+            // Either field alone is sufficient. The previous AND check
+            // missed the exact problem reported: an empty Label and a
+            // "spellcheck" Name, yielding three indistinguishable entries.
+            if looks_like_spellcheck(&name)||looks_like_spellcheck(&label){
                 return true;
             }
             if let Ok(children)=unsafe{item.Children()}{
@@ -181,6 +190,10 @@ mod windows_menu {
                 clear();
                 if unsafe{args.MenuItems()}.ok()
                     .is_some_and(|items|has_generic_spellcheck(&items,0)){
+                    // The stable SDK does not expose correction text. Let
+                    // Chromium own this specific menu rather than claiming
+                    // the word "spellcheck" is a replacement suggestion.
+                    // We do NOT set Handled(true) or take a deferral.
                     let _=unsafe{args.SetHandled(false)};
                     return Ok(());
                 }

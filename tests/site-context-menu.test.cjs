@@ -128,3 +128,20 @@ test('10 dismissal and next context request never execute a stale command',async
   assert.ok(h.commands.some(c=>c.name==='site-context-select'&&c.payload.requestId===43&&c.payload.commandId===112));
   assert.equal(h.commands.some(c=>c.payload?.commandId===111),false);
 });
+
+test('11 lower-case unlabeled spellcheck items never render as replacement words',async()=>{
+  const h=harness();
+  await h.emit({kind:'selection',editable:true,nativeItems:[
+    cmd('spellcheck',301,{name:'spellcheck'}),
+    cmd('spellcheck',302,{name:'spellCheck'}),
+    cmd('',303,{name:'spellcheck'}),
+    {separator:true},
+    cmd('Copy',304,{name:'copy'}),
+    cmd('Paste',305,{name:'paste'})
+  ]});
+  assert.equal(h.buttons().some(b=>/^spellcheck$/i.test(b.textContent)),false);
+  assert.equal(h.buttons().some(b=>b.textContent==='Copy'),true);
+  h.click('Paste');
+  assert.ok(h.commands.some(c=>c.name==='site-context-select'&&c.payload.commandId===305));
+  assert.ok(!h.commands.some(c=>[301,302,303].includes(c.payload?.commandId)));
+});

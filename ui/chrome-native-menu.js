@@ -532,6 +532,12 @@
           if(entry.separator)return [sep()];
           const label=String(entry.text||entry.name||'').replace(/&(?!&)/g,'').trim();
           if(!label)return [];
+          // Absolute last-resort UI guard: WebView2 stable context-menu
+          // commands sometimes have an empty suggestion label and only
+          // expose the generic "spellCheck" name. Never show these as if
+          // they were the user's correct replacement spelling. The native
+          // side normally routes these clicks to Chromium's built-in menu.
+          if(/^spell[\s_-]*check$/i.test(label))return [];
           const text=(entry.checked?'✓  ':'')+label;
           if(Array.isArray(entry.items)){
             const children=convertNative(entry.items,depth+1);

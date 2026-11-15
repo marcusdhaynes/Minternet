@@ -519,7 +519,7 @@
   // bookmark-place objects, or file/directory entries depending on the source.
   // Import into a detached validated tree and save once: one Undo operation.
   const imported=window.MinternetBookmarkImport;
-  function appendImported(items,parentId=null,replaceBar=false){
+  function appendImported(items,parentId=null,replaceBar=false,addBefore=false){
     if(!imported||!Array.isArray(items)||!items.length)return 0;
     // All-or-nothing capacity check: never create an empty or half-imported
     // folder when Firefox supplied a large nested tree.
@@ -540,6 +540,11 @@
     }
     const draftState=replaceBar?model.blank():model.hydrate(JSON.stringify(data));
     if(replaceBar)draftState.visible=data.visible;
+    // Remember how many original root entries preceded this import. The
+    // source tree's internal order never changes; only the position of the
+    // newly imported root block can change.
+    const destination=model.find(draftState,parentId||model.BOOKMARK_BAR_ID);
+    const existingChildren=destination?.kind==='folder'?destination.children.length:0;
     let added=0;
     const limit=2000;
     function insert(node,parent,depth){
@@ -557,6 +562,10 @@
     }
     for(const item of items)insert(item,parentId,0);
     if(!added)return 0;
+    if(addBefore&&!replaceBar&&destination?.kind==='folder'){
+      const newChildren=destination.children.splice(existingChildren);
+      destination.children.unshift(...newChildren);
+    }
     if(JSON.stringify(draftState).length>950000){
       toast('This folder is too large for the bookmark store; nothing was imported.');
       return 0;
@@ -574,11 +583,20 @@
       const parsed=await readImportedFile(file);
       if(!parsed.length){report('No supported bookmarks found. Use an HTML or JSON bookmark export.');return;}
       const normalized=imported.normalizeBrowserRoots(parsed);
-      const replacement=$('bookmarkImportMode')?.value==='replace';
-      const added=appendImported(normalized,model.BOOKMARK_BAR_ID,replacement);
+      const mode=$('bookmarkImportMode')?.value||'merge-after';
+      const replacement=mode==='replace';
+      if(replacement && !window.confirm(
+          'Replace the current Bookmark Bar and every nested folder with this import? This will remove existing bookmarks.')){
+        report('Import cancelled. Existing bookmarks were not changed.');
+        return;
+      }
+      const added=appendImported(normalized,model.BOOKMARK_BAR_ID,
+        replacement,mode==='merge-before');
       if(added){
         report('Imported '+added+' bookmark items and folders into Bookmark Bar'+
-          (replacement?' (replacement).':'. Existing items preserved.'));
+          (replacement?' (existing bookmarks replaced).':
+          mode==='merge-before'?' (merged before existing bookmarks).':
+          ' (merged after existing bookmarks).'));
         renderManager();renderBar();
       }else report('Bookmark import could not be completed; existing bookmarks were preserved.');
     }catch(error){report('Bookmark import failed: '+String(error?.message||error));}
