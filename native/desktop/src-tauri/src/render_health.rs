@@ -199,7 +199,7 @@ mod tests{
         assert!(!claim(id,"https://one.example/"));
         assert!(claim(id,"https://two.example/"));
     }
-    #[test]fn inspection_cannot_read_page_contents_or send_a_url(){
+    #[test]fn inspection_cannot_read_page_contents_or_send_a_url(){
         assert!(!BLANK_PROBE.contains("localStorage"));
         assert!(!BLANK_PROBE.contains("document.cookie"));
         assert!(!BLANK_PROBE.contains("fetch("));
