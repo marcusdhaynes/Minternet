@@ -1344,7 +1344,7 @@ fn fetch_bookmark_icon_data(raw:&str)->Result<String,String>{
     }
     let host=url.host_str().unwrap_or_default().to_ascii_lowercase();
     if host=="localhost"||host.ends_with(".localhost")||host.ends_with(".local")||
-       host.parse::<std::net::IpAddr>().is_ok(){
+       host.ends_with(".onion")||host.parse::<std::net::IpAddr>().is_ok(){
         return Err("Private or numeric hosts are not valid favicon sources".into());
     }
     let agent=ureq::AgentBuilder::new()
@@ -1378,7 +1378,7 @@ fn lookup_site_icons(url:&str)->Vec<String>{
     // Never probe local addresses as part of bookmark icon discovery.
     let host=page.host_str().unwrap_or_default().to_ascii_lowercase();
     if host=="localhost" || host.ends_with(".localhost") ||
-       host.ends_with(".local") || host.parse::<std::net::IpAddr>().is_ok(){
+       host.ends_with(".local") || host.ends_with(".onion") || host.parse::<std::net::IpAddr>().is_ok(){
         return Vec::new();
     }
     page.set_fragment(None);
@@ -1398,6 +1398,9 @@ fn lookup_site_icons(url:&str)->Vec<String>{
                 let Ok(next)=page.join(location) else{break};
                 if next.scheme()!="https" || !next.username().is_empty() ||
                    next.password().is_some() {break;}
+                let host=next.host_str().unwrap_or_default().to_ascii_lowercase();
+                if host=="localhost"||host.ends_with(".localhost")||host.ends_with(".local")||
+                   host.ends_with(".onion")||host.parse::<std::net::IpAddr>().is_ok(){break;}
                 page=next;continue;
             },
             Err(_)=>break,
@@ -1411,8 +1414,11 @@ fn lookup_site_icons(url:&str)->Vec<String>{
                 !next.username().is_empty() || next.password().is_some(){break;}
             let host=next.host_str().unwrap_or_default().to_ascii_lowercase();
             if host=="localhost" || host.ends_with(".localhost") ||
-                host.ends_with(".local") || host.parse::<std::net::IpAddr>().is_ok(){break;}
-            page=next;continue;
+                host.ends_with(".local") || host.ends_with(".onion") || host.parse::<std::net::IpAddr>().is_ok(){break;}
+            let host=next.host_str().unwrap_or_default().to_ascii_lowercase();
+                if host=="localhost"||host.ends_with(".localhost")||host.ends_with(".local")||
+                   host.ends_with(".onion")||host.parse::<std::net::IpAddr>().is_ok(){break;}
+                page=next;continue;
         }
         let mime=response.header("Content-Type").unwrap_or("");
         if !mime.to_ascii_lowercase().contains("text/html"){break;}
@@ -5473,6 +5479,9 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             .await.map_err(|e|e.to_string())?;
     }
     if name=="bookmark-icon-data" {
+        let tor_active=app.state::<Mutex<Browser>>().lock()
+            .map(|b|b.active().is_some_and(|tab|tab.tor)).unwrap_or(true);
+        if tor_active{return Err("Direct icon lookups are blocked while Tor is active".into());}
         let url=value.as_str().ok_or("Expected HTTPS favicon URL")?;
         if url.len()>4096{return Err("Favicon URL too long".into());}
         let target=url.to_owned();
@@ -5482,6 +5491,9 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         return Ok(json!(result));
     }
     if name=="bookmark-site-icons" {
+        let tor_active=app.state::<Mutex<Browser>>().lock()
+            .map(|b|b.active().is_some_and(|tab|tab.tor)).unwrap_or(true);
+        if tor_active{return Err("Direct site metadata lookups are blocked while Tor is active".into());}
         let url=value.as_str().ok_or("Expected bookmarked HTTPS URL")?;
         if url.len()>4096 {return Err("Bookmark URL too long".into());}
         let target=url.to_owned();
