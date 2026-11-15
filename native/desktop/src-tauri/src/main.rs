@@ -1398,9 +1398,6 @@ fn lookup_site_icons(url:&str)->Vec<String>{
                 let Ok(next)=page.join(location) else{break};
                 if next.scheme()!="https" || !next.username().is_empty() ||
                    next.password().is_some() {break;}
-                let host=next.host_str().unwrap_or_default().to_ascii_lowercase();
-                if host=="localhost"||host.ends_with(".localhost")||host.ends_with(".local")||
-                   host.ends_with(".onion")||host.parse::<std::net::IpAddr>().is_ok(){break;}
                 page=next;continue;
             },
             Err(_)=>break,

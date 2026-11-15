@@ -75,3 +75,16 @@ test('12. Tor microphone and camera access are denied while ordinary sites retai
  assert.match(native,/PermissionKind::Microphone \| PermissionKind::Camera if tor/);
  assert.match(native,/PermissionKind::Microphone \| PermissionKind::Camera =>/);
 });
+
+test('13. Native bookmark icon helpers reject onion-site URLs and Tor-active bypass',()=>{
+ assert.match(native,/host\.ends_with\("\.onion"\)/);
+ assert.match(native,/if tor_active\{return Err\("Direct icon lookups are blocked while Tor is active"/);
+ assert.match(native,/if tor_active\{return Err\("Direct site metadata lookups are blocked while Tor is active"/);
+});
+test('14. Bookmark bar avoids chrome-origin icon requests while Tor is active',()=>{
+ const bar=source('ui/bookmark-ui.js');
+ assert.match(bar,/if\(torBookmarkMode\)return Promise\.resolve\(\[\]\)/);
+ assert.match(bar,/if\(torBookmarkMode\)return;/);
+ assert.match(bar,/pendingIconRequests\.clear\(\)/);
+ assert.match(bar,/if\(torBookmarkMode&&!thumbs\.has\(value\)\)/);
+});

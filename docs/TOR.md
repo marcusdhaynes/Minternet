@@ -33,4 +33,4 @@ _Last updated November 15, 2026._
 9. Run Tor Project fingerprinting and browser privacy diagnostics; document every remaining difference from Tor Browser.
 10. Repeat on supported Windows/WebView2 and Linux/WebKitGTK versions, test long-lived connections, and commission an independent security audit.
 
-Automated source assertions in `tests/tor-integration.test.cjs` and Rust unit tests are development regression checks only. They do **not** satisfy the real network/security gates above.
+Automated source assertions in `tests/tor-integration.test.cjs` run in the full JavaScript test suite and ten repeated CI regression cycles; Rust unit tests are separate development checks. They are development regression checks only. They do **not** satisfy the real network/security gates above.
