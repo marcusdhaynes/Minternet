@@ -2360,6 +2360,20 @@ fn recover_stalled_site_if_url(app:&tauri::AppHandle,id:u32,
             render_health::record(app,id,"recovery-suppressed");
             return;
         }
+        // Empty DOM does not imply a dead WebView2 browser process. Reload
+        // the existing controller once instead of destroying the browser
+        // profile's active renderer. This keeps the cookie jar and storage
+        // attached; failed/crashed renderers still use full reconstruction.
+        if reason=="blank-document"{
+            if let Some(label)=current.1.as_ref(){
+                if let Some(view)=app.get_webview(label){
+                    if view.reload().is_ok(){
+                        render_health::record(app,id,"reloaded");
+                        return;
+                    }
+                }
+            }
+        }
         if let Some(label)=current.1.as_ref(){
             if let Some(view)=app.get_webview(label){let _=view.close();}
         }
@@ -3029,9 +3043,11 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                                     let marker=std::env::temp_dir().join(format!(
                                         "minternet-blank-render-{}.ok",std::process::id()));
                                     let _=view.eval_with_callback(
-                                        "(document.body?.innerText?.includes('Example Domain')===true)&&document.cookie.includes('minternet_render_repair=retained')&&localStorage.getItem('minternet_render_repair')==='retained'",
+                                        "Number(document.body?.innerText?.includes('Example Domain')===true)+2*Number(document.cookie.includes('minternet_render_repair=retained'))+4*Number(localStorage.getItem('minternet_render_repair')==='retained')",
                                         move|proof|{
-                                            if proof.trim()=="true"{
+                                            let flags=proof.trim().parse::<u8>().unwrap_or(0);
+                                            render_health::smoke_stage(&format!("proof-flags:{flags}"));
+                                            if flags==7{
                                                 BLANK_PHASE.store(3,Ordering::Release);
                                                 render_health::smoke_stage("proof-passed");
                                                 let _=std::fs::write(&marker,

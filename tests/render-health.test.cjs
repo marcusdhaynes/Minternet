@@ -58,3 +58,15 @@ test('render health log contains events but no website URL, form data or screens
  assert.match(src,/reason=\{reason\}/);
  assert.doesNotMatch(src,/format!\(".*url=|CapturePreview|document\.body\.innerHTML/);
 });
+
+test('healthy blank DOM reloads its existing WebView2 controller once before full reconstruction',()=>{
+  const main=read('native/desktop/src-tauri/src/main.rs');
+  const health=read('native/desktop/src-tauri/src/render_health.rs');
+  const recovery=main.slice(main.indexOf('fn recover_stalled_site_if_url('),
+     main.indexOf('fn is_real_page_url('));
+  assert.match(recovery,/if reason=="blank-document"/);
+  assert.match(recovery,/if view.reload\(\).is_ok\(\)/);
+  assert.ok(recovery.indexOf('view.reload().is_ok()') < recovery.indexOf('let _=view.close()'));
+  assert.match(health,/claim\(id,&current\.0\)/.test(recovery) ? recovery : '',/claim/);
+  assert.match(main,/proof-flags:\{flags\}/);
+});
