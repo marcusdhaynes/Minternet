@@ -46,7 +46,9 @@ test('real Windows CI intentionally blanks HTTPS content and verifies recovery',
  const win=read('.github/workflows/native-windows.yml');
  assert.match(src,/BLANK_PHASE:std::sync::atomic::AtomicU8/);
  assert.match(src,/BLANK_PHASE\.compare_exchange\(0,1/);
- assert.match(src,/document\.body\?\.innerText\?\.includes\('Example Domain'\)/);
+ assert.match(src,/location\.hostname==='example\.com'/);
+ assert.match(src,/document\.readyState==='complete'/);
+ assert.match(src,/document\.body\?\.innerText\|\|''/);
  assert.match(src,/document\.body\.replaceChildren\(\)/);
  assert.match(src,/minternet-blank-render-.*\.ok/);
  assert.match(win,/--minternet-blank-render-smoke/);

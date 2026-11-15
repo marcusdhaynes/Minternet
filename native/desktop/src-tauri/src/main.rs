@@ -3043,7 +3043,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                                     let marker=std::env::temp_dir().join(format!(
                                         "minternet-blank-render-{}.ok",std::process::id()));
                                     let _=view.eval_with_callback(
-                                        "Number(document.body?.innerText?.includes('Example Domain')===true)+2*Number(document.cookie.includes('minternet_render_repair=retained'))+4*Number(localStorage.getItem('minternet_render_repair')==='retained')",
+                                        "Number(document.readyState==='complete'&&location.hostname==='example.com'&&(document.body?.innerText||'').trim().length>=25)+2*Number(document.cookie.includes('minternet_render_repair=retained'))+4*Number(localStorage.getItem('minternet_render_repair')==='retained')",
                                         move|proof|{
                                             let flags=proof.trim().parse::<u8>().unwrap_or(0);
                                             render_health::smoke_stage(&format!("proof-flags:{flags}"));
