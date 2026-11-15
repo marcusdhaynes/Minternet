@@ -62,6 +62,12 @@ test('Crash recovery preserves tabs and does not automatically load a previously
   assert.match(lifecycle,/legacy update marker/i);
   const updater=read('native/desktop/src-tauri/src/portable_updater.rs');
   assert.match(updater,/super::clear_crash_guard\(&handle\);\s*handle\.exit\(0\)/);
+  assert.match(main,/--minternet-cookie-set-smoke/);
+  assert.match(main,/--minternet-cookie-check-smoke/);
+  assert.match(main,/minternet_ci_profile_v1/);
+  const win=read('.github/workflows/native-windows.yml');
+  assert.match(win,/EXE replacement did not retain WebView2 cookie and localStorage/);
+  assert.match(win,/real WebView2 cookie \+ localStorage survived portable EXE replacement/);
   assert.doesNotMatch(main,/panic payloads in logs.*writeln!\([^;]*info\.payload\(/s);
 });
 

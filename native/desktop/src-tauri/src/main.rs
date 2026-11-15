@@ -2525,6 +2525,36 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                 }
                 return false;
             }
+            // CI only: report whether *real* WebView2 cookies and localStorage
+            // survived an actual portable EXE replacement and relaunch.
+            if std::env::args().any(|a|a=="--minternet-cookie-set-smoke"||
+                                     a=="--minternet-cookie-check-smoke") &&
+               url.scheme()=="https" &&
+               url.host_str()==Some("minternet-cookie-probe.invalid") &&
+               url.path()=="/__complete" {
+                let stage=url.query_pairs().find(|(k,_)|k=="stage")
+                    .map(|(_,v)|v.to_string()).unwrap_or_default();
+                let passed=url.query_pairs().any(|(k,v)|k=="ok"&&v=="true");
+                if matches!(stage.as_str(),"set"|"check") {
+                    let marker=std::env::temp_dir().join(format!(
+                        "minternet-cookie-{stage}-{}.{}",
+                        std::process::id(),if passed {"ok"}else{"failed"}));
+                    let _=std::fs::write(marker,format!(
+                        "WebView2 {stage} cookie/localStorage: {}",if passed{"PASS"}else{"FAIL"}));
+                    // Gracefully close WebViews to flush Chromium's profile.
+                    let worker=for_navigation.clone();
+                    std::thread::spawn(move||{
+                        std::thread::sleep(Duration::from_millis(650));
+                        let handle=worker.clone();
+                        let _=worker.run_on_main_thread(move||{
+                            if let Some(window)=handle.get_window("main"){
+                                let _=window.close();
+                            }
+                        });
+                    });
+                }
+                return false;
+            }
             if matches!(url.scheme(), "https"|"http") {
                 // No bundled content filter: ordinary web requests are handled
                 // directly by WebView2, retaining existing URL safety checks.
@@ -2798,6 +2828,26 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                     }
                     if is_real_page_url(event.url().as_str()) {
                         apply_volume_to_site(&for_load,id,view.label(),true);
+                    }
+                    // CI: write/read a persistent cookie and localStorage in
+                    // actual HTTPS WebView2 across a native EXE replacement.
+                    if event.url().host_str()==Some("example.com") &&
+                        std::env::args().any(|a|a=="--minternet-cookie-set-smoke"){
+                        let _=view.eval(r#"(function(){
+                          document.cookie='minternet_ci_profile_v1=retained; Max-Age=3600; Path=/; SameSite=Lax; Secure';
+                          localStorage.setItem('minternet_ci_profile_v1','retained');
+                          const ok=document.cookie.includes('minternet_ci_profile_v1=retained')&&
+                            localStorage.getItem('minternet_ci_profile_v1')==='retained';
+                          location.assign('https://minternet-cookie-probe.invalid/__complete?stage=set&ok='+ok);
+                        })();"#);
+                    }
+                    if event.url().host_str()==Some("example.com") &&
+                        std::env::args().any(|a|a=="--minternet-cookie-check-smoke"){
+                        let _=view.eval(r#"(function(){
+                          const ok=document.cookie.includes('minternet_ci_profile_v1=retained')&&
+                            localStorage.getItem('minternet_ci_profile_v1')==='retained';
+                          location.assign('https://minternet-cookie-probe.invalid/__complete?stage=check&ok='+ok);
+                        })();"#);
                     }
                     // CI: prove that an OAuth-style bootstrap popup retains
                     // window.opener and can send a real postMessage to its site.
@@ -6772,6 +6822,8 @@ fn main() {
             let turbo_smoke = std::env::args().any(|a| a == "--minternet-turbo-smoke");
             let auth_popup_smoke = std::env::args().any(|a| a == "--minternet-auth-popup-smoke");
             let passkey_smoke = std::env::args().any(|a| a == "--minternet-passkey-smoke");
+            let cookie_smoke=std::env::args().any(|a|
+                a=="--minternet-cookie-set-smoke"||a=="--minternet-cookie-check-smoke");
             let media_smoke = std::env::args().any(|a| a == "--minternet-media-smoke");
             let bookmarks_smoke = std::env::args().any(|a| a == "--minternet-bookmarks-smoke");
             let bookmarks_reopen = std::env::args().any(|a| a == "--minternet-bookmarks-reopen");
@@ -6867,7 +6919,7 @@ fn main() {
                                     }
                                   },300);
                                 "#);
-                            } else if smoke || auth_popup_smoke || passkey_smoke {
+                            } else if smoke || auth_popup_smoke || passkey_smoke || cookie_smoke {
                                 let _ = view.eval(
                                     "setTimeout(() => window.minternet?.command('navigate', 'https://example.com'), 200)"
                                 );
