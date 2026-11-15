@@ -2214,7 +2214,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { di
 /* Split panes merge into one extremely condensed supertab. No duplicate
    title text, spare icon margins, or hidden close-button width. */
 :root{--minternet-supertab-gap:0px;--minternet-supertab-padding:1px;}
-.tabs .tab.split-supertab{
+.tabs .tab.split-supertab:not(.group-end-cap):not(.pinned-tab){
   display:inline-flex!important;align-items:center;justify-content:center;
   flex:0 0 auto!important;width:max-content!important;min-width:0!important;
   max-width:none!important;gap:var(--minternet-supertab-gap);
