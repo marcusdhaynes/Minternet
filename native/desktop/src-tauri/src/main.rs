@@ -8,6 +8,8 @@ mod media_devices;
 #[cfg(windows)]
 mod native_surface;
 mod site_context_menu;
+#[cfg(windows)]
+mod render_health;
 mod extensions;
 mod portable_updater;
 mod session_lifecycle;
@@ -2313,6 +2315,77 @@ fn display_active(app: &tauri::AppHandle) {
     notify(app);
 }
 
+
+fn recover_stalled_site(app:&tauri::AppHandle,id:u32,reason:&'static str){
+    let current={
+        let state=app.state::<Mutex<Browser>>();
+        state.lock().ok().and_then(|b|b.tabs.iter().find(|t|t.id==id)
+            .map(|t|t.url.clone()))
+    };
+    if let Some(url)=current {
+        recover_stalled_site_if_url(app,id,&url,reason);
+    }
+}
+// A failed renderer, unlike a healthy page with draft input, has no usable
+// document to preserve. Keep the same WebView2 profile, ID, URL, and cookies.
+// One automatic replacement per tab+URL prevents white/refresh loops.
+fn recover_stalled_site_if_url(app:&tauri::AppHandle,id:u32,
+                               expected_url:&str,reason:&'static str){
+    #[cfg(windows)]
+    {
+        let current={
+            let state=app.state::<Mutex<Browser>>();
+            let Ok(b)=state.lock() else{return};
+            let Some(tab)=b.tabs.iter().find(|tab|tab.id==id)else{return};
+            if tab.url!=expected_url||!is_real_page_url(&tab.url){return;}
+            let active=b.active_id==id;
+            if reason=="blank-document"&&(!active||tab.loading){return;}
+            (tab.url.clone(),tab.view.clone(),active)
+        };
+        if !render_health::claim(id,&current.0){
+            render_health::record(app,id,"recovery-suppressed");
+            return;
+        }
+        if let Some(label)=current.1.as_ref(){
+            if let Some(view)=app.get_webview(label){let _=view.close();}
+        }
+        {
+            let state=app.state::<Mutex<Browser>>();
+            if let Ok(mut b)=state.lock(){
+                if let Some(tab)=b.tabs.iter_mut().find(|tab|tab.id==id){
+                    if tab.url!=current.0{return;}
+                    tab.view=None;
+                    tab.loading=false;
+                    tab.checking_unload=false;
+                }
+            }
+        }
+        // The old view and the replacement share the same tab-{id} label.
+        // A cache hit would otherwise incorrectly skip Show() and retain an
+        // invisible or stale child controller (one source of white screens).
+        if let Ok(mut cache)=app.state::<Mutex<LayoutCache>>().lock(){
+            if let Some(label)=current.1.as_ref(){cache.shown.remove(label);}
+            cache.size_and_home=None;
+        }
+        if current.2{
+            if let Ok(target)=tauri::Url::parse(&current.0){
+                match navigate_tab(app,id,Some(target),false){
+                    Ok(())=>{
+                        render_health::record(app,id,"recreated");
+                        if let Some(chrome)=app.get_webview("chrome"){
+                            let _=chrome.eval(
+                              "window.minternetToast?.('Page renderer recovered. Your saved logins and tabs were retained.');"
+                            );
+                        }
+                    },
+                    Err(error)=>eprintln!("Renderer recovery failed for tab {id}: {error}")
+                }
+            }
+        }else{notify(app);}
+    }
+    #[cfg(not(windows))]
+    {let _=(app,id,expected_url,reason);}
+}
 fn is_real_page_url(url:&str)->bool{
     // Internal prepared controllers must never become a visible browser URL.
     let Ok(actual)=tauri::Url::parse(url) else{return false};
@@ -2860,28 +2933,13 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                             });
                         });
                     }
-                    // Never auto-reload an authenticated SPA as a blank-screen
-                    // workaround: it can loop, flash white and destroy unsaved
-                    // input. Request a native non-navigating geometry check.
-                    if event.url().host_str()==Some("chatgpt.com") {
-                        let _=view.eval(r#"
-                          (() => {
-                            const marker='minternet-surface-check-v2';
-                            setTimeout(() => {
-                              try {
-                                if(document.visibilityState!=='visible')return;
-                                if(document.readyState!=='complete')return;
-                                if(sessionStorage.getItem(marker)==='done')return;
-                                const body=document.body;
-                                if(!body || (body.innerText||'').trim().length>=32)return;
-                                if(document.querySelector('textarea,input:not([type="hidden"]),[contenteditable="true"],video,canvas'))return;
-                                sessionStorage.setItem(marker,'done');
-                                window.open('https://minternet-surface.invalid/__repair','_blank');
-                              } catch {}
-                            },12000);
-                          })();
-                        "#);
-                    }
+                    // WebView2 PageLoadEvent::Finished does NOT establish
+                    // that a large SPA actually rendered a usable document.
+                    // A bounded, privacy-safe check runs after hydration;
+                    // never reload a populated editor or a playing page.
+                    #[cfg(windows)]
+                    render_health::schedule_blank_probe(
+                        &for_load,id,event.url().as_str().to_string());
                     if is_real_page_url(event.url().as_str()) {
                         apply_volume_to_site(&for_load,id,view.label(),true);
                     }
@@ -3017,6 +3075,8 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     attach_browser_favicon(app,id,&created);
     media_devices::attach(app,id,&created,private);
     site_context_menu::attach(app,id,&created);
+    #[cfg(windows)]
+    render_health::attach(app,id,&created);
     #[cfg(windows)]
     if let Ok(page)=created.url(){
         media_devices::reset_old_denials(app,id,page.as_str());
