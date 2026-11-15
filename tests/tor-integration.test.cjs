@@ -67,7 +67,7 @@ test('10. Tor sessions remain excluded from synced and persistent regular sessio
 });
 test('11. Tor mode is clearly labelled and does not fetch favicons directly',()=>{
  assert.match(html,/Open New Tor Tab \(Tor-routed; not Tor Browser\)/);
- assert.match(app,/if\(tab\.tor && \^/);
+ assert.match(app,/if\(tab\.tor && \/\^https\?/);
  assert.match(app,/tab-tor-mark/);
  assert.match(app,/Tor-routed tab; not equivalent to Tor Browser/);
 });
