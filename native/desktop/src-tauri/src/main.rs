@@ -5,6 +5,8 @@ mod google_account;
 mod firefox_bookmarks;
 mod secret_bookmarks;
 mod media_devices;
+#[cfg(windows)]
+mod native_surface;
 mod site_context_menu;
 mod extensions;
 mod portable_updater;
@@ -2087,6 +2089,8 @@ fn reconcile_visible_child_bounds(app:&tauri::AppHandle)->bool {
         .map(|r|*r).unwrap_or((0.5,0.5));
     let available=height-top;
     let mut corrected=false;
+    #[cfg(windows)]
+    let parent_hwnd=window.hwnd().ok().map(|hwnd|hwnd.0 as isize).unwrap_or(0);
 
     let mut fix=|view:&tauri::Webview,x:f64,y:f64,w:f64,h:f64|{
         let (Ok(pos),Ok(size))=(view.position(),view.size()) else{return};
@@ -2102,6 +2106,13 @@ fn reconcile_visible_child_bounds(app:&tauri::AppHandle)->bool {
                 corrected=true;
             }
         }
+        // Tauri's logical coordinates can be correct while the *native*
+        // child HWND or CoreWebView2Controller Bounds are wrong.
+        #[cfg(windows)]
+        native_surface::verify(view,parent_hwnd,[
+            (x*scale).round() as i32,(y*scale).round() as i32,
+            (w*scale).round() as i32,(h*scale).round() as i32,
+        ]);
     };
     if let Some(chrome)=app.get_webview("chrome"){
         fix(&chrome,0.0,0.0,width,
@@ -2204,6 +2215,17 @@ fn start_geometry_smoke(app:&tauri::AppHandle,id:u32){
             } else {
                 format!("failed to correct WebView2 bounds; repaired={changed}, expected={expected:?}, actual={actual:?}")
             });
+            // A second, independent test corrupts the actual Win32 child
+            // window and the WebView2 controller while Tauri's logical
+            // geometry remains correct. That was the missing regression.
+            #[cfg(windows)]
+            if let Ok(hwnd)=window.hwnd(){
+                native_surface::smoke(&view,hwnd.0 as isize,[
+                    0,(top*scale).round() as i32,
+                    (width*scale).round() as i32,
+                    ((height-top)*scale).round() as i32,
+                ]);
+            }
         });
     });
 }
@@ -2447,6 +2469,9 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     // Browser tab reordering remains scoped to the trusted chrome view.
     let builder=WebviewBuilder::new(label.clone(),url)
         .incognito(private)
+        // A dark native fallback avoids a seizure-like white flash before
+        // the website commits its own first painted frame.
+        .background_color(tauri::webview::Color(13,17,29,255))
         .disable_drag_drop_handler();
     // Opt in to a separate WebView2 site profile only after a user imports
     // an enabled extension. Keeps trusted browser chrome, credentials and
@@ -2614,6 +2639,21 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
         .on_new_window(move |url, _features| {
             if url.as_str()=="https://minternet-find.invalid/__open" {
                 let _=for_popup.emit_to("chrome","minternet:find-open",json!({}));
+                return NewWindowResponse::Deny;
+            }
+            if url.as_str()=="https://minternet-surface.invalid/__repair" {
+                // A stalled site asks for a *compositor* repair only: never
+                // reload, clear cookies, recreate its renderer or steal focus.
+                let app=for_popup.clone();
+                std::thread::spawn(move||{
+                    std::thread::sleep(Duration::from_millis(80));
+                    let handle=app.clone();
+                    let _=app.run_on_main_thread(move||{
+                        invalidate_layout(&handle);
+                        refresh_layout(&handle);
+                        reconcile_visible_child_bounds(&handle);
+                    });
+                });
                 return NewWindowResponse::Deny;
             }
             if url.as_str()=="https://minternet-autofill.invalid/__retry" {
@@ -2802,15 +2842,13 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                             });
                         });
                     }
-                    // ChatGPT can occasionally finish a WebView2 navigation
-                    // while leaving an empty document surface. Retry the same
-                    // conversation URL exactly once if it remains textless and
-                    // noninteractive for twenty seconds. Do not reload a page
-                    // with any active input, media or visible application text.
+                    // Never auto-reload an authenticated SPA as a blank-screen
+                    // workaround: it can loop, flash white and destroy unsaved
+                    // input. Request a native non-navigating geometry check.
                     if event.url().host_str()==Some("chatgpt.com") {
                         let _=view.eval(r#"
                           (() => {
-                            const marker='minternet-blank-surface-retry-v1';
+                            const marker='minternet-surface-check-v2';
                             setTimeout(() => {
                               try {
                                 if(document.visibilityState!=='visible')return;
@@ -2820,9 +2858,9 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                                 if(!body || (body.innerText||'').trim().length>=32)return;
                                 if(document.querySelector('textarea,input:not([type="hidden"]),[contenteditable="true"],video,canvas'))return;
                                 sessionStorage.setItem(marker,'done');
-                                location.reload();
+                                window.open('https://minternet-surface.invalid/__repair','_blank');
                               } catch {}
-                            },20000);
+                            },12000);
                           })();
                         "#);
                     }

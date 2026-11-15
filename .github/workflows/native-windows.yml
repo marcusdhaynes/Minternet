@@ -66,6 +66,7 @@ jobs:
           node --test ../../tests/context-menu-position.test.cjs
           node --test ../../tests/site-context-menu.test.cjs
           node --test ../../tests/native-startup-geometry.test.cjs
+          node --test ../../tests/native-compositor-geometry.test.cjs
           node --test ../../tests/site-dragdrop-layout.test.cjs
           node --test ../../tests/native-surface-transitions.test.cjs
           node --check ../../ui/updates.js
@@ -167,10 +168,25 @@ jobs:
             if ($proof -notmatch "PASS: maximized WebView2 child corrected") {
               throw "Unexpected native geometry proof: $proof"
             }
-            "PASS: real maximized WebView2 recovers from the same 53px off-center, undersized rectangle shown in screenshot." >> $env:GITHUB_STEP_SUMMARY
+            $nativeOk = Join-Path $env:TEMP "minternet-native-surface-$($p.Id).ok"
+            $nativeFailed = Join-Path $env:TEMP "minternet-native-surface-$($p.Id).failed"
+            $nativeVerified = $false
+            for ($i=0; $i -lt 20; $i++) {
+              Start-Sleep -Milliseconds 500
+              if (Test-Path -LiteralPath $nativeFailed) {
+                throw "Real Win32/WebView2 compositor repair failed: $(Get-Content $nativeFailed -Raw)"
+              }
+              if (Test-Path -LiteralPath $nativeOk) { $nativeVerified = $true; break }
+            }
+            if (!$nativeVerified) { throw "Native child HWND and WebView2 controller were not verified" }
+            $proof = Get-Content -LiteralPath $nativeOk -Raw
+            if ($proof -notmatch "PASS: actual WebView2 child HWND and controller corrected without navigation"){
+              throw "Unexpected native surface proof: $proof"
+            }
+            "PASS: both Tauri bounds and real HWND/controller bounds recovered from deliberately corrupted offset/size, without reloading a website." >> $env:GITHUB_STEP_SUMMARY
           } finally {
             if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
-            Remove-Item $passed,$failed -Force -ErrorAction SilentlyContinue
+            Remove-Item $passed,$failed,$nativeOk,$nativeFailed -Force -ErrorAction SilentlyContinue
           }
       - name: Verify OAuth popup renders with a working native window.opener
         shell: pwsh
