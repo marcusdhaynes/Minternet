@@ -67,6 +67,8 @@ jobs:
           node --test ../../tests/site-context-menu.test.cjs
           node --test ../../tests/native-startup-geometry.test.cjs
           node --test ../../tests/native-compositor-geometry.test.cjs
+          node --test ../../tests/supertab.test.cjs ../../tests/bookmark-settings-import.test.cjs ../../tests/spellcheck-label.test.cjs
+          node --check ../../ui/supertab.js
           node --test ../../tests/site-dragdrop-layout.test.cjs
           node --test ../../tests/native-surface-transitions.test.cjs
           node --check ../../ui/updates.js
