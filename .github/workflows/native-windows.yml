@@ -67,6 +67,7 @@ jobs:
           node --test ../../tests/site-context-menu.test.cjs
           node --test ../../tests/native-startup-geometry.test.cjs
           node --test ../../tests/native-compositor-geometry.test.cjs
+          node --test ../../tests/render-health.test.cjs
           node --test ../../tests/supertab.test.cjs ../../tests/bookmark-settings-import.test.cjs ../../tests/spellcheck-label.test.cjs
           node --check ../../ui/supertab.js
           node --test ../../tests/site-dragdrop-layout.test.cjs
@@ -141,6 +142,32 @@ jobs:
               throw "Incorrect native webview confirmation: $proof"
             }
             "PASS: Chrome IPC navigated to example.com and WebView2 returned the page title inside Minternet." >> $env:GITHUB_STEP_SUMMARY
+          } finally {
+            if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
+            Remove-Item $marker -Force -ErrorAction SilentlyContinue
+          }
+      - name: Reproduce white page and verify real DOM recovery without profile reset
+        shell: pwsh
+        run: |
+          $exe = "$env:RUNNER_TEMP\minternet-portable\Minternet-Portable-x64.exe"
+          $p = Start-Process -FilePath $exe -ArgumentList "--minternet-blank-render-smoke" -PassThru
+          $marker = Join-Path $env:TEMP "minternet-blank-render-$($p.Id).ok"
+          try {
+            $passed = $false
+            for ($i=0; $i -lt 40; $i++) {
+              Start-Sleep -Seconds 1
+              $p.Refresh()
+              if ($p.HasExited) { throw "Browser exited during blank-page recovery smoke" }
+              if (Test-Path $marker) { $passed = $true; break }
+            }
+            if (!$passed) {
+              throw "A real blank native WebView2 document was not restored to Example Domain"
+            }
+            $proof = Get-Content -LiteralPath $marker -Raw
+            if($proof -notmatch "PASS: recovered empty DOM using new site renderer"){
+              throw "Unexpected page recovery marker: $proof"
+            }
+            "PASS: intentionally blanked HTTPS page was rebuilt and text returned without clearing the browser profile." >> $env:GITHUB_STEP_SUMMARY
           } finally {
             if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
             Remove-Item $marker -Force -ErrorAction SilentlyContinue

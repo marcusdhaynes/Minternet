@@ -1,0 +1,54 @@
+'use strict';
+const test=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const path=require('node:path');
+const read=(p)=>fs.readFileSync(path.join(__dirname,'..',p),'utf8');
+test('WebView2 browser and renderer failures are observed rather than treated as page loads',()=>{
+ const src=read('native/desktop/src-tauri/src/render_health.rs');
+ const main=read('native/desktop/src-tauri/src/main.rs');
+ assert.match(src,/ProcessFailedEventHandler::create/);
+ assert.match(src,/add_ProcessFailed\(&process_handler/);
+ assert.match(src,/NavigationCompletedEventHandler::create/);
+ assert.match(src,/args\.IsSuccess\(&mut success\)/);
+ assert.match(src,/COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED/);
+ assert.match(src,/COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED/);
+ assert.match(src,/recoverable_failure\(kind\)/);
+ assert.match(main,/render_health::attach\(app,id,&created\)/);
+});
+test('a truly blank SPA gets one bounded recovery without clearing user data',()=>{
+ const src=read('native/desktop/src-tauri/src/render_health.rs');
+ const main=read('native/desktop/src-tauri/src/main.rs');
+ assert.match(src,/BLANK_PROBE/);
+ assert.match(src,/document\.readyState/);
+ assert.match(src,/document\.visibilityState/);
+ assert.match(src,/visibleText<25/);
+ assert.match(src,/hasUsableEditor/);
+ assert.match(src,/if result\.trim\(\)!="true"/);
+ assert.match(src,/if map\.get\(&id\)\.is_some_and/);
+ assert.match(main,/recover_stalled_site_if_url/);
+ assert.match(main,/cache\.shown\.remove\(label\)/);
+ assert.match(main,/tab\.view=None/);
+ assert.match(main,/navigate_tab\(app,id,Some\(target\),false\)/);
+ assert.doesNotMatch(src,/clear_all_browsing_data|reset_profile|remove_dir_all|document\.cookie|localStorage/);
+});
+test('blank UI recovery does not accidentally destroy a populated editor or GPU process',()=>{
+ const src=read('native/desktop/src-tauri/src/render_health.rs');
+ assert.match(src,/!hasUsableEditor&&!busy&&!media/);
+ assert.match(src,/assert!\(!recoverable_failure\(COREWEBVIEW2_PROCESS_FAILED_KIND_GPU_PROCESS_EXITED\)\)/);
+});
+test('real Windows CI intentionally blanks HTTPS content and verifies recovery',()=>{
+ const src=read('native/desktop/src-tauri/src/main.rs');
+ const win=read('.github/workflows/native-windows.yml');
+ assert.match(src,/BLANK_STAGED:AtomicBool/);
+ assert.match(src,/document\.body\.replaceChildren\(\)/);
+ assert.match(src,/minternet-blank-render-.*\.ok/);
+ assert.match(win,/--minternet-blank-render-smoke/);
+ assert.match(win,/A real blank native WebView2 document was not restored/);
+});
+test('render health log contains events but no website URL, form data or screenshots',()=>{
+ const src=read('native/desktop/src-tauri/src/render_health.rs');
+ assert.match(src,/render-health\.log/);
+ assert.match(src,/reason=\{reason\}/);
+ assert.doesNotMatch(src,/format!\(".*url=|CapturePreview|document\.body\.innerHTML/);
+});
