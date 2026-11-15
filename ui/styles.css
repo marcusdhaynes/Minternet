@@ -2260,3 +2260,11 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { di
   min-height:28px;background:#171e32;color:#e8edff;border:1px solid #5c6886;
   border-radius:5px;font-size:11px;padding:4px 7px;cursor:pointer;}
 #renderCompatibilityStatus{overflow-wrap:anywhere;}
+
+/* Tor mode is opt-in, identified independently from ordinary private tabs. */
+.tab.tor-tab{box-shadow:inset 0 -2px 0 #a16de9}
+.tab-tor-mark{font-size:11px;line-height:1;flex-shrink:0}
+#tor.tor-selected{color:#d9b4ff;filter:drop-shadow(0 0 3px #8450c0)}
+#tor.tor-connecting{opacity:.5;cursor:progress;animation:minternet-tor-pulse .8s ease-in-out infinite alternate}
+@keyframes minternet-tor-pulse{from{opacity:.45}to{opacity:1}}
+.tor-active #address{border-color:#a16de9}
