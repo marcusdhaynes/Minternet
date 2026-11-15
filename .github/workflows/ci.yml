@@ -26,7 +26,7 @@ jobs:
           set -euo pipefail
           for n in $(seq 1 10); do
             echo "::group::Verification cycle $n/10"
-            node --test tests/custom-context-tabs.test.cjs tests/browser-core-guards.test.cjs tests/native-startup-geometry.test.cjs tests/native-compositor-geometry.test.cjs tests/render-health.test.cjs tests/passkeys-auth-popup.test.cjs tests/supertab.test.cjs tests/bookmark-settings-import.test.cjs tests/spellcheck-label.test.cjs
+            node --test tests/custom-context-tabs.test.cjs tests/browser-core-guards.test.cjs tests/native-startup-geometry.test.cjs tests/native-compositor-geometry.test.cjs tests/render-health.test.cjs tests/render-compat.test.cjs tests/passkeys-auth-popup.test.cjs tests/supertab.test.cjs tests/bookmark-settings-import.test.cjs tests/spellcheck-label.test.cjs
             echo "::endgroup::"
           done
       - run: npm audit --audit-level=high

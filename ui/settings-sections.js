@@ -38,6 +38,7 @@
   move(general,'defaultSearchEngine','.search-setting-field');
   move(general,'bookmarkBarToggle','.bookmark-toggle');
   const appearance=section('Appearance');
+  move(appearance,'renderCompatibilityMode','.render-compat-settings');
   move(appearance,'groupTabWidth','.tab-layout-settings');
   move(appearance,'zoomLevel','.zoom-setting-row');
   const tabs=section('Tabs & Performance');

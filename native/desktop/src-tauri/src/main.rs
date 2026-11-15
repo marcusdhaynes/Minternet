@@ -10,6 +10,8 @@ mod native_surface;
 mod site_context_menu;
 #[cfg(windows)]
 mod render_health;
+#[cfg(windows)]
+mod render_compat;
 mod extensions;
 mod portable_updater;
 mod session_lifecycle;
@@ -2965,7 +2967,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                             let app=for_load.clone();
                             let label=view.label().to_string();
                             std::thread::spawn(move||{
-                                std::thread::sleep(Duration::from_millis(550));
+                                std::thread::sleep(Duration::from_millis(2500));
                                 let task=app.clone();
                                 let _=app.run_on_main_thread(move||{
                                     let Some(view)=task.get_webview(&label) else {
@@ -2976,7 +2978,8 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                                     let status=view.eval_with_callback(r#"(function(){
                                       try{
                                         if(document.readyState!=='complete' ||
-                                           !document.body?.innerText?.includes('Example Domain')){
+                                           !document.body ||
+                                           (document.body.innerText||'').trim().length<25){
                                           return 0;
                                         }
                                         document.cookie='minternet_render_repair=retained; Max-Age=1800; Path=/; SameSite=Lax; Secure';
@@ -4417,6 +4420,23 @@ fn browser_snapshot(app: tauri::AppHandle) -> Result<Snapshot,String> { snapshot
 
 #[tauri::command]
 async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Result<Value, String> {
+    if name=="render-compat-get" {
+        #[cfg(windows)]
+        {return Ok(render_compat::status(&app));}
+        #[cfg(not(windows))]
+        {return Ok(json!({"supported":false,"saved":false,"current":false,"restartRequired":false}));}
+    }
+    if name=="render-compat-set" {
+        #[cfg(windows)]
+        {return render_compat::save(&app,value.as_bool().ok_or("Expected true or false")?);}
+        #[cfg(not(windows))]
+        {return Err("This WebView2 setting is only available on Windows".into());}
+    }
+    if name=="render-surface-repair" {
+        schedule_surface_restore(&app);
+        schedule_page_bounds_reconciliation(&app);
+        return Ok(json!({"ok":true}));
+    }
     if matches!(name.as_str(),"site-media-get"|"site-media-set"|"site-media-revoke"){
         let (id,url,private)={
             let browser=app.state::<Mutex<Browser>>();
@@ -6983,6 +7003,11 @@ fn main() {
         .manage(LocalMediaPath::default())
         .invoke_handler(tauri::generate_handler![browser_action, browser_snapshot])
         .setup(|app| {
+            // Before any WebView2 controller is initialized, select the
+            // user's optional GPU troubleshooting mode for this process.
+            // The default uses hardware acceleration and existing profiles.
+            #[cfg(windows)]
+            render_compat::configure(app.handle());
             let real_launch=new_window_startup().is_none()&&
                 !std::env::args().any(|arg|
                     arg.starts_with("--minternet-")&&(arg.ends_with("-smoke")||arg.ends_with("-reopen")));

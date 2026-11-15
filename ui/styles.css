@@ -2249,3 +2249,14 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { di
 .bookmark-import-actions>label:not(.bookmark-import-trigger){font-size:10px;display:flex;align-items:center;gap:6px;}
 .bookmark-import-actions select{max-width:min(250px,100%);min-height:26px;border:1px solid #5e6987;border-radius:5px;background:#141e35;color:#e9ecff;font-size:10px;}
 #bookmarkImportStatus{color:#abbce0;}
+
+/* Optional GPU troubleshooting mode - hardware accelerated by default. */
+.render-compat-settings{display:flex;flex-direction:column;gap:7px;
+  padding:9px;border-top:1px solid #39445e;}
+.render-compat-settings strong{font-size:11px;color:#e8edff;}
+.render-compat-settings small{font-size:10px;line-height:1.5;color:#bac4da;}
+.render-compat-settings label{font-size:10px;display:flex;flex-direction:column;gap:5px;}
+.render-compat-settings select,.render-compat-settings button{
+  min-height:28px;background:#171e32;color:#e8edff;border:1px solid #5c6886;
+  border-radius:5px;font-size:11px;padding:4px 7px;cursor:pointer;}
+#renderCompatibilityStatus{overflow-wrap:anywhere;}

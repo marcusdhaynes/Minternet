@@ -26,6 +26,7 @@
   <script src="./find-page.js" defer></script>
   <script src="./chrome-tools.js" defer></script>
   <script src="./browser-settings.js" defer></script>
+  <script src="./render-compat-ui.js" defer></script>
   <script src="./volume-ui.js" defer></script>
   <script src="./media-launch.js" defer></script>
   <script src="./credential-import.js" defer></script>
@@ -247,6 +248,18 @@
         </div>
       </section>
       <small id="browserPreferencesStatus" class="browser-preferences-status" aria-live="polite" hidden></small>
+      <section class="render-compat-settings" aria-label="WebView2 Rendering">
+        <strong>Website Rendering</strong>
+        <small>Hardware acceleration is faster and recommended. If your pages are repeatedly blank or white, try the software rendering compatibility mode. Restart Minternet to apply. Your login sessions and bookmark profile are not reset.</small>
+        <label for="renderCompatibilityMode">Rendering Mode
+          <select id="renderCompatibilityMode">
+            <option value="hardware" selected>Hardware Accelerated (Recommended)</option>
+            <option value="software">Compatibility Mode (Software)</option>
+          </select>
+        </label>
+        <button type="button" id="renderSurfaceRepair">Repair Current Page Display</button>
+        <small id="renderCompatibilityStatus" role="status" aria-live="polite"></small>
+      </section>
       <section class="tab-layout-settings" aria-label="Tab Bar Appearance">
         <div class="tab-layout-settings-title"><strong>Tab Bar Appearance</strong><small>Set tab width and equal left/right padding in pixels; changes apply immediately.</small></div>
         <table class="tab-size-table" aria-label="Tab widths and horizontal padding">
