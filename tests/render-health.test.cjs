@@ -67,6 +67,7 @@ test('healthy blank DOM reloads its existing WebView2 controller once before ful
   assert.match(recovery,/if reason=="blank-document"/);
   assert.match(recovery,/if view.reload\(\).is_ok\(\)/);
   assert.ok(recovery.indexOf('view.reload().is_ok()') < recovery.indexOf('let _=view.close()'));
-  assert.match(health,/claim\(id,&current\.0\)/.test(recovery) ? recovery : '',/claim/);
+  assert.match(recovery,/render_health::claim\(id,&current\.0\)/);
+  assert.match(health,/"reloaded"/);
   assert.match(main,/proof-flags:\{flags\}/);
 });
