@@ -225,6 +225,11 @@ function renderSiteIcon(tab,slot){
   }
   slot.classList.remove('secret-tab-icon','private-eye');
   slot.removeAttribute('data-site-key');
+  if(tab.tor && /^https?:\/\//i.test(tab.url)){
+    // No direct-connection favicon discovery from trusted browser chrome.
+    slot.append(iconFallback('Tor'));
+    return;
+  }
   if(!tab.url||!/^https?:\/\//i.test(tab.url)){
     if(!tab.url||tab.url==='about:blank'){
       const image=document.createElement('img');
@@ -276,7 +281,7 @@ if(window.__TAURI__?.event){
 function buildTab(tab, active) {
   const root = document.createElement('div');
   root.className = 'tab' + (active ? ' selected' : '') +
-    (tab.private ? ' private-tab' : '') + (tab.pinned ? ' pinned-tab' : '') +
+    (tab.private ? ' private-tab' : '') + (tab.tor ? ' tor-tab' : '') + (tab.pinned ? ' pinned-tab' : '') +
     (tab.suspended ? ' unloaded-tab' : '') + (tab.secretTab?' secret-tab':'');
   root.setAttribute('role', 'tab');
   root.setAttribute('aria-selected', String(active));
@@ -294,7 +299,8 @@ function buildTab(tab, active) {
     ?(window.minternetSecretTabNames?.get(tab.id)||'Secret Tab')
     :(tab.title || 'New Tab');
   choose.append(symbol, text);
-  if(tab.private){const eye=document.createElement('span');eye.className='tab-private-eye';eye.innerHTML=PRIVATE_EYE;choose.append(eye);}
+  if(tab.tor){const mark=document.createElement('span');mark.className='tab-tor-mark';mark.textContent='🧅';mark.setAttribute('aria-label','Tor-routed tab');choose.append(mark);}
+  else if(tab.private){const eye=document.createElement('span');eye.className='tab-private-eye';eye.innerHTML=PRIVATE_EYE;choose.append(eye);}
   const close = document.createElement('button');
   close.className = 'tab-close';
   close.textContent = '×';
@@ -357,7 +363,7 @@ function render(data) {
       const el = tabs.children[i];
       const activeTab = tab.id === data.activeId;
       el.className = 'tab' + (activeTab ? ' selected' : '') +
-        (tab.private ? ' private-tab' : '')+(tab.pinned ? ' pinned-tab' : '')+(tab.suspended ? ' unloaded-tab' : '')+
+        (tab.private ? ' private-tab' : '')+(tab.tor ? ' tor-tab' : '')+(tab.pinned ? ' pinned-tab' : '')+(tab.suspended ? ' unloaded-tab' : '')+
         (tab.secretTab?' secret-tab':'');
       el.setAttribute('aria-selected', String(activeTab));
       el.title = tabTooltip(tab);
@@ -367,6 +373,9 @@ function render(data) {
     }
   }
   document.documentElement.classList.toggle('private-active',Boolean(active?.private));
+  document.documentElement.classList.toggle('tor-active',Boolean(active?.tor));
+  byId('tor').classList.toggle('tor-selected',Boolean(active?.tor));
+  byId('address').title=active?.tor?'Tor-routed tab; not equivalent to Tor Browser fingerprint protection':'';
   if(isNewTab){
     requestAnimationFrame(()=>{
       const address=byId('address');
@@ -405,9 +414,19 @@ api.onFocusAddress(() => byId('address').focus());
 const bind = (id, name) => byId(id).addEventListener('click', () => {if(name==='reload')byId('reload').classList.add('refresh-spinning');void command(name);});
 for (const [id, name] of [
   ['newTab','new'],['newPrivate','new-private'],['dashboardButton','deselect'],
-  ['reload','reload'],['tor','tor'],
+  ['reload','reload'],
   ['minimize','minimize'],['maximize','maximize'],['quit','quit']
 ]) bind(id,name);
+byId('tor').addEventListener('click',async()=>{
+  const button=byId('tor');
+  if(button.disabled)return;
+  button.disabled=true;
+  button.classList.add('tor-connecting');
+  button.setAttribute('aria-busy','true');
+  toast('Connecting to Tor…');
+  try{const result=await command('tor');if(result?.tor)focusNewTabAddress();}
+  finally{button.disabled=false;button.classList.remove('tor-connecting');button.removeAttribute('aria-busy');}
+});
 byId('addressForm').addEventListener('submit', event => {
   event.preventDefault();
   const field=byId('address');
