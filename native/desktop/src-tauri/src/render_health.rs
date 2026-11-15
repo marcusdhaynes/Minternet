@@ -13,7 +13,7 @@ use webview2_com::Microsoft::Web::WebView2::Win32::{
  COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE,
  COREWEBVIEW2_PROCESS_FAILED_KIND_GPU_PROCESS_EXITED
 };
-use windows::Win32::Foundation::BOOL;
+use windows::core::BOOL;
 
 // This runs only in the currently active document, at most twice after a
 // finished navigation. It returns a boolean. No DOM text is returned to the
@@ -170,11 +170,12 @@ pub fn schedule_blank_probe(app:&tauri::AppHandle,id:u32,expected_url:String){
                     record(&callback,id,"blank-document");
                     // Defer teardown out of the COM ExecuteScript callback.
                     let closer=callback.clone();
+                    let recovery_address=address.clone();
                     std::thread::spawn(move||{
                         std::thread::sleep(Duration::from_millis(200));
                         let app=closer.clone();
                         let _=closer.run_on_main_thread(move||{
-                            super::recover_stalled_site_if_url(&app,id,&address,
+                            super::recover_stalled_site_if_url(&app,id,&recovery_address,
                                 "blank-document");
                         });
                     });

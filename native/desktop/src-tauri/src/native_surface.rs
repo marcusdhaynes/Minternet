@@ -2,7 +2,8 @@
 //! cached Webview::position/size can be correct while WebView2 displays an
 //! offset, undersized white/black compositor rectangle.
 #![cfg(windows)]
-use windows::Win32::Foundation::{BOOL,HWND,POINT,RECT};
+use windows::core::BOOL;
+use windows::Win32::Foundation::{HWND,POINT,RECT};
 use windows::Win32::Graphics::Gdi::ScreenToClient;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowRect, SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER,

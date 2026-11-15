@@ -2370,7 +2370,7 @@ fn recover_stalled_site_if_url(app:&tauri::AppHandle,id:u32,
                     tab.loading=false;
                     tab.checking_unload=false;
                 }
-            }
+            };
         }
         // The old view and the replacement share the same tab-{id} label.
         // A cache hit would otherwise incorrectly skip Show() and retain an
@@ -2966,7 +2966,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                                 "(document.body?.innerText?.includes('Example Domain')===true)&&document.cookie.includes('minternet_render_repair=retained')&&localStorage.getItem('minternet_render_repair')==='retained'",
                                 move|proof|{
                                     if proof.trim()=="true"{
-                                        let _=std::fs::write(target,
+                                        let _=std::fs::write(&target,
                                           "PASS: recovered empty DOM and retained real WebView2 cookie plus localStorage");
                                     }
                                 }
