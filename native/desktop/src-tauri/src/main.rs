@@ -4459,6 +4459,43 @@ fn browser_snapshot(app: tauri::AppHandle) -> Result<Snapshot,String> { snapshot
 
 #[tauri::command]
 async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Result<Value, String> {
+    // Tor is deliberately opt-in. Never create a Tor WebView while bootstrapping,
+    // and never replace a failed Tor connection with a direct network route.
+    if name=="tor-status" {
+        #[cfg(any(windows,target_os="linux"))]
+        {return Ok(tor_transport::status());}
+        #[cfg(not(any(windows,target_os="linux")))]
+        {return Ok(json!({"embedded":false,"bootstrapped":false,"warning":"Tor tabs are not enabled on this platform"}));}
+    }
+    if name=="tor" {
+        #[cfg(not(any(windows,target_os="linux")))]
+        {return Err("Tor is currently available only on Windows and Linux desktop builds".into());}
+        #[cfg(any(windows,target_os="linux"))]
+        {
+            let id={
+                let state=app.state::<Mutex<Browser>>();
+                let mut b=state.lock().map_err(|e|e.to_string())?;
+                let id=b.add(true)?;
+                if let Some(tab)=b.tabs.iter_mut().find(|t|t.id==id){tab.tor=true;}
+                id
+            };
+            if let Err(error)=tor_transport::prepare(id).await {
+                tor_transport::release(id);
+                if let Ok(mut b)=app.state::<Mutex<Browser>>().lock(){
+                    b.tabs.retain(|t|t.id!=id);
+                    if b.active_id==id{b.active_id=0;}
+                }
+                display_active(&app);
+                notify(&app);
+                return Err(error);
+            }
+            display_active(&app);
+            focus_address_bar(&app);
+            notify(&app);
+            return Ok(json!({"ok":true,"tor":true,"tabId":id,
+                "message":"Tor circuit ready. This is Tor-routed Minternet, not the hardened Tor Browser."}));
+        }
+    }
     if name=="render-compat-get" {
         #[cfg(windows)]
         {return Ok(render_compat::status(&app));}
