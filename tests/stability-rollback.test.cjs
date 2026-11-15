@@ -61,9 +61,9 @@ test('Crash recovery preserves tabs and does not automatically load a previously
   assert.match(lifecycle,/scan_prior\(dir,pid,is_running\)/);
   assert.match(lifecycle,/fs::remove_file\(dir.join\(OLD_MARKER\)\)/);
   const updater=read('native/desktop/src-tauri/src/portable_updater.rs');
-  assert.match(updater,/super::clear_crash_guard\\(&handle\\);/);
-  assert.match(updater,/window\\.close\\(\\)\\.is_ok\\(\\)/);
-  assert.match(updater,/closing\\.exit\\(0\\)/);
+  assert.match(updater,/super::clear_crash_guard\(&handle\);/);
+  assert.match(updater,/window\.close\(\)\.is_ok\(\)/);
+  assert.match(updater,/closing\.exit\(0\)/);
   assert.match(main,/--minternet-cookie-set-smoke/);
   assert.match(main,/--minternet-cookie-check-smoke/);
   assert.match(main,/minternet_ci_profile_v1/);
