@@ -300,15 +300,15 @@
         <strong>Import Bookmarks</strong>
         <small>Merge is the default: all existing bookmarks remain. Choose whether imported bookmarks are added after or before them. Replace is optional and requires confirmation. Exported Bookmark Bar folders and nested subfolders retain their structure.</small>
         <div class="bookmark-import-actions">
-          <label class="bookmark-import-trigger" for="importBookmarksFile">Import Bookmarks
-            <input id="importBookmarksFile" type="file" accept=".html,.htm,.json,.url,.txt,text/html,application/json" aria-label="Choose a bookmark export file">
-          </label>
           <label for="bookmarkImportMode">Import Order
             <select id="bookmarkImportMode" aria-label="Bookmark import mode and order">
               <option value="merge-after" selected>Merge — Add After Existing</option>
               <option value="merge-before">Merge — Add Before Existing</option>
               <option value="replace">Replace Existing Bookmarks</option>
             </select>
+          </label>
+          <label class="bookmark-import-trigger" for="importBookmarksFile">Import Bookmarks
+            <input id="importBookmarksFile" type="file" accept=".html,.htm,.json,.url,.txt,text/html,application/json" aria-label="Choose a bookmark export file">
           </label>
         </div>
         <small id="bookmarkImportStatus" role="status" aria-live="polite"></small>
