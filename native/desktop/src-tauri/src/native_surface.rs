@@ -3,8 +3,9 @@
 //! offset, undersized white/black compositor rectangle.
 #![cfg(windows)]
 use windows::Win32::Foundation::{HWND,POINT,RECT};
+use windows::Win32::Graphics::Gdi::ScreenToClient;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetWindowRect, ScreenToClient, SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER,
+    GetWindowRect, SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER,
 };
 use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller;
 
@@ -15,7 +16,7 @@ fn actual(hwnd:HWND,parent:HWND)->Option<Bounds>{
     let mut rect=RECT::default();
     if unsafe{GetWindowRect(hwnd,&mut rect)}.is_err(){return None;}
     let mut point=POINT{x:rect.left,y:rect.top};
-    if unsafe{ScreenToClient(parent,&mut point)}.is_err(){return None;}
+    if !unsafe{ScreenToClient(parent,&mut point)}.as_bool(){return None;}
     Some([point.x,point.y,rect.right-rect.left,rect.bottom-rect.top])
 }
 fn different(a:Bounds,b:Bounds)->bool{
