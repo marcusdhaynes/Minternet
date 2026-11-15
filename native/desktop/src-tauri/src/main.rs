@@ -17,6 +17,8 @@ mod portable_updater;
 mod session_lifecycle;
 mod auth_popup;
 mod passkey_support;
+#[cfg(any(windows,target_os="linux"))]
+mod tor_transport;
 use base64::Engine as _;
 use rand::{rngs::OsRng,RngCore};
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -242,6 +244,7 @@ struct Tab {
     title: String,
     url: String,
     private: bool,
+    tor: bool,
     pinned: bool,
     audio_playing: bool,
     audio_muted: bool,
@@ -271,6 +274,7 @@ struct PublicTab {
     title: String,
     url: String,
     private: bool,
+    tor: bool,
     pinned: bool,
     audio_playing: bool,
     audio_muted: bool,
@@ -850,7 +854,7 @@ impl Browser {
         let id = self.next_id;
         self.next_id += 1;
         self.tabs.push(Tab {
-            id, title: "New Tab".into(), url: HOME.into(), private,
+            id, title: "New Tab".into(), url: HOME.into(), private,tor:false,
             pinned: false, audio_playing:false, audio_muted:false,
             view: None, history: vec![HOME.into()], at: 0,
             inactive_since: None, loading: false, checking_unload: false,
@@ -885,7 +889,7 @@ impl Browser {
                 id:t.id,
                 title:if t.secret_id.is_some(){"Secret Tab".into()}else{t.title.clone()},
                 url:if t.secret_id.is_some(){HOME.into()}else{t.url.clone()},
-                private:t.private,pinned:t.pinned,audio_playing:t.audio_playing,
+                private:t.private,tor:t.tor,pinned:t.pinned,audio_playing:t.audio_playing,
                 audio_muted:t.audio_muted,loading:t.loading,
                 can_back:t.secret_id.is_none() && t.at>0,
                 can_forward:t.secret_id.is_none() && t.at+1<t.history.len(),
@@ -2586,18 +2590,34 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     // prevents File/DataTransfer drops on ChatGPT, Muse, upload targets,
     // sortable lists, editors and ordinary third-party web applications.
     // Browser tab reordering remains scoped to the trusted chrome view.
+    let tor=app.state::<Mutex<Browser>>().lock().map_err(|e|e.to_string())?
+        .tabs.iter().find(|tab|tab.id==id).is_some_and(|tab|tab.tor);
+    #[cfg(not(any(windows,target_os="linux")))]
+    if tor{return Err("Tor network integration is not supported on this platform".into());}
     let builder=WebviewBuilder::new(label.clone(),url)
-        .incognito(private)
+        .incognito(private || tor)
         // A dark native fallback avoids a seizure-like white flash before
         // the website commits its own first painted frame.
         .background_color(tauri::webview::Color(13,17,29,255))
         .disable_drag_drop_handler();
+    // A Tor tab uses a distinct profile and per-tab Arti circuit. Never
+    // permit its WebView2 controller to exist without a functioning proxy.
+    #[cfg(any(windows,target_os="linux"))]
+    let builder=if tor{
+        let dir=app.path().app_local_data_dir().map_err(|e|e.to_string())?
+            .join("tor-ephemeral-profiles").join(format!("tab-{id}"));
+        builder.data_directory(dir).proxy_url(tor_transport::proxy_url(id)?)
+    }else{builder};
+    #[cfg(windows)]
+    let builder=if tor{
+        builder.additional_browser_args("--force-webrtc-ip-handling-policy=disable_non_proxied_udp --disable-quic --disable-background-networking --no-pings")
+    }else{builder};
     // Opt in to a separate WebView2 site profile only after a user imports
     // an enabled extension. Keeps trusted browser chrome, credentials and
     // its existing profile outside third-party extension scope. Without an
     // imported extension existing cookies and sessions stay untouched.
     #[cfg(windows)]
-    let builder=if !private && extensions::any_enabled(app){
+    let builder=if !private && !tor && extensions::any_enabled(app){
         builder.browser_extensions_enabled(true)
             .data_directory(extensions::isolated_site_dir(app)?)
             .extensions_path(extensions::active_dir(app)?)
@@ -2807,6 +2827,8 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
             let opener_url=for_popup.state::<Mutex<Browser>>().lock().ok()
                 .and_then(|browser|browser.tabs.iter().find(|tab|tab.id==id)
                     .map(|tab|tab.url.clone())).unwrap_or_default();
+            // A popup inheriting an ordinary profile could bypass Tor.
+            if tor{return NewWindowResponse::Deny;}
             if auth_popup::preserve_opener(&opener_url,&url){
                 // A managed Tauri popup receives the opener's WebView2
                 // environment via window_features. That gives window.open
@@ -3871,6 +3893,7 @@ fn open_site_popup_tab(app:&tauri::AppHandle,opener:u32,target:tauri::Url)
         let state=app.state::<Mutex<Browser>>();
         let mut b=state.lock().map_err(|e|e.to_string())?;
         let original=b.tabs.iter().find(|t|t.id==opener).ok_or("Opener tab closed")?;
+        if original.tor{return Err("Tor popup blocked: cannot open using an ordinary connection".into());}
         let private=original.private||original.secret_id.is_some();
         (b.active_id,b.add_after(private,opener,false)?)
     };
@@ -6495,7 +6518,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 let state=app.state::<Mutex<Browser>>();
                 let mut b=state.lock().map_err(|e|e.to_string())?;
                 let tab=b.tabs.iter_mut().find(|t|t.id==id).ok_or("Tab not found")?;
-                if tab.secret_id.is_some(){return Err("Secret tabs cannot be pinned".into());}
+                if tab.secret_id.is_some()||tab.tor{return Err("Secret and Tor tabs cannot be pinned".into());}
                 tab.pinned=match name.as_str(){
                     "pin"=>true,"unpin"=>false,_=>!tab.pinned
                 };
@@ -6622,6 +6645,8 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             app.state::<AuthorizedSecrets>().items.lock().map_err(|e|e.to_string())?
                 .retain(|id,_|!wanted.contains(id));
             for label in labels {if let Some(wv)=app.get_webview(&label){let _=wv.close();}}
+            #[cfg(any(windows,target_os="linux"))]
+            for id in &wanted {tor_transport::release(*id);}
             prune_splits(&app);
             save_pinned(&app)?;
             activated(&app)?;
@@ -6649,6 +6674,8 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             if let Some(label)=label {
                 if let Some(wv)=app.get_webview(&label) { let _=wv.close(); }
             }
+            #[cfg(any(windows,target_os="linux"))]
+            tor_transport::release(id);
             prune_splits(&app);
             save_pinned(&app)?;
             activated(&app)?;
@@ -6888,7 +6915,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 let state = app.state::<Mutex<Browser>>();
                 let mut b = state.lock().map_err(|e|e.to_string())?;
                 let t = b.active_mut().ok_or("No tab")?;
-                if t.secret_id.is_some(){return Err("Secret tabs cannot change privacy mode".into());}
+                if t.secret_id.is_some()||t.tor{return Err("Tor tabs cannot switch to ordinary browsing".into());}
                 let old = t.view.take();
                 t.private = !t.private;
                 t.history = vec![t.url.clone()];
@@ -6924,7 +6951,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             return Ok(json!({"message": "Chrome and Firefox stores are browse-only in Minternet. WebView2 cannot run their one-click installers or Firefox XPI files. Do not install unknown extension packages."}));
         }
         "tor" => {
-            return Ok(json!({"message": "Tor is not integrated. Do not treat this native-webview prototype as Tor Browser."}));
+            return Ok(json!({"message":"Tor transport is initializing; retry in a moment."}));
         }
         "restore-window" => {
             let window=app.get_window("main").ok_or("Window unavailable")?;
