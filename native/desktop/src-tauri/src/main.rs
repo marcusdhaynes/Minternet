@@ -2625,7 +2625,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
         // destinations even when a proxy is configured. The SOCKS handler
         // rejects IP-literal and localhost targets rather than forwarding.
         let proxy=tor_transport::proxy_url(id)?;
-        builder.additional_browser_args(format!(
+        builder.additional_browser_args(&format!(
             "--proxy-server={} --proxy-bypass-list=<-loopback> --force-webrtc-ip-handling-policy=disable_non_proxied_udp --disable-quic --disable-background-networking --no-pings",proxy.as_str()))
     }else{builder};
     let builder=if tor{
