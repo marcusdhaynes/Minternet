@@ -1002,6 +1002,9 @@ fn restore_pinned(app: &tauri::AppHandle) {
 /* Restore the full non-private browsing session, including ordinary tabs.
    Private tabs intentionally never enter persistent storage. */
 fn session_file(app: &tauri::AppHandle) -> Result<PathBuf,String> {
+    if std::env::args().any(|a|a=="--minternet-last-active-smoke"){
+        return Ok(std::env::temp_dir().join("minternet-last-active-fixture.v1.json"));
+    }
     let dir=app.path().app_data_dir().map_err(|e|e.to_string())?;
     Ok(dir.join("browser-session.v1.json"))
 }
@@ -1060,7 +1063,8 @@ fn save_session(app: &tauri::AppHandle) -> Result<(),String> {
     Ok(())
 }
 fn restore_session(app: &tauri::AppHandle) {
-    if std::env::args().any(|a|a.starts_with("--minternet-") && a.ends_with("smoke")){
+    if !std::env::args().any(|a|a=="--minternet-last-active-smoke") &&
+        std::env::args().any(|a|a.starts_with("--minternet-") && a.ends_with("smoke")){
         restore_pinned(app);return;
     }
     let Ok(path)=session_file(app) else {restore_pinned(app);return};
@@ -3296,6 +3300,32 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                         event.url().as_str().to_string(),2900);
                     if is_real_page_url(event.url().as_str()) {
                         apply_volume_to_site(&for_load,id,view.label(),true);
+                    }
+                    // CI: restore the last selected real HTTPS tab from an
+                    // isolated session file and confirm actual DOM rendering.
+                    // Never writes to the user's normal browser-session file.
+                    #[cfg(windows)]
+                    if std::env::args().any(|a|a=="--minternet-last-active-smoke") &&
+                        event.url().host_str()==Some("example.com") &&
+                        event.url().query_pairs().any(|(k,v)|
+                            k=="minternet-last-active"&&v=="selected") {
+                        let expected=event.url().as_str().to_string();
+                        let current=for_load.state::<Mutex<Browser>>().lock().ok()
+                            .and_then(|b|b.active().map(|t|t.id==id && t.url==expected))
+                            .unwrap_or(false);
+                        if current{
+                            let _=view.eval_with_callback(
+                                r#"Number(document.title==='Example Domain' &&
+                                    (document.body?.innerText||'').includes('Example Domain'))"#,
+                                move|result|{
+                                    if result.trim()=="1"{
+                                        let marker=std::env::temp_dir().join(format!(
+                                            "minternet-last-active-{}.ok",std::process::id()));
+                                        let _=std::fs::write(marker,
+                                            "PASS: last active tab selected and rendered from saved session");
+                                    }
+                                });
+                        }
                     }
                     // CI: write/read a persistent cookie and localStorage in
                     // actual HTTPS WebView2 across a native EXE replacement.
@@ -7547,7 +7577,8 @@ fn main() {
             if let Some((_,private))=new_window_target.as_ref(){
                 let state=app.state::<Mutex<Browser>>();
                 state.lock().map_err(|e|e.to_string())?.add(*private)?;
-            }else if smoke && !std::env::args().any(|a|a=="--minternet-pin-reopen-smoke") {
+            }else if smoke && !std::env::args().any(|a|
+                a=="--minternet-pin-reopen-smoke"||a=="--minternet-last-active-smoke") {
                 let store=app.state::<Mutex<Browser>>();
                 let mut b=store.lock().map_err(|e|e.to_string())?;
                 b.add(false)?;
