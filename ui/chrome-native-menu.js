@@ -284,6 +284,9 @@
         row.dataset.bookmarkKind=spec.folderId?'folder':'link';
         row.classList.add('bookmark-popup-item');
         row.draggable=true;
+        // Ctrl/Cmd-click or hold selects multiple items in flyouts just as it
+        // does on the Bookmark Bar and in the manager.
+        ctrl()?.bindSelectable?.(bookmarkId,row);
         let suppressDragClickUntil=0;
         row.addEventListener('dragstart',event=>{
           suppressDragClickUntil=Infinity;
