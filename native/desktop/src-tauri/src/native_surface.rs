@@ -75,7 +75,11 @@ pub fn ensure_visible(view:&tauri::Webview){
         let controller=native.controller();
         let mut visible=BOOL::default();
         if unsafe{controller.IsVisible(&mut visible)}.is_ok() && !visible.as_bool(){
-            let _=unsafe{controller.SetIsVisible(true)};
+            if unsafe{controller.SetIsVisible(true)}.is_ok(){
+                // The restored window can still hold an old DirectComposition
+                // surface after its controller silently became hidden.
+                let _=unsafe{controller.NotifyParentWindowPositionChanged()};
+            }
         }
     });
 }
