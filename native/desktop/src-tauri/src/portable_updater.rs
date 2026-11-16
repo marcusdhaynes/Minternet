@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 static RUNNING:AtomicBool=AtomicBool::new(false);
 const API:&str="https://api.github.com/repos/marcusdhaynes/Minternet/releases/latest";
+const RELEASE_LIST_API:&str="https://api.github.com/repos/marcusdhaynes/Minternet/releases?per_page=100";
 const MAX_EXE:u64=50_000_000;
 
 // Small CI-only marker. The EXE itself reports the compiled build identity,
@@ -64,6 +65,44 @@ fn latest_asset(data:&Value)->Result<(String,String,String),String>{
     let checksum=checksum.ok_or("Release is missing SHA256SUMS.txt")?;
     Ok((prefix,binary,checksum))
 }
+fn installable(release:&Value)->bool{
+    if release.get("draft").and_then(Value::as_bool)==Some(true) ||
+       release.get("prerelease").and_then(Value::as_bool)==Some(true){return false;}
+    let Some(tag)=release.get("tag_name").and_then(Value::as_str) else{return false};
+    if !tag.starts_with('v')||version_key(tag).is_none(){return false;}
+    let expected=format!("Minternet-Windows-Portable-{tag}.exe");
+    let Some(assets)=release.get("assets").and_then(Value::as_array) else{return false};
+    let trusted="https://github.com/marcusdhaynes/Minternet/releases/download/";
+    let valid=|name:&str|assets.iter().any(|asset|
+        asset.get("name").and_then(Value::as_str)==Some(name) &&
+        asset.get("browser_download_url").and_then(Value::as_str)
+            .is_some_and(|url|url.starts_with(trusted))
+    );
+    valid(&expected)&&valid("SHA256SUMS.txt")
+}
+fn newest_installable(releases:&[Value])->Option<&Value>{
+    releases.iter().filter(|value|installable(value)).max_by_key(|value|
+        value.get("tag_name").and_then(Value::as_str).and_then(version_key)
+    )
+}
+fn fetch_newest_published()->Result<Value,String>{
+    // The GitHub "latest" flag can lag newer builds when multiple runners
+    // finish out of order. Compare actual version keys, not publication time.
+    let mut candidates=Vec::new();
+    let mut errors=Vec::new();
+    for endpoint in [API,RELEASE_LIST_API]{
+        match remote(endpoint).and_then(|response|response.into_json::<Value>()
+            .map_err(|err|format!("Invalid release metadata: {err}"))){
+            Ok(Value::Array(items))=>candidates.extend(items),
+            Ok(value)=>candidates.push(value),
+            Err(error)=>errors.push(error),
+        }
+    }
+    newest_installable(&candidates).cloned().ok_or_else(||
+        if errors.len()==2{"GitHub Releases could not be checked".to_string()}
+        else{"No verified Windows release with EXE and SHA256SUMS is published".to_string())
+    )
+}
 fn remote(url:&str)->Result<ureq::Response,String>{
     ureq::get(url)
         .set("User-Agent","Minternet-Portable-Updater")
@@ -111,11 +150,7 @@ fn prepare(app:&AppHandle)->Result<(),String>{
         format!("Cannot replace the EXE in its present folder: {e}"))?;
     fs::remove_file(&probe).map_err(|e|e.to_string())?;
     report(app,"checking","Checking published Windows release…");
-    let release:Value=remote(API)?.into_json().map_err(|e|format!("Invalid release metadata: {e}"))?;
-    if release.get("draft").and_then(Value::as_bool)==Some(true) ||
-        release.get("prerelease").and_then(Value::as_bool)==Some(true){
-        return Err("Latest release is not a published stable update".into());
-    }
+    let release=fetch_newest_published()?;
     let (name,url,hash_url)=latest_asset(&release)?;
     report(app,"downloading","Downloading verified Windows update…");
     let hashes=remote(&hash_url)?.into_string()
@@ -385,6 +420,21 @@ mod tests{
         assert!(version_key("v0.3.0-build.21-g12345678")>version_key("0.3.0-build.20-gabcdef12"));
         assert!(version_key("v0.4.0")>version_key("0.3.0-build.999"));
         assert!(version_key("bad").is_none());
+    }
+    #[test] fn selects_highest_stable_windows_build_not_last_published(){
+        let make=|n:u32|json!({
+            "tag_name":format!("v0.3.0-build.{n}-g12345678"),
+            "assets":[
+              {"name":format!("Minternet-Windows-Portable-v0.3.0-build.{n}-g12345678.exe"),
+               "browser_download_url":format!(
+                "https://github.com/marcusdhaynes/Minternet/releases/download/v0.3.0-build.{n}-g12345678/minternet.exe")},
+              {"name":"SHA256SUMS.txt",
+               "browser_download_url":"https://github.com/marcusdhaynes/Minternet/releases/download/v0.3.0-build/checksums.txt"}
+            ]
+        });
+        let candidates=vec![make(101),make(104),make(102)];
+        let highest=newest_installable(&candidates).unwrap();
+        assert_eq!(highest["tag_name"],"v0.3.0-build.104-g12345678");
     }
     #[test] fn checksum_exact_match(){
         assert_eq!(expected_hash(&format!("{}  Minternet.exe", "a".repeat(64)),"Minternet.exe").unwrap(),"a".repeat(64));
