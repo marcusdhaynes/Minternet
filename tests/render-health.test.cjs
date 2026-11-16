@@ -24,7 +24,8 @@ test('a truly blank SPA gets one bounded recovery without clearing user data',()
  assert.match(src,/document\.visibilityState/);
  assert.match(src,/visibleText<25/);
  assert.match(src,/hasUsableEditor/);
- assert.match(src,/if flags!=127\{return;\}/);
+ assert.match(src,/if flags!=127\{hits\.store\(0,Ordering::Release\);return;\}/);
+ assert.match(src,/if !smoke && hits\.fetch_add\(1,Ordering::AcqRel\)==0\{return;\}/);
  assert.match(src,/smoke_stage\(&format!\("probe-flags:\{flags\}"\)\)/);
  assert.match(src,/if map\.get\(&id\)\.is_some_and/);
  assert.match(main,/recover_stalled_site_if_url/);
