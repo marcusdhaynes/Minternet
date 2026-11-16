@@ -3483,7 +3483,11 @@ fn schedule_wgu_login_autofill(app:&tauri::AppHandle){
     let owner=app.clone();
     std::thread::spawn(move||{
         loop{
-            std::thread::sleep(Duration::from_secs(20));
+            // WGU can replace its form within the same document, without
+            // PageLoadEvent::Finished. Recheck on a short cadence instead of
+            // leaving a blank form for 20 seconds. Actual DOM edits remain
+            // conditional on empty fields and the exact target origin.
+            std::thread::sleep(Duration::from_secs(4));
             if owner.get_window("main").is_none(){break;}
             if !vault_section_allowed(&owner,"logins"){continue;}
             let worker=owner.clone();
@@ -3492,8 +3496,9 @@ fn schedule_wgu_login_autofill(app:&tauri::AppHandle){
                     let state=worker.state::<Mutex<Browser>>();
                     let Ok(browser)=state.lock()else{return};
                     let Some(tab)=browser.active()else{return};
-                    if tab.private||tab.secret_id.is_some() ||
-                       !tab.url.starts_with("https://access.wgu.edu/"){return;}
+                    if tab.private||tab.secret_id.is_some() || tab.loading ||
+                       password_vault::origin(&tab.url).ok().as_deref()
+                           !=Some("https://access.wgu.edu"){return;}
                     tab.id
                 };
                 let _=fill_saved_credential(&worker,id,false,None);
