@@ -8,8 +8,10 @@
   const cleanLabel=(value,fallback)=>String(value||fallback).replace(/[\r\n\t]/g,' ').slice(0,80);
   const sep=()=>({item:'Separator'});
   const disabled=text=>({text,enabled:false});
-  const item=(text,action)=>({text:cleanLabel(text,'Untitled'),action});
-  const sub=(text,items)=>({text:cleanLabel(text,'Folder'),items:items.length?items:[disabled('Empty')]});
+  const item=(text,action,bookmarkId=null)=>({text:cleanLabel(text,'Untitled'),action,
+    ...(bookmarkId?{bookmarkId}:{})});
+  const sub=(text,items,folderId=null)=>({text:cleanLabel(text,'Folder'),
+    items:items.length?items:[disabled('Empty')],...(folderId?{folderId}:{})});
   const iconText=node=>{
     const icon=node?.icon||'';
     return (icon.startsWith('data:')||icon.startsWith('https://'))?(node?.kind==='folder'?'📁':'🔖'):icon|| (node?.kind==='folder'?'📁':'🔖');
@@ -25,9 +27,9 @@
     const items=[];
     for(const child of folder.children.slice(0,120)){
       if(child.kind==='folder'){
-        items.push(sub(iconText(child)+'  '+label(child),depth<11?folderItems(child.id,depth+1):[disabled('Maximum folder depth')]));
+        items.push(sub(iconText(child)+'  '+label(child),depth<11?folderItems(child.id,depth+1):[disabled('Maximum folder depth')],child.id));
       }else if(child.kind==='link'){
-        items.push(item(iconText(child)+'  '+label(child),()=>b.openLink(child.url)));
+        items.push(item(iconText(child)+'  '+label(child),()=>b.openLink(child.url),child.id));
       }
     }
     if(folder.children.length>120)items.push(item('More…',()=>b.manager()));
@@ -274,12 +276,25 @@
       row.type='button';row.className='system-popup-row';
       row.textContent=spec.text;
       row.disabled=spec.enabled===false;
+      // Folder flyouts share the same trusted drag identity as the bar.
+      // A remote website cannot call this chrome-only drag controller.
+      const bookmarkId=spec.folderId||spec.bookmarkId;
+      if(bookmarkId){
+        row.dataset.bookmarkId=bookmarkId;
+        row.dataset.bookmarkKind=spec.folderId?'folder':'link';
+        row.classList.add('bookmark-popup-item');
+        row.draggable=true;
+        row.addEventListener('dragstart',event=>
+          ctrl()?.beginDragById?.(bookmarkId,row,event));
+      }
       if(spec.items){
         const arrow=document.createElement('span');arrow.textContent='›';arrow.className='system-popup-arrow';row.append(arrow);
         const child=domMenu(spec.items);
         child.classList.add('system-popup-child');
+        if(spec.folderId)child.dataset.bookmarkFolderId=spec.folderId;
         const host=document.createElement('div');
         host.className='system-popup-has-child';
+        if(spec.folderId)host.dataset.bookmarkFolderId=spec.folderId;
         host.append(row,child);list.append(host);
         row.addEventListener('click',()=>host.classList.toggle('system-popup-open'));
         host.addEventListener('mouseenter',()=>host.classList.add('system-popup-open'));
@@ -303,7 +318,10 @@
     const viewport=await popupViewport();
     if(generation!==menuGeneration)return false;
     const host=document.createElement('div');
-    host.className='system-popup-root'+(options.custom?' minternet-context-menu':'')+(options.compactTab?' compact-tab-menu':'');
+    host.className='system-popup-root'+(options.custom?' minternet-context-menu':'')+
+      (options.compactTab?' compact-tab-menu':'')+
+      (options.bookmarkFolderId?' bookmark-folder-popup':'');
+    if(options.bookmarkFolderId)host.dataset.bookmarkFolderId=options.bookmarkFolderId;
     if(options.custom){
       const header=document.createElement('div');
       header.className='minternet-context-heading';
@@ -355,7 +373,9 @@
       }
       host.append(toolbar);
     }
-    const contents=domMenu(items);host.append(contents);
+    const contents=domMenu(items);
+    if(options.bookmarkFolderId)contents.dataset.bookmarkFolderId=options.bookmarkFolderId;
+    host.append(contents);
     document.body.append(host);fallback=host;
     placePopup(host,point,viewport);
     document.addEventListener('pointerdown',outside,true);
@@ -500,7 +520,7 @@
     folder:(id,button)=>{
       closeFallback();
       return popup(folderItems(id),fromElement(button),
-        {custom:true,heading:'FOLDER'}).then(result=>{
+        {custom:true,heading:'FOLDER',bookmarkFolderId:id}).then(result=>{
         // popup() builds the fallback after clearing the previous menu.
         // Apply the active-folder color only while its menu is displayed.
         if(result&&fallback&&button){
@@ -646,6 +666,8 @@
     inspectBar:()=>barMenu(),
     inspectBookmark:id=>bookmarkMenu(id),
     inspectFolder:id=>folderItems(id),
+    // A move changes the tree; discard stale popups before another drag.
+    dismissBookmarkDrag:()=>{if(fallback?.classList.contains('bookmark-folder-popup'))closeFallback();},
     nativePopupCount:()=>nativePopupCount
   };
   window.minternetMenus=handlers;
