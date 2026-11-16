@@ -51,3 +51,18 @@ test('ChatGPT no longer auto reloads while its layout or compositor is white',()
   assert.match(src,/background_color\(tauri::webview::Color\(13,17,29,255\)\)/);
   assert.match(src,/url\.as_str\(\)=="https:\/\/minternet-surface\.invalid\/__repair"/);
 });
+
+test('startup repair verifies native controller visibility even with correct HWND bounds',()=>{
+  const main=get('native/desktop/src-tauri/src/main.rs');
+  const native=get('native/desktop/src-tauri/src/native_surface.rs');
+  const startup=main.slice(main.indexOf('fn reconcile_visible_child_bounds('),
+    main.indexOf('fn schedule_startup_bounds_reconciliation('));
+  const restoring=main.slice(main.indexOf('fn restore_visible_surfaces('),
+    main.indexOf('fn display_active('));
+  assert.match(startup,/native_surface::ensure_visible\(&view\)/);
+  assert.match(restoring,/native_surface::ensure_visible\(&view\)/);
+  assert.match(native,/fn correct_visibility\(controller:&ICoreWebView2Controller\)->bool/);
+  assert.match(native,/controller\.SetIsVisible\(false\)/);
+  assert.match(native,/observed_hidden&&restored&&visible/);
+  assert.match(native,/correct_visibility\(&controller\)/);
+});
