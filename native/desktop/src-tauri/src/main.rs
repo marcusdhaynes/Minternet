@@ -7,6 +7,7 @@ mod google_account;
 mod firefox_bookmarks;
 mod secret_bookmarks;
 mod media_devices;
+mod site_fullscreen;
 #[cfg(windows)]
 mod native_surface;
 mod site_context_menu;
@@ -1963,6 +1964,7 @@ fn refresh_layout(app: &tauri::AppHandle) {
         return;
     }
     let Ok((width, height)) = dimensions(&window) else { return };
+    if site_fullscreen::apply_layout(app,width,height){return;}
     let (show_home, active_id, active_label) = {
         let state = app.state::<Mutex<Browser>>();
         let Ok(browser) = state.lock() else { return };
@@ -2345,6 +2347,7 @@ fn start_geometry_smoke(app:&tauri::AppHandle,id:u32){
 }
 
 fn display_active(app: &tauri::AppHandle) {
+    site_fullscreen::cancel_if_tab_changed(app);
     let mut targets=HashSet::new();
     {
         // Keep all site views visible and at identical positions while trusted
@@ -3327,6 +3330,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     #[cfg(windows)]
     attach_browser_favicon(app,id,&created);
     media_devices::attach(app,id,&created,private);
+    site_fullscreen::attach(app,id,&created);
     site_context_menu::attach(app,id,&created);
     #[cfg(windows)]
     render_health::attach(app,id,&created);
