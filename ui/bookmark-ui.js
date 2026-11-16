@@ -324,7 +324,7 @@
   // Dragging over a Bookmark Bar folder opens the same cascading folder menu
   // as clicking it, so a bookmark can be placed into an arbitrarily nested
   // folder without first navigating into the bookmark manager.
-  function scheduleFolderHover(event,placement){
+  function scheduleFolderHover(event,placement,external=false){
     const barFolder=placement?.inside && placement.element?.closest('#bookmarkItems');
     const folder=barFolder?placement.parentId:null;
     // Replacing an open flyout removes its source DOM node, which can cancel
@@ -340,7 +340,7 @@
     const button=placement.element;
     folderHoverTimer=setTimeout(()=>{
       folderHoverTimer=null;
-      if(draggedBarId && folderHoverId===folder &&
+      if((external||draggedBarId) && folderHoverId===folder &&
           model.find(data,folder)?.kind==='folder'){
         void window.minternetMenus?.folder?.(folder,button);
       }
@@ -835,12 +835,17 @@
     scrollDragTarget(event);
     // Browser-chrome must never navigate to dropped external files or URLs.
     event.preventDefault();
-    if(parent===null){clearDrop();return;}
+    if(parent===null){clearDrop();cancelFolderHover();return;}
     event.dataTransfer.dropEffect='copy';
+    scheduleFolderHover(event,barPlacement(event),true);
     clearDrop();
     hoverTarget=event.target.closest('.bookmark-item,.bookmark-tree-line,.bookmark-folder-row,.bookmark-popup-item')
       || event.target.closest('#bookmarkManager,#bookmarkBar,#bookmarkFolderMenu,.bookmark-folder-popup');
     hoverTarget?.classList.add('bookmark-drop-target');
+    if(hoverTarget?.classList.contains('bookmark-popup-item') &&
+        hoverTarget.dataset.bookmarkKind==='folder'){
+      hoverTarget.closest('.system-popup-has-child')?.classList.add('system-popup-open');
+    }
     document.documentElement.classList.add('bookmark-drag-over');
   },true);
   document.addEventListener('drop',event=>{
@@ -860,7 +865,7 @@
       ||type==='application/x-bookmark-folder');
     const files=Array.from(dt.files||[]);
     const entries=Array.from(dt.items||[]).map(item=>item.webkitGetAsEntry?.()).filter(Boolean);
-    clearDrop();
+    clearDrop();cancelFolderHover();
     void (async()=>{
       let items=plain;
       if(firefoxFolder&&window.__TAURI__){
@@ -901,7 +906,7 @@
   },true);
   document.addEventListener('dragend',clearDrop,true);
   document.addEventListener('dragleave',event=>{
-    if(!event.relatedTarget)clearDrop();
+    if(!event.relatedTarget){clearDrop();cancelFolderHover();}
   },true);
   $('bookmarkImportFile')?.addEventListener('click',()=>$('bookmarkImportInput')?.click());
   $('bookmarkImportInput')?.addEventListener('change',async event=>{
