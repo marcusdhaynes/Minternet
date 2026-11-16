@@ -73,27 +73,28 @@
     }finally{clearTimeout(timeout);}
   }
   async function findPublishedRelease(){
-    let firstError=null;
-    // GitHub's /latest can return 404 when no formal Release exists. A list
-    // check distinguishes this from rate limiting and malformed metadata.
+    // GitHub's /releases/latest is a label, not a guarantee of the highest
+    // version. Older parallel builds can finish later. Compare stable,
+    // installable releases by embedded build number instead.
+    let error=null;
     for(let attempt=0;attempt<2;attempt++){
+      let latest=null,list=[];
       try{
-        const latest=await request('/releases/latest');
-        if(latest.data){
-          const release=convertRelease(latest.data);
-          if(release)return {release};
-        }
-        const list=await request('/releases?per_page=15');
-        const releases=Array.isArray(list.data)?list.data.map(convertRelease).filter(Boolean):[];
-        releases.sort((a,b)=>isNewer(a.version,b.version)?-1:isNewer(b.version,a.version)?1:0);
-        if(releases[0])return {release:releases[0]};
-        return {release:null,unpublished:true};
-      }catch(err){
-        firstError=err;
-        if(attempt===0)await new Promise(ok=>setTimeout(ok,400));
-      }
+        const result=await request('/releases/latest');
+        latest=convertRelease(result.data);
+      }catch(err){error=err;}
+      try{
+        const result=await request('/releases?per_page=100');
+        list=Array.isArray(result.data)?result.data.map(convertRelease).filter(Boolean):[];
+      }catch(err){error=err;}
+      const releases=[...list];
+      if(latest&&!releases.some(item=>item.tag===latest.tag))releases.push(latest);
+      releases.sort((a,b)=>isNewer(a.version,b.version)?-1:isNewer(b.version,a.version)?1:0);
+      if(releases.length)return {release:releases[0]};
+      if(!error)return {release:null,unpublished:true};
+      if(attempt===0)await new Promise(ok=>setTimeout(ok,400));
     }
-    throw firstError||new Error('Update service unavailable.');
+    throw error||new Error('GitHub release verification is unavailable.');
   }
   async function checkForUpdate(){
     if(checking)return checking;
