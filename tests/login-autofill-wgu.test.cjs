@@ -172,12 +172,11 @@ test('retries respect deliberately cleared fields and never refill the same inpu
   assert.equal(page.pw.value,'');
 });
 
-test('WGU native retry is scoped to exact access.wgu.edu origin',()=>{
+test('continuous login retry validates the current HTTPS origin and vault access',()=>{
   const main=fs.readFileSync(path.join(__dirname,'../native/desktop/src-tauri/src/main.rs'),'utf8');
   assert.match(main,/fn schedule_wgu_login_autofill/);
-  assert.match(main,/password_vault::origin\(&tab\.url\)\.ok\(\)\.as_deref\(\)/);
-  assert.match(main,/Some\("https:\/\/access\.wgu\.edu"\)/);
-  assert.match(main,/Duration::from_secs\(4\)/);
+  assert.match(main,/password_vault::origin\(&tab\.url\)\.is_err\(\)/);
+  assert.match(main,/Duration::from_secs\(3\)/);
   assert.match(main,/vault_section_allowed\(&owner,"logins"\)/);
   assert.match(main,/schedule_wgu_login_autofill\(app\.handle\(\)\)/);
   assert.match(main,/vault\.matching\("https:\/\/my\.wgu\.edu",false,None\)/);
