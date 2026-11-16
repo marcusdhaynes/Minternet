@@ -2120,6 +2120,7 @@ fn restore_visible_surfaces(app:&tauri::AppHandle){
 // old smaller/off-center HWND, displaying a white rectangle with black bands.
 // A cached logical layout is not proof that the native child still matches.
 fn reconcile_visible_child_bounds(app:&tauri::AppHandle)->bool {
+    if site_fullscreen::active(app){return false;}
     let Some(window)=app.get_window("main") else{return false};
     let Ok((width,height))=dimensions(&window) else{return false};
     let scale=window.scale_factor().unwrap_or(1.0).max(0.1);
@@ -2351,6 +2352,10 @@ fn start_geometry_smoke(app:&tauri::AppHandle,id:u32){
 
 fn display_active(app: &tauri::AppHandle) {
     site_fullscreen::cancel_if_tab_changed(app);
+    if site_fullscreen::active(app){
+        refresh_layout(app);
+        return;
+    }
     let mut targets=HashSet::new();
     {
         // Keep all site views visible and at identical positions while trusted
@@ -2726,6 +2731,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     }else{builder};
     let builder = builder
         .initialization_script(include_str!("../../../../ui/site-media-bridge.js"))
+        .initialization_script(include_str!("../../../../ui/site-fullscreen-bridge.js"))
         .initialization_script(include_str!("../../../../ui/site-download-links.js"))
         // A remote page never receives native commands. This reserved
         // non-loading popup URL is a narrowly scoped Ctrl+F signal that
