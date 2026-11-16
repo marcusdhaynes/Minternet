@@ -422,9 +422,21 @@
     if(!event.dataTransfer)return;
     finishBarDrag();
     draggedBarId=item.id;draggedBarElement=el;
-    draggedIds=selectedBookmarks.has(item.id)
+    const chosen=selectedBookmarks.has(item.id)
       ?Array.from(selectedBookmarks).filter(id=>id!==model.BOOKMARK_BAR_ID&&model.find(data,id))
       :[item.id];
+    // A selected folder already contains its selected descendants. Move it
+    // exactly once rather than rejecting a natural multi-selection that
+    // happens to include both parent and child.
+    const chosenSet=new Set(chosen);
+    draggedIds=chosen.filter(id=>{
+      let parent=model.location(data,id)?.parent;
+      while(parent){
+        if(chosenSet.has(parent.id))return false;
+        parent=model.location(data,parent.id)?.parent;
+      }
+      return true;
+    });
     el.classList.add('bookmark-reorder-source');
     event.dataTransfer.setData('application/x-minternet-reorder',item.id);
     if(item.kind==='link'){
@@ -1318,6 +1330,12 @@
       const node=model.find(data,id);
       if(!node||id===model.BOOKMARK_BAR_ID)return event.preventDefault();
       beginBookmarkDrag(node,row,event);
+    },
+    bindSelectable:(id,row)=>{
+      const node=model.find(data,id);
+      if(!node||id===model.BOOKMARK_BAR_ID)return;
+      row.classList.toggle('bookmark-multi-selected',selectedBookmarks.has(id));
+      bindHoldSelect(row,node);
     },
     edit, deleteBookmark, openInNewTab, newFolder: parent => openEditor('folder',null,parent||null),
     savePage: parent => {
