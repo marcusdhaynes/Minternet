@@ -80,13 +80,18 @@
     // Do not open a toolbar-obscuring dialog merely because a site has a
     // login or email field. Show it only when there is something useful.
     const status=await cmd('vault-status');
-    if(!status?.unlocked)return;
+    // An update/restart intentionally locks the encrypted vault. Never imply
+    // saved logins disappeared: offer to unlock them at the login form.
+    const needsUnlock=!status?.unlocked;
+    if(needsUnlock && (ctx.kind!=='login'||!status?.exists))return;
     let logins=[],cards=[],identities=[];
     if(ctx.kind==='login'){
-      const all=await cmd('vault-list');
-      logins=(Array.isArray(all)?all:[]).filter(item=>
-        item.origin===ctx.origin&&item.autofill!==false);
-      if(!logins.length&&!ctx.saveReady)return;
+      if(!needsUnlock){
+        const all=await cmd('vault-list');
+        logins=(Array.isArray(all)?all:[]).filter(item=>
+          item.origin===ctx.origin&&item.autofill!==false);
+        if(!logins.length&&!ctx.saveReady)return;
+      }
     }else if(ctx.kind==='payment'){
       const all=await cmd('vault-card-list');
       cards=Array.isArray(all)?all:[];
@@ -106,17 +111,23 @@
     head.append(action('×',()=>hide(true),'form-suggestion-x'));
     panel.append(head);
     if(ctx.kind==='login'){
-      for(const item of logins.slice(0,7)){
-        panel.append(action('Fill · '+item.username,async()=>{
-          const answer=await cmd('vault-fill',item.username);
-          if(answer?.filled)hide();
-          else window.minternetToast?.('No matching login form found.');
+      if(needsUnlock){
+        panel.append(create('p','form-suggestion-note',
+          'Your saved logins are locked after restart. Unlock the vault to detect and fill them.'));
+        panel.append(action('Unlock Saved Logins',()=>openManager('login'),'form-suggestion-option'));
+      }else{
+        for(const item of logins.slice(0,7)){
+          panel.append(action('Fill · '+item.username,async()=>{
+            const answer=await cmd('vault-fill',item.username);
+            if(answer?.filled)hide();
+            else window.minternetToast?.('No matching login form found.');
+          },'form-suggestion-option'));
+        }
+        if(ctx.saveReady)panel.append(action('＋ Save this login',async()=>{
+          await approved('vault-capture-login',null,'Login encrypted and saved.');
         },'form-suggestion-option'));
+        panel.append(action('✎ Edit Logins',()=>openManager('login'),'form-suggestion-option'));
       }
-      if(ctx.saveReady)panel.append(action('＋ Save this login',async()=>{
-        await approved('vault-capture-login',null,'Login encrypted and saved.');
-      },'form-suggestion-option'));
-      panel.append(action('✎ Edit Logins',()=>openManager('login'),'form-suggestion-option'));
     }else if(ctx.kind==='payment'){
       for(const card of cards.slice(0,7)){
         panel.append(action('Fill · '+(card.label||card.name)+' ••••'+card.last4,async()=>{
