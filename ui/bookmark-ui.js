@@ -327,7 +327,11 @@
   function scheduleFolderHover(event,placement){
     const barFolder=placement?.inside && placement.element?.closest('#bookmarkItems');
     const folder=barFolder?placement.parentId:null;
-    if(!folder||folder===draggedBarId||draggedIds.includes(folder)){
+    // Replacing an open flyout removes its source DOM node, which can cancel
+    // an in-flight HTML5 drag. A flyout source can still drop straight into
+    // a bar folder's center; only bar/manager drags auto-open new flyouts.
+    if(!folder||folder===draggedBarId||draggedIds.includes(folder)||
+        draggedBarElement?.closest('.bookmark-folder-popup')){
       cancelFolderHover();return;
     }
     if(folder===folderHoverId)return;
