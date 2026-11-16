@@ -105,7 +105,8 @@
       ...(belonging?[item('↙  Remove From '+g.displayName(belonging),()=>g.ungroup(tabId))]:[]),
       ...(tab.url?.startsWith('https://')?[item('☆  Bookmark Page',()=>window.minternet?.command('activate',tabId).then(()=>b?.toggleBookmark()))]:[]),
       ...(tab.url?.startsWith('http')&&!tab.secretTab?
-        [item('▣  Open in New Window',()=>window.minternet?.command('open-new-browser-window',{url:tab.url,sourceTabId:tabId}))]:[]),
+        [item('↗  Open in New Tab',()=>window.minternet?.command('site-link-new-tab',{tabId,url:tab.url})),
+         item('▣  Open in New Window',()=>window.minternet?.command('open-new-browser-window',{url:tab.url,sourceTabId:tabId}))]:[]),
       sub('▣  Split View',[
         item('Snap This Tab Into Split',()=>window.minternet?.command('split-add',tabId)),
         item('Return This Tab To Single View',()=>window.minternet?.command('split-remove',tabId)),
@@ -566,12 +567,25 @@
       const selected=typeof payload.selection==='string'?payload.selection.slice(0,2048):'';
       const point={x:Math.max(0,Number(payload.x)||0),y:Math.max(0,Number(payload.y)||0)};
       const items=[...nativeItems];
+      // Keep the tab action immediately above the new-window action.
+      if(href){
+        const isWindow=entry=>/open.*new window/i.test(String(entry.text||entry.nativeName||''));
+        const isTab=entry=>/open.*new tab/i.test(String(entry.text||entry.nativeName||''));
+        const existing=items.findIndex(isTab);
+        const windowIndex=items.findIndex(isWindow);
+        if(windowIndex>=0&&existing<0){
+          items.splice(windowIndex,0,item('↗  Open in New Tab',()=>window.minternet?.command('site-link-new-tab',{tabId:payload.tabId,url:href})));
+        }else if(windowIndex>=0&&existing>windowIndex){
+          const [tabAction]=items.splice(existing,1);
+          items.splice(items.findIndex(isWindow),0,tabAction);
+        }
+      }
       // The built-in menu is authoritative. These are Minternet-specific
       // fallbacks, not replacements for bitmap copy, Save Image As, spell
       // checking, native media controls or extension items.
       const extras=[];
       if(href){
-        if(!hasNative('openLinkInNewTab'))extras.push(item('↗  Open Link in New Tab',()=>window.minternet?.command('site-link-new-tab',{tabId:payload.tabId,url:href})));
+        if(!hasNative('openLinkInNewTab')&&!items.some(entry=>/open.*new tab/i.test(entry.text||'')))extras.push(item('↗  Open Link in New Tab',()=>window.minternet?.command('site-link-new-tab',{tabId:payload.tabId,url:href})));
         if(!hasNative('openLinkInNewWindow'))extras.push(item('▣  Open Link in New Window',()=>window.minternet?.command('open-new-browser-window',{url:href,sourceTabId:payload.tabId})));
         if(!hasNative('copyLink'))extras.push(item('⧉  Copy Link Address',()=>window.minternet?.command('site-context-copy',href)));
       }
