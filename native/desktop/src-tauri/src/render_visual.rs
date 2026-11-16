@@ -3,7 +3,7 @@
 //! exposed to the toolbar, or sent over the network. Only a boolean survives.
 #![cfg(windows)]
 use std::{collections::HashMap,io::Cursor,
-    sync::{Mutex,OnceLock},time::{Duration,Instant}};
+    sync::{Mutex,OnceLock,atomic::{AtomicU64,Ordering}},time::{Duration,Instant}};
 use tauri::Manager;
 use windows::Win32::{
     Foundation::HGLOBAL,
@@ -14,22 +14,29 @@ use webview2_com::{CapturePreviewCompletedHandler,
     Microsoft::Web::WebView2::Win32::COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG};
 
 const MAX_CAPTURE_BYTES:usize=12*1024*1024;
-static BUSY:OnceLock<Mutex<HashMap<u32,Instant>>>=OnceLock::new();
+static BUSY:OnceLock<Mutex<HashMap<u32,(Instant,u64)>>>=OnceLock::new();
+static CAPTURE_SEQ:AtomicU64=AtomicU64::new(1);
 static WHITE:OnceLock<Mutex<HashMap<u32,(String,Instant,u8)>>>=OnceLock::new();
 
-fn pending()->&'static Mutex<HashMap<u32,Instant>>{
+fn pending()->&'static Mutex<HashMap<u32,(Instant,u64)>>{
     BUSY.get_or_init(||Mutex::new(HashMap::new()))
 }
-fn begin_capture(id:u32)->bool{
-    let Ok(mut entries)=pending().lock() else{return false};
-    // WebView2 can return S_OK but omit the CapturePreview callback if a
-    // controller becomes hidden. A stale in-flight marker must not disable
-    // health supervision forever.
-    entries.retain(|_,when|when.elapsed()<Duration::from_secs(18));
-    entries.insert(id,Instant::now()).is_none()
+fn begin_capture(id:u32)->Option<u64>{
+    let Ok(mut entries)=pending().lock() else{return None};
+    // WebView2 can return S_OK without a completion callback if its surface
+    // becomes hidden. Expire such probes, but never replace an active one.
+    entries.retain(|_,(when,_)|when.elapsed()<Duration::from_secs(18));
+    if entries.contains_key(&id){return None;}
+    let token=CAPTURE_SEQ.fetch_add(1,Ordering::Relaxed);
+    entries.insert(id,(Instant::now(),token));
+    Some(token)
 }
-fn clear_pending(id:u32){
-    if let Ok(mut pending)=pending().lock(){pending.remove(&id);}
+fn clear_pending(id:u32,token:u64){
+    if let Ok(mut pending)=pending().lock(){
+        if pending.get(&id).is_some_and(|(_,current)|*current==token){
+            pending.remove(&id);
+        }
+    }
 }
 // Two white captures, separated by a compositor rebind, are required.
 // A healthy/colored frame resets the suspicion. A visual failure alone
@@ -165,7 +172,7 @@ pub fn schedule(app:&tauri::AppHandle,id:u32,url:String,delay_ms:u64){
         let worker=task.clone();
         let _=task.run_on_main_thread(move||{
             let Some(label)=match_active(&worker,id,&url) else{return};
-            if !begin_capture(id){return;}
+            let Some(token)=begin_capture(id) else{return};
             let Some(view)=worker.get_webview(&label) else{
                 clear_pending(id);return;
             };
@@ -173,15 +180,15 @@ pub fn schedule(app:&tauri::AppHandle,id:u32,url:String,delay_ms:u64){
             let app=worker.clone();
             let result=view.with_webview(move|native|{
                 let Ok(core)=(unsafe{native.controller().CoreWebView2()})else{
-                    clear_pending(id);return
+                    clear_pending(id,token);return
                 };
                 let Ok(stream)=(unsafe{CreateStreamOnHGlobal(HGLOBAL::default(),true)})else{
-                    clear_pending(id);return
+                    clear_pending(id,token);return
                 };
                 let callback_stream=stream.clone();
                 let callback=CapturePreviewCompletedHandler::create(Box::new(move|status|{
                     let pixels=if status.is_ok(){read_preview(&callback_stream)}else{None};
-                    clear_pending(id);
+                    clear_pending(id,token);
                     if let Some(pixels)=pixels{
                         let completed=app.clone();
                         let uri=expected.clone();
@@ -196,9 +203,9 @@ pub fn schedule(app:&tauri::AppHandle,id:u32,url:String,delay_ms:u64){
                 }));
                 if unsafe{core.CapturePreview(
                     COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG,
-                    &stream,&callback)}.is_err(){clear_pending(id);}
+                    &stream,&callback)}.is_err(){clear_pending(id,token);}
             });
-            if result.is_err(){clear_pending(id);}
+            if result.is_err(){clear_pending(id,token);}
         });
     });
 }
