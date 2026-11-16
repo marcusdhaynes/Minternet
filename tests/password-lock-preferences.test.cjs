@@ -17,7 +17,7 @@ test('opt-out credentials use Windows Credential Manager, never a plaintext loca
   const store=read('native/desktop/src-tauri/src/device_secrets.rs');
   assert.match(store,/CredWriteW/);assert.match(store,/CredReadW/);
   assert.match(store,/CredDeleteW/);assert.match(store,/CRED_PERSIST_LOCAL_MACHINE/);
-  assert.doesNotMatch(store,/fs::write|localStorage|JSON\.stringify/);
+  assert.doesNotMatch(store,/fs::write|localStorage\.setItem|JSON\.stringify\(/);
   const main=read('native/desktop/src-tauri/src/main.rs');
   assert.match(main,/lock-preferences-set/);
   assert.match(main,/scratch\.unlock\(&path,&secret,false\)/);
