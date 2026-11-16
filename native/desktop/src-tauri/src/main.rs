@@ -5337,6 +5337,13 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             .await.map_err(|e|e.to_string())?;
     }
     if name=="live-sync-vault-export" {
+        // This exports plaintext login, payment, and identity records to the
+        // trusted local sync client. Never defeat per-section locks merely
+        // because one category has automatically unlocked its shared vault.
+        if !["logins","identities","payments"].into_iter()
+            .all(|section|vault_section_allowed(&app,section)){
+            return Ok(json!({"locked":true}));
+        }
         // Sensitive plaintext is returned only to the LOCAL trusted chrome,
         // which immediately wraps each record in AES-GCM for server storage.
         let state=app.state::<Mutex<password_vault::Vault>>();
@@ -5350,6 +5357,10 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         let entry=value.get("entry").ok_or("Missing decrypted sync entry")?;
         let deleted=value.get("deleted").and_then(Value::as_bool)==Some(true);
         if !matches!(kind,"login"|"payment"|"identity") {return Err("Not a vault record".into());}
+        let section=match kind{"login"=>"logins","payment"=>"payments",_=>"identities"};
+        if !vault_section_allowed(&app,section){
+            return Err(format!("Unlock {section} before merging synced records"));
+        }
         let state=app.state::<Mutex<password_vault::Vault>>();
         let mut vault=state.lock().map_err(|e|e.to_string())?;
         if !vault.unlocked(){return Ok(json!({"ok":false,"locked":true}));}
@@ -5972,6 +5983,10 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 .ok_or("Import type required")?;
             if kind!="password"&&kind!="card"{
                 return Err("Unsupported credential import type".into());
+            }
+            let section=if kind=="password"{"logins"}else{"payments"};
+            if !vault_section_allowed(&app,section){
+                return Err(format!("Unlock {section} before importing records"));
             }
             let records=value.get("entries").and_then(Value::as_array)
                 .ok_or("Import records required")?;
