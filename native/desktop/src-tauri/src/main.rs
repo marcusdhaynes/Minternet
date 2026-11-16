@@ -1148,6 +1148,11 @@ fn restore_session(app: &tauri::AppHandle) {
     let saved_active=data.get("active").and_then(Value::as_u64)
         .and_then(|n|usize::try_from(n).ok());
     let mut restored_active=None;
+    // Limits apply to NEW tabs, not tabs that were already open before
+    // the user changed the preference or updated the executable.
+    // Dropping older saved tabs here can silently lose the selected one.
+    let configured_limit=browser.tab_limit;
+    browser.tab_limit=0;
     for (saved_index,record) in saved.iter().enumerate() {
         let Some(address)=record.get("url").and_then(Value::as_str) else {continue};
         if address!=HOME {
@@ -1171,6 +1176,7 @@ fn restore_session(app: &tauri::AppHandle) {
             }
         }
     }
+    browser.tab_limit=configured_limit;
     // Saved indices refer to the unfiltered records; a skipped invalid URL
     // must never make the wrong tab active. Fall back to the last real page.
     browser.active_id=restored_active
