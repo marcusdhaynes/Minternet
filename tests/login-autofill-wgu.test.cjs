@@ -55,7 +55,7 @@ function fakePage({origin='https://access.wgu.edu',route='/pingfed/idp/SSO.saml2
   view.top=view;
   doc.defaultView=view;
   for(const input of inputs)input.ownerDocument=doc;
-  let scheduled=0,notifyChanges=()=>{};
+  let scheduled=0,notifyChanges=()=>{},clock=0;
   const globals={
     window:view,document:doc,
     location:{protocol:'https:',origin,pathname:route},
@@ -66,7 +66,7 @@ function fakePage({origin='https://access.wgu.edu',route='/pingfed/idp/SSO.saml2
       disconnect(){}
     },
     setTimeout(){scheduled++;return scheduled;},clearTimeout(){},
-    Date,Set,WeakSet,Math
+    Date:{now(){clock+=120;return clock;}},Set,WeakSet,Math
   };
   function fill(credentialOrigin='https://access.wgu.edu'){
     const payload={origin:credentialOrigin,username:'student-name',password:'secret-login'};
