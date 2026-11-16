@@ -155,7 +155,7 @@
     head.append(make('strong','','Identities'));
     const lock=make('button','identity-lock','Lock');lock.type='button';
     lock.addEventListener('click',async()=>{
-      const result=await call('vault-lock');
+      const result=await call('vault-lock','identities');
       if(result?.ok){unlocked=false;syncUi();clearEditor();report('Encrypted vault locked.');}
     });
     const exit=make('button','','×');exit.type='button';exit.title='Close';
