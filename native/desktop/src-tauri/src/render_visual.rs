@@ -174,7 +174,7 @@ pub fn schedule(app:&tauri::AppHandle,id:u32,url:String,delay_ms:u64){
             let Some(label)=match_active(&worker,id,&url) else{return};
             let Some(token)=begin_capture(id) else{return};
             let Some(view)=worker.get_webview(&label) else{
-                clear_pending(id);return;
+                clear_pending(id,token);return;
             };
             let expected=url.clone();
             let app=worker.clone();
