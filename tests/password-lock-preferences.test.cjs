@@ -11,7 +11,7 @@ test('four password prompts default to ON with independent explicit choices',()=
     assert.match(prefs,new RegExp('"'+section+'"'));
   }
   assert.match(prefs,/Self\{logins:true,identities:true,payments:true,bookmarks:true\}/);
-  assert.match(prefs,/Access::from_policy/);
+  assert.match(prefs,/pub fn from_policy/);
 });
 test('opt-out credentials use Windows Credential Manager, never a plaintext local profile',()=>{
   const store=read('native/desktop/src-tauri/src/device_secrets.rs');
