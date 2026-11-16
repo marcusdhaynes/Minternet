@@ -554,6 +554,14 @@ mod tests {
         assert_eq!(vault.matching("https://example.com",true,Some("alice"))
             .unwrap().password,"pass-one");
         assert!(vault.matching("https://another.example",false,None).is_none());
+        assert!(vault.prefer("https://example.com","alice"));
+        assert_eq!(vault.matching("https://example.com",false,None)
+            .unwrap().username,"alice");
+        vault.save(&file).unwrap();
+        vault.lock();
+        vault.unlock(&file,"correct horse battery staple",false).unwrap();
+        assert_eq!(vault.matching("https://example.com",false,None)
+            .unwrap().username,"alice");
         vault.lock();
         let _=fs::remove_file(file);
     }
