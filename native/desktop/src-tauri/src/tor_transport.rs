@@ -62,20 +62,29 @@ pub fn proxy_url(id:u32)->Result<tauri::Url,String>{
 }
 
 pub fn release(app:&tauri::AppHandle,id:u32){
+    let mut removed=false;
     if let Ok(mut state)=proxies().lock(){
         if let Some(proxy)=state.remove(&id){
             let _=proxy.shutdown.send(true);
             proxy.task.abort();
+            removed=true;
         }
     }
-    cleanup_profile(app,id);
+    if removed{cleanup_profile(app,id);}
 }
 
 pub fn status()->serde_json::Value{
     let count=proxies().lock().map(|p|p.values().filter(|v|!v.task.is_finished()).count()).unwrap_or(0);
-    serde_json::json!({"embedded":true,"bootstrapped":CLIENT.get().is_some(),
+    // Read live Arti status. A client that bootstrapped earlier may no longer
+    // have usable directory/guard state after a network outage.
+    let (ready,progress)=CLIENT.get().map(|client|{
+        let status=client.bootstrap_status();
+        (status.ready_for_traffic(),(status.as_frac()*100.0).round() as u32)
+    }).unwrap_or((false,0));
+    serde_json::json!({"embedded":true,"bootstrapped":ready,
+        "bootstrapProgressPercent":progress.min(100),
         "activeTabs":count,"browserHardening":"partial",
-        "warning":"Tor-routed WebView2 is not Tor Browser; browser fingerprinting protections are incomplete."})
+        "warning":"Arti readiness is not proof of browser anonymity, DNS leak resistance or Tor Browser fingerprint protection."})
 }
 
 /// Only called from a trusted Tauri chrome command. Never open a browser

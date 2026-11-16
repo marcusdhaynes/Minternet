@@ -42,3 +42,5 @@ Automated source assertions in `tests/tor-integration.test.cjs` run in the full 
 
 ## Tor session controls
 Right-click the Tor toolbar button to open the browser-owned menu. **New Tor Tab** creates a separately isolated Tor tab. **Open Site in Fresh Tor Tab** duplicates the current Tor page into a new private profile with a separate circuit context; it leaves the original tab open. **New Identity** closes all existing Tor tabs and their connections, then opens a fresh Tor tab. Normal tabs are unchanged. New Identity intentionally loses the old Tor tabs' page/session state. A different exit IP is not guaranteed, and this does not match every Tor Browser identity-erasure guarantee.
+
+Arti's **live** `bootstrap_status()` readiness and rough progress are exposed in Tor Connection Status. A past successful bootstrap no longer causes the status to appear ready after Arti reports that it is no longer ready. This is informational and does not prove Tor exit connectivity, DNS safety or identity protection.

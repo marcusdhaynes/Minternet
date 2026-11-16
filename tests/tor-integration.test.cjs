@@ -131,3 +131,13 @@ test('21. New identity and fresh-tab actions are available from custom Tor menu'
  assert.match(app,/Open Site in Fresh Tor Tab/);
  assert.match(app,/torMenu\.setAttribute\('role','menu'\)/);
 });
+
+test('22. Tor readiness reports current bootstrap condition, not merely a cached client',()=>{
+ assert.match(transport,/client\.bootstrap_status\(\)/);
+ assert.match(transport,/status\.ready_for_traffic\(\)/);
+ assert.match(transport,/bootstrapProgressPercent/);
+ assert.doesNotMatch(transport,/"bootstrapped":CLIENT\.get\(\)\.is_some\(\)/);
+});
+test('23. Ordinary tab closes do not spawn Tor profile cleanup threads',()=>{
+ assert.match(transport,/if removed\{cleanup_profile\(app,id\);\}/);
+});
