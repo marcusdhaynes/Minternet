@@ -56,6 +56,23 @@ test('no capture pixels or visited URLs are persisted by the visual checker',()=
  assert.match(visual,/SAFE_TO_RESTART/);
  assert.match(visual,/tab\.private\|\|tab\.tor\|\|tab\.secret_id\.is_some\(\)/);
 });
+test('Windows CI injects a fully white overlay over healthy HTTPS DOM and requires pixel recovery',()=>{
+ assert.match(main,/minternet-ci-white-mask/);
+ assert.match(main,/render_visual::smoke_confirmed\(\)/);
+ assert.match(main,/localStorage\.getItem\('minternet_visual_ci'\)/);
+ assert.match(win,/--minternet-white-surface-smoke/);
+ assert.match(win,/A real HTTPS page covered with an all-white compositor frame did not recover/);
+});
+test('session uses validated primary, temporary and backup checkpoints after updates',()=>{
+ const checkpoint=main.slice(main.indexOf('fn read_session_data('),
+   main.indexOf('fn save_session('));
+ assert.match(checkpoint,/path\.with_extension\("tmp"\)/);
+ assert.match(checkpoint,/path\.with_extension\("bak"\)/);
+ assert.match(checkpoint,/serde_json::from_slice::<Value>/);
+ assert.match(main,/mod session_checkpoint_tests/);
+ assert.match(main,/browser\.tab_limit=0;/);
+ assert.match(main,/browser\.tab_limit=configured_limit;/);
+});
 test('Windows release is gated by actual native executable and Rust tests',()=>{
  assert.match(win,/npm run build/);
  assert.match(win,/cargo test --manifest-path src-tauri\/Cargo\.toml/);
