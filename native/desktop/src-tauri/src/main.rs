@@ -2079,7 +2079,12 @@ fn restore_visible_surfaces(app:&tauri::AppHandle){
     };
     for label in labels {
         if let Some(view)=app.get_webview(&label){
-            // Preserve visibility, DOM, scroll position, and GPU frame.
+            // Tauri's shown-label cache is not the native controller state.
+            // Restore a controller that WebView2 silently hid while the parent
+            // window was recreated/maximized during an in-place update.
+            #[cfg(windows)]
+            native_surface::ensure_visible(&view);
+            // Preserve DOM, scroll position, cookies, and the GPU frame.
             notify_native_compositor(&view);
         }
     }
@@ -2154,6 +2159,9 @@ fn reconcile_visible_child_bounds(app:&tauri::AppHandle)->bool {
                 app.state::<SplitThreeLeft>().0.lock().map(|s|*s).unwrap_or(false))
             }else{(0.0,top,width,available)};
             fix(&view,x,y,w,h);
+            // The size may already be correct while the controller is hidden.
+            #[cfg(windows)]
+            native_surface::ensure_visible(&view);
         }
     }
     corrected
