@@ -1,6 +1,16 @@
 plugins {
     id 'com.android.application'
 }
+
+// All platform builds use the same base version and source SHA. Incrementing
+// versionCode for each CI run makes newer APKs distinguishable from old ones.
+// Release signing is deliberately NOT fabricated: debug APKs are previews.
+def sharedVersion = new groovy.json.JsonSlurper()
+    .parse(file('../../desktop/src-tauri/tauri.conf.json')).version.toString()
+def ciNumber = System.getenv('GITHUB_RUN_NUMBER')
+def ciSha = System.getenv('GITHUB_SHA')
+def buildNumber = ciNumber?.isInteger() ? ciNumber.toInteger() : 1
+def buildSuffix = ciSha?.length() >= 8 ? "-g" + ciSha.substring(0, 8) : "-local"
 android {
     namespace 'app.minternet.browser'
     compileSdk 35
@@ -8,8 +18,8 @@ android {
         applicationId 'app.minternet.browser'
         minSdk 26
         targetSdk 35
-        versionCode 1
-        versionName '0.2.0'
+        versionCode buildNumber
+        versionName "${sharedVersion}-build.${buildNumber}${buildSuffix}"
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
