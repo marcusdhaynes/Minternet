@@ -31,12 +31,14 @@ fn begin_capture(id:u32)->Option<u64>{
     entries.insert(id,(Instant::now(),token));
     Some(token)
 }
-fn clear_pending(id:u32,token:u64){
+fn clear_pending(id:u32,token:u64)->bool{
     if let Ok(mut pending)=pending().lock(){
         if pending.get(&id).is_some_and(|(_,current)|*current==token){
             pending.remove(&id);
+            return true;
         }
     }
+    false
 }
 // Two white captures, separated by a compositor rebind, are required.
 // A healthy/colored frame resets the suspicion. A visual failure alone
@@ -188,7 +190,9 @@ pub fn schedule(app:&tauri::AppHandle,id:u32,url:String,delay_ms:u64){
                 let callback_stream=stream.clone();
                 let callback=CapturePreviewCompletedHandler::create(Box::new(move|status|{
                     let pixels=if status.is_ok(){read_preview(&callback_stream)}else{None};
-                    clear_pending(id,token);
+                    // An expired callback from a previously destroyed
+                    // controller must never act on a newer tab generation.
+                    if !clear_pending(id,token){return Ok(());}
                     if let Some(pixels)=pixels{
                         let completed=app.clone();
                         let uri=expected.clone();
