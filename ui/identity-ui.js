@@ -94,7 +94,7 @@
     button.textContent=exists?'Unlock':'Create Encrypted Vault';
   }
   async function reload(){
-    const result=await call('vault-status');
+    const result=await call('vault-status','identities');
     if(!result)return;
     exists=Boolean(result.exists);unlocked=Boolean(result.unlocked);
     syncUi();
@@ -170,7 +170,7 @@
     auth.addEventListener('submit',async event=>{
       event.preventDefault();
       const secret=master.value;master.value='';
-      const result=await call(exists?'vault-unlock':'vault-create',secret);
+      const result=await call(exists?'vault-unlock':'vault-create',{password:secret,section:'identities'});
       if(result?.ok){exists=true;unlocked=true;await reload();report('Vault unlocked.');}
     });
     editor=make('div','identity-editor');
