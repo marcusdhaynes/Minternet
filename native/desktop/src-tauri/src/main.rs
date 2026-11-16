@@ -1440,8 +1440,16 @@ fn percent_encode_search(text: &str) -> String {
 }
 
 fn dimensions(window: &tauri::Window) -> Result<(f64, f64), String> {
-    let size = window.inner_size().map_err(|e| e.to_string())?;
-    let scale = window.scale_factor().map_err(|e| e.to_string())?;
+    let mut size = window.inner_size().map_err(|e| e.to_string())?;
+    let scale = window.scale_factor().map_err(|e| e.to_string())?.max(0.1);
+    // Live GetClientRect beats stale cached inner_size after replacing an EXE,
+    // display-DPI changes, Windows snap, and maximized-window reparenting.
+    #[cfg(windows)]
+    if let Ok(hwnd)=window.hwnd(){
+        if let Some((w,h))=native_surface::parent_client_size(hwnd.0 as isize){
+            size=tauri::PhysicalSize::new(w,h);
+        }
+    }
     let logical = size.to_logical::<f64>(scale);
     Ok((logical.width.max(1.0), logical.height.max(1.0)))
 }
@@ -1933,7 +1941,15 @@ fn raise_chrome_above_site(_app:&tauri::AppHandle){}
 
 fn refresh_layout(app: &tauri::AppHandle) {
     let Some(window) = app.get_window("main") else { return };
-    let Ok(physical) = window.inner_size() else { return };
+    let Ok(mut physical) = window.inner_size() else { return };
+    // Rely on the actual Win32 host client rectangle, not an inner-size
+    // value cached before this borderless window finished restoring.
+    #[cfg(windows)]
+    if let Ok(hwnd)=window.hwnd(){
+        if let Some((w,h))=native_surface::parent_client_size(hwnd.0 as isize){
+            physical=tauri::PhysicalSize::new(w,h);
+        }
+    }
     // Windows can report a zero/tiny client area while minimizing or dragging.
     // Never collapse a live WebView2 renderer to a 1-pixel surface: it can
     // become blank until another full layout or an expensive site refresh.
@@ -2127,19 +2143,23 @@ fn reconcile_visible_child_bounds(app:&tauri::AppHandle)->bool {
     let parent_hwnd=window.hwnd().ok().map(|hwnd|hwnd.0 as isize).unwrap_or(0);
 
     let mut fix=|view:&tauri::Webview,x:f64,y:f64,w:f64,h:f64|{
-        let (Ok(pos),Ok(size))=(view.position(),view.size()) else{return};
-        let expected=[x*scale,y*scale,w*scale,h*scale];
-        let actual=[pos.x as f64,pos.y as f64,size.width as f64,size.height as f64];
-        if expected.iter().zip(actual.iter()).any(|(want,got)|(want-got).abs()>3.0){
-            let rectangle=tauri::Rect {
-                position:LogicalPosition::new(x,y).into(),
-                size:LogicalSize::new(w.max(1.0),h.max(1.0)).into()
-            };
-            if view.set_bounds(rectangle).is_ok(){
-                notify_native_compositor(view);
-                corrected=true;
+        if let (Ok(pos),Ok(size))=(view.position(),view.size()){
+            let expected=[x*scale,y*scale,w*scale,h*scale];
+            let actual=[pos.x as f64,pos.y as f64,size.width as f64,size.height as f64];
+            if expected.iter().zip(actual.iter()).any(|(want,got)|(want-got).abs()>3.0){
+                let rectangle=tauri::Rect {
+                    position:LogicalPosition::new(x,y).into(),
+                    size:LogicalSize::new(w.max(1.0),h.max(1.0)).into()
+                };
+                if view.set_bounds(rectangle).is_ok(){
+                    notify_native_compositor(view);
+                    corrected=true;
+                }
             }
         }
+        // Even when Tauri's geometry query fails transiently, inspect the
+        // *native* HWND and controller. The previous early return skipped
+        // the only repair path capable of correcting a displaced white pane.
         // Tauri's logical coordinates can be correct while the *native*
         // child HWND or CoreWebView2Controller Bounds are wrong.
         #[cfg(windows)]
@@ -2190,6 +2210,25 @@ fn schedule_startup_bounds_reconciliation(app:&tauri::AppHandle){
                     refresh_layout(&handle);
                 }
                 reconcile_visible_child_bounds(&handle);
+            });
+        }
+        // The previous startup checker simply stopped after ~6 seconds.
+        // A site can create or reparent a WebView2 child well after that,
+        // especially after an in-place EXE update, suspend/resume, GPU reset,
+        // or an SPA route change that has no navigation-completed event.
+        // Continue a LOW-COST, geometry-only watchdog. It does not toggle
+        // visibility, reload a website, reset the profile, or rewrite bounds
+        // when they're correct. Exit when the main window is closed.
+        let mut cycles=0u64;
+        loop {
+            std::thread::sleep(Duration::from_secs(if cycles<60{2}else{12}));
+            cycles=cycles.saturating_add(1);
+            if original.get_window("main").is_none(){break;}
+            let task=original.clone();
+            let _=original.run_on_main_thread(move||{
+                let Some(window)=task.get_window("main")else{return};
+                if window.is_minimized().unwrap_or(true){return;}
+                reconcile_visible_child_bounds(&task);
             });
         }
     });
