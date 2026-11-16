@@ -77,3 +77,7 @@ The new GitHub Actions workflow is https://github.com/marcusdhaynes/Minternet/ac
 **Security architecture:** A normal WebView2 browser cannot achieve Tor Browser's hardened Gecko protections simply by using an Arti SOCKS proxy and injecting JavaScript. Tor Browser's own maintainers discourage conventional browsers with Tor. Full parity requires actually integrating or launching a verified Tor Browser engine, with its matching first-party isolation, fingerprint defenses and security patch cadence. Until that architecture is implemented and independently tested, Minternet Tor remains experimental. Even official Tor Browser cannot promise perfect anonymity.
 
 Reference: https://support.torproject.org/tor-browser/security/using-tor-with-other-browsers/
+
+## Connection timeout diagnosis
+
+The initial Linux live transport run passed all 70 Rust unit tests but failed its Tor exit check because the SOCKS connection exceeded the 25-second curl deadline. This does not establish any working Tor connection. The updated smoke uses a 150-second connection allowance and sanitized stage diagnostics (SOCKS request received, Arti stream connected, refused, or timed out), without recording destination names or user IPs. These probes still fail with nonzero status if Tor cannot be verified.

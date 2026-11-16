@@ -13,8 +13,9 @@ fn curl(proxy:&str,url:&str,head:bool)->Result<String,String>{
     // Do not allow environment proxy configuration to override the exact
     // listener. -h on socks5h forces hostname resolution through Tor.
     let mut command=Command::new("curl");
-    command.args(["--silent","--show-error","--connect-timeout","25",
-        "--max-time","95","--proto","=https","--proxy",proxy,
+    command.args(["--disable","--silent","--show-error","--http1.1",
+        "--connect-timeout","150","--max-time","195",
+        "--proto","=https","--proxy",proxy,
         "--noproxy",""]);
     if head {
         command.args(["--output",if cfg!(windows){"NUL"}else{"/dev/null"},

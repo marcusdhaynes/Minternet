@@ -178,13 +178,32 @@ async fn serve(mut socket:TcpStream,client:Arc<Client>)->std::io::Result<()>{
     };
     let port=u16::from_be_bytes(port);
     if port==0{socket.write_all(&reply(8)).await?;return Ok(());}
+    // Emit only protocol stages in the explicit CI smoke; never hostnames,
+    // user addresses or exit IPs. Normal browsing does not log destinations.
+    if std::env::args().any(|a|a=="--minternet-tor-transport-smoke"){
+        eprintln!("TOR_DIAG: SOCKS remote-domain CONNECT received");
+    }
     // No DNS APIs or fallback TCP sockets are used for the destination.
-    match tokio::time::timeout(Duration::from_secs(75),client.connect((domain.as_str(),port))).await{
+    match tokio::time::timeout(Duration::from_secs(135),client.connect((domain.as_str(),port))).await{
         Ok(Ok(mut upstream))=>{
+            if std::env::args().any(|a|a=="--minternet-tor-transport-smoke"){
+                eprintln!("TOR_DIAG: Arti upstream connected");
+            }
             socket.write_all(&reply(0)).await?;
             let _=tokio::io::copy_bidirectional(&mut socket,&mut upstream).await;
         }
-        _=>{socket.write_all(&reply(5)).await?;}
+        Ok(Err(_))=>{
+            if std::env::args().any(|a|a=="--minternet-tor-transport-smoke"){
+                eprintln!("TOR_DIAG: Arti upstream refused/failed");
+            }
+            socket.write_all(&reply(5)).await?;
+        }
+        Err(_)=>{
+            if std::env::args().any(|a|a=="--minternet-tor-transport-smoke"){
+                eprintln!("TOR_DIAG: Arti circuit creation timed out");
+            }
+            socket.write_all(&reply(5)).await?;
+        }
     }
     Ok(())
 }
