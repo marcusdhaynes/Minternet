@@ -2274,3 +2274,16 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { di
 #tor.tor-connecting{opacity:.5;cursor:progress;animation:minternet-tor-pulse .8s ease-in-out infinite alternate}
 @keyframes minternet-tor-pulse{from{opacity:.45}to{opacity:1}}
 .tor-active #address{border-color:#a16de9}
+
+/* Per-area, OS-protected password prompt controls in Settings → User Data. */
+.lock-preference-explainer{margin:2px 0 10px;font-size:12px;line-height:1.45;opacity:.82}
+.lock-preference-row{display:flex;flex-direction:column;gap:5px;min-width:0;margin:5px 0;
+  padding:8px 9px;border:1px solid var(--border,rgba(160,175,205,.16));border-radius:7px}
+.lock-preference-label{display:flex;gap:10px;align-items:center;cursor:pointer;font-size:13px}
+.lock-preference-label input{accent-color:var(--accent,#8875e9);flex-shrink:0}
+.lock-preference-approval{display:flex;gap:5px;flex-wrap:wrap;align-items:center}
+.lock-preference-approval[hidden]{display:none}
+.lock-preference-approval input{flex:1;min-width:125px;width:100%;border-radius:5px;
+  padding:6px 8px;background:var(--bg-2,#202438);color:inherit;border:1px solid rgba(175,190,225,.3)}
+.lock-preference-approval button{font-size:11px;padding:6px 8px;border-radius:5px}
+#passwordLockPreferencesStatus{font-size:12px;line-height:1.35;min-height:1em}
