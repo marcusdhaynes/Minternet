@@ -214,6 +214,33 @@ jobs:
             if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
             Remove-Item $marker,$stage -Force -ErrorAction SilentlyContinue
           }
+      - name: Reproduce white WebView2 compositor with healthy DOM and verify real visual recovery
+        shell: pwsh
+        run: |
+          $exe = "$env:RUNNER_TEMP\minternet-portable\Minternet-Portable-x64.exe"
+          $p = Start-Process -FilePath $exe -ArgumentList '--minternet-white-surface-smoke' -PassThru
+          $proof = Join-Path $env:TEMP "minternet-visual-white-$($p.Id).ok"
+          try {
+            $passed = $false
+            for($i=0;$i -lt 55;$i++){
+              Start-Sleep -Seconds 1
+              $p.Refresh()
+              if($p.HasExited){throw 'Browser exited before composited white-frame recovery'}
+              if(Test-Path -LiteralPath $proof){$passed=$true;break}
+            }
+            if(!$passed){
+              throw 'A real HTTPS page covered with an all-white compositor frame did not recover automatically'
+            }
+            $contents=Get-Content -LiteralPath $proof -Raw
+            if($contents -notmatch 'recovered visually white composited page while preserving WebView2 storage'){
+              throw "Unexpected visual recovery proof: $contents"
+            }
+            "PASS: actual WebView2 pixel capture detected all-white frame despite healthy DOM, rebound surface, recovered webpage, retained cookie/localStorage." >> $env:GITHUB_STEP_SUMMARY
+          } finally {
+            $p.Refresh()
+            if(!$p.HasExited){Stop-Process -Id $p.Id -Force}
+            Remove-Item $proof -Force -ErrorAction SilentlyContinue
+          }
       - name: Reproduce and repair off-center WebView2 startup after maximization
         shell: pwsh
         run: |
