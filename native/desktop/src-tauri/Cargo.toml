@@ -41,4 +41,4 @@ drag = "2.1.1"
 [target.'cfg(any(windows, target_os = "linux"))'.dependencies]
 arti-client = { version = "=0.47.0", default-features = false, features = ["tokio", "rustls", "compression", "onion-service-client"] }
 tor-rtcompat = { version = "=0.47.0", default-features = false, features = ["tokio", "rustls"] }
-tokio = { version = "1", features = ["net", "io-util", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1", features = ["net", "io-util", "rt-multi-thread", "sync", "time", "macros"] }

@@ -2615,13 +2615,21 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     // permit its WebView2 controller to exist without a functioning proxy.
     #[cfg(any(windows,target_os="linux"))]
     let builder=if tor{
-        let dir=app.path().app_local_data_dir().map_err(|e|e.to_string())?
-            .join("tor-ephemeral-profiles").join(format!("tab-{id}"));
-        builder.data_directory(dir).proxy_url(tor_transport::proxy_url(id)?)
+        builder.data_directory(tor_transport::profile_dir(app,id)?)
+            .proxy_url(tor_transport::proxy_url(id)?)
     }else{builder};
     #[cfg(windows)]
     let builder=if tor{
-        builder.additional_browser_args("--force-webrtc-ip-handling-policy=disable_non_proxied_udp --disable-quic --disable-background-networking --no-pings")
+        // Explicitly configure both proxy and the inverse loopback bypass.
+        // Chromium otherwise connects directly to localhost and link-local
+        // destinations even when a proxy is configured. The SOCKS handler
+        // rejects IP-literal and localhost targets rather than forwarding.
+        let proxy=tor_transport::proxy_url(id)?;
+        builder.additional_browser_args(format!(
+            "--proxy-server={} --proxy-bypass-list=<-loopback> --force-webrtc-ip-handling-policy=disable_non_proxied_udp --disable-quic --disable-background-networking --no-pings",proxy.as_str()))
+    }else{builder};
+    let builder=if tor{
+        builder.initialization_script(include_str!("../../../../ui/tor-site-hardening.js"))
     }else{builder};
     // Opt in to a separate WebView2 site profile only after a user imports
     // an enabled extension. Keeps trusted browser chrome, credentials and
@@ -2674,6 +2682,10 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
         // must actually load before its first HTTPS navigation. Ordinary HTTP
         // is legitimate browser content but remains visibly marked insecure.
         .on_navigation(move |url| {
+            #[cfg(any(windows,target_os="linux"))]
+            if tor && matches!(url.scheme(),"http"|"https") &&
+                !(url.host_str()==Some("tauri.localhost")&&url.path()=="/warmup.html") &&
+                !tor_transport::safe_top_level(&url){return false;}
             // CI probe endpoints never leave this process or send credentials.
             if std::env::args().any(|a|a=="--minternet-auth-popup-smoke") &&
                 url.as_str()=="https://minternet-auth-probe.invalid/__ok" {
@@ -3955,6 +3967,14 @@ fn new_window_startup()->Option<(tauri::Url,bool)>{
 
 fn navigate_tab(app: &tauri::AppHandle, id: u32, url: Option<tauri::Url>, append: bool) -> Result<(), String> {
     let str_url = url.as_ref().map(|u| u.as_str()).unwrap_or(HOME).to_string();
+    #[cfg(any(windows,target_os="linux"))]
+    if app.state::<Mutex<Browser>>().lock().map_err(|e|e.to_string())?
+        .tabs.iter().any(|tab|tab.id==id&&tab.tor){
+        if let Some(ref target)=url{
+            if !tor_transport::safe_top_level(target){return Err("Tor blocks local and numeric website destinations".into());}
+            tor_transport::proxy_url(id)?;
+        }
+    }
     let (existing, private, warming, save_url) = {
         let state = app.state::<Mutex<Browser>>();
         let mut browser = state.lock().map_err(|e| e.to_string())?;
@@ -4479,7 +4499,7 @@ mod local_media_tests{
 #[cfg(any(windows,target_os="linux"))]
 async fn prepare_new_tor_tab(app:&tauri::AppHandle,id:u32)->Result<(),String>{
     if let Err(error)=tor_transport::prepare(id).await {
-        tor_transport::release(id);
+        tor_transport::release(&app,id);
         if let Ok(mut browser)=app.state::<Mutex<Browser>>().lock(){
             browser.tabs.retain(|tab|tab.id!=id);
             if browser.active_id==id{browser.active_id=0;}
@@ -4517,7 +4537,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 id
             };
             if let Err(error)=tor_transport::prepare(id).await {
-                tor_transport::release(id);
+                tor_transport::release(&app,id);
                 if let Ok(mut b)=app.state::<Mutex<Browser>>().lock(){
                     b.tabs.retain(|t|t.id!=id);
                     if b.active_id==id{b.active_id=0;}
@@ -6748,7 +6768,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 .retain(|id,_|!wanted.contains(id));
             for label in labels {if let Some(wv)=app.get_webview(&label){let _=wv.close();}}
             #[cfg(any(windows,target_os="linux"))]
-            for id in &wanted {tor_transport::release(*id);}
+            for id in &wanted {tor_transport::release(&app,*id);}
             prune_splits(&app);
             save_pinned(&app)?;
             activated(&app)?;
@@ -6777,7 +6797,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 if let Some(wv)=app.get_webview(&label) { let _=wv.close(); }
             }
             #[cfg(any(windows,target_os="linux"))]
-            tor_transport::release(id);
+            tor_transport::release(&app,id);
             prune_splits(&app);
             save_pinned(&app)?;
             activated(&app)?;

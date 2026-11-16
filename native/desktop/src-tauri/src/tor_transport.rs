@@ -1,7 +1,9 @@
 //! Tor transport for isolated native desktop tabs.
 //! This is a Tor-routed WebView, *not* Tor Browser's fingerprinting protection.
 //! Arti does remote DNS; we never resolve destination hostnames via the OS.
-use std::{collections::HashMap, sync::{Arc, Mutex, OnceLock}, time::Duration};
+use std::{collections::HashMap, path::PathBuf, sync::{Arc, Mutex, OnceLock}, time::Duration};
+use rand::{rngs::OsRng, RngCore};
+use tauri::Manager;
 use arti_client::{TorClient, TorClientConfig};
 use tor_rtcompat::PreferredRuntime;
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::{TcpListener, TcpStream}, task::JoinHandle};
@@ -14,6 +16,38 @@ struct TabProxy {
 }
 static CLIENT: tokio::sync::OnceCell<Arc<Client>> = tokio::sync::OnceCell::const_new();
 static PROXIES: OnceLock<Mutex<HashMap<u32,TabProxy>>> = OnceLock::new();
+static SESSION_TAG: OnceLock<String> = OnceLock::new();
+
+fn session_tag()->&'static str{
+    SESSION_TAG.get_or_init(||{
+        let mut random=[0u8;16];
+        OsRng.fill_bytes(&mut random);
+        random.iter().map(|x|format!("{x:02x}")).collect()
+    })
+}
+
+/// Separate browser-profile storage for every Tor tab AND application instance.
+/// An unrelated Minternet process must never reuse another process's cache.
+pub fn profile_dir(app:&tauri::AppHandle,id:u32)->Result<PathBuf,String>{
+    Ok(app.path().app_local_data_dir().map_err(|e|e.to_string())?
+        .join("tor-ephemeral-profiles")
+        .join(format!("session-{}",session_tag()))
+        .join(format!("tab-{id}")))
+}
+
+fn cleanup_profile(app:&tauri::AppHandle,id:u32){
+    let Ok(path)=profile_dir(app,id) else{return};
+    // WebView2 may still be releasing profile files. Best-effort deletion,
+    // not an anti-forensic guarantee, never touches ordinary browser storage.
+    std::thread::spawn(move||{
+        for _ in 0..8{
+            if !path.exists(){break;}
+            if std::fs::remove_dir_all(&path).is_ok(){break;}
+            std::thread::sleep(Duration::from_millis(350));
+        }
+    });
+}
+
 
 fn proxies() -> &'static Mutex<HashMap<u32,TabProxy>> {
     PROXIES.get_or_init(|| Mutex::new(HashMap::new()))
@@ -27,13 +61,14 @@ pub fn proxy_url(id:u32)->Result<tauri::Url,String>{
         .map_err(|e|e.to_string())
 }
 
-pub fn release(id:u32){
+pub fn release(app:&tauri::AppHandle,id:u32){
     if let Ok(mut state)=proxies().lock(){
         if let Some(proxy)=state.remove(&id){
             let _=proxy.shutdown.send(true);
             proxy.task.abort();
         }
     }
+    cleanup_profile(app,id);
 }
 
 pub fn status()->serde_json::Value{
@@ -145,6 +180,18 @@ async fn serve(mut socket:TcpStream,client:Arc<Client>)->std::io::Result<()>{
     Ok(())
 }
 fn reply(status:u8)->[u8;10]{[5,status,0,1,0,0,0,0,0,0]}
+/// Blocks direct/private-network navigation at the host boundary before a
+/// renderer is permitted to attempt a WebView2 request.
+pub fn safe_top_level(url:&tauri::Url)->bool{
+    if !matches!(url.scheme(),"http"|"https")||url.host_str().is_none()||
+       !url.username().is_empty()||url.password().is_some(){return false;}
+    let host=url.host_str().unwrap_or_default().trim_start_matches('[').trim_end_matches(']');
+    let lower=host.to_ascii_lowercase();
+    !host.parse::<std::net::IpAddr>().is_ok() &&
+    !lower.eq("localhost") && !lower.eq("loopback") &&
+    ![".localhost",".local",".lan",".internal",".home.arpa"].iter().any(|end|lower.ends_with(end))
+}
+
 fn valid_destination(s:&str)->bool{
     !s.is_empty() && s.len()<=253 && !s.contains('\0') && !s.contains('/')
         && !s.chars().any(|c|c.is_whitespace())
@@ -163,6 +210,14 @@ mod tests {
     #[test] fn socks_connect_replies_are_well_formed(){
         assert_eq!(reply(0),[5,0,0,1,0,0,0,0,0,0]);
         assert_eq!(reply(7)[1],7);
+    }
+    #[test] fn reject_tor_local_or_numeric_top_level(){
+        for input in ["https://localhost/","http://127.0.0.1:3000/","https://[::1]/",
+            "https://printer.local/","https://router.home.arpa/","https://loopback/"]{
+            assert!(!safe_top_level(&tauri::Url::parse(input).unwrap()),"{input}");
+        }
+        assert!(safe_top_level(&tauri::Url::parse("https://example.org/").unwrap()));
+        assert!(safe_top_level(&tauri::Url::parse("http://service.onion/").unwrap()));
     }
     #[test] fn reject_local_or_malformed_destinations(){
         for host in ["localhost","secret.localhost","127.0.0.1","::1","", "example.org/other","host\nname",".invalid","invalid."]{

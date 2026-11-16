@@ -34,3 +34,8 @@ _Last updated November 15, 2026._
 10. Repeat on supported Windows/WebView2 and Linux/WebKitGTK versions, test long-lived connections, and commission an independent security audit.
 
 Automated source assertions in `tests/tor-integration.test.cjs` run in the full JavaScript test suite and ten repeated CI regression cycles; Rust unit tests are separate development checks. They are development regression checks only. They do **not** satisfy the real network/security gates above.
+
+## Additional hardening (November 15, round 2)
+- Chromium has implicit proxy bypass rules for localhost and link-local destinations. The Windows Tor WebView now passes both an explicit SOCKS5 proxy and the `<-loopback>` bypass subtraction, and the Tor transport rejects local/IP-literal destinations. These settings need a real WebView2 network-capture test; source inspection alone cannot establish enforcement.
+- Each Minternet process and Tor tab has a randomly scoped WebView profile directory. On Tor tab close, the listener and active sessions are signaled to stop and the app attempts to delete that profile. OS file locks or a crash can prevent deletion; this is not an anti-forensic promise.
+- Tor-only document-start restrictions aim to disable WebRTC peer creation and selected sensitive APIs. These are best-effort mitigations; they do not replace Tor Browser's engine-level fingerprint defenses.

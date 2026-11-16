@@ -88,3 +88,33 @@ test('14. Bookmark bar avoids chrome-origin icon requests while Tor is active',(
  assert.match(bar,/pendingIconRequests\.clear\(\)/);
  assert.match(bar,/if\(torBookmarkMode&&!thumbs\.has\(value\)\)/);
 });
+
+test('15. Tor rejects direct loopback and local top-level requests',()=>{
+ assert.match(transport,/pub fn safe_top_level\(url:&tauri::Url\)/);
+ assert.match(native,/if tor && matches!\(url\.scheme\(\),"http"\|"https"\)/);
+ assert.match(native,/!tor_transport::safe_top_level\(&url\)/);
+ assert.match(native,/tor_transport::proxy_url\(id\)\?;/);
+});
+test('16. The WebView2 Tor proxy explicitly removes Chromium implicit loopback bypass',()=>{
+ assert.match(native,/--proxy-server=\{\}/);
+ assert.match(native,/--proxy-bypass-list=<-loopback>/);
+ assert.match(native,/force-webrtc-ip-handling-policy=disable_non_proxied_udp/);
+});
+test('17. Tor tabs use process-specific ephemeral WebView profiles',()=>{
+ assert.match(transport,/static SESSION_TAG:/);
+ assert.match(transport,/OsRng\.fill_bytes\(&mut random\)/);
+ assert.match(transport,/join\(format!\("session-\{\}",session_tag\(\)\)\)/);
+ assert.match(transport,/cleanup_profile\(app,id\)/);
+});
+test('18. Closing Tor tab disconnects streams and best-effort cleans the profile',()=>{
+ assert.match(transport,/proxy\.shutdown\.send\(true\)/);
+ assert.match(transport,/session_shutdown\.changed\(\)\.await/);
+ assert.match(transport,/remove_dir_all\(&path\)/);
+});
+test('19. Tor document-start script disables potentially identifying WebRTC and privileged APIs',()=>{
+ assert.match(native,/tor-site-hardening\.js/);
+ const script=source('ui/tor-site-hardening.js');
+ assert.match(script,/RTCPeerConnection/);
+ assert.match(script,/getUserMedia/);
+ assert.match(script,/getDisplayMedia/);
+});
