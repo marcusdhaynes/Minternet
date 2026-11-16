@@ -2682,6 +2682,9 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
         // must actually load before its first HTTPS navigation. Ordinary HTTP
         // is legitimate browser content but remains visibly marked insecure.
         .on_navigation(move |url| {
+            if !tor && url.host_str().is_some_and(|host|host.to_ascii_lowercase().ends_with(".onion")) {
+                return false;
+            }
             #[cfg(any(windows,target_os="linux"))]
             if tor && matches!(url.scheme(),"http"|"https") &&
                 !(url.host_str()==Some("tauri.localhost")&&url.path()=="/warmup.html") &&
@@ -3914,6 +3917,7 @@ fn prepare_active(app: &tauri::AppHandle) -> Result<(), String> {
 fn valid_browser_window_url(address:&str)->Result<tauri::Url,String>{
     let target=tauri::Url::parse(address).map_err(|_|"Invalid website address")?;
     if !matches!(target.scheme(),"http"|"https") || target.host_str().is_none() ||
+       target.host_str().is_some_and(|host|host.ends_with(".onion")) ||
        !target.username().is_empty()||target.password().is_some(){
         return Err("A new browser window requires a public HTTP(S) address".into());
     }
@@ -3967,6 +3971,13 @@ fn new_window_startup()->Option<(tauri::Url,bool)>{
 
 fn navigate_tab(app: &tauri::AppHandle, id: u32, url: Option<tauri::Url>, append: bool) -> Result<(), String> {
     let str_url = url.as_ref().map(|u| u.as_str()).unwrap_or(HOME).to_string();
+    // Only Tor profiles may navigate to .onion destinations.
+    let tor_tab=app.state::<Mutex<Browser>>().lock().map_err(|e|e.to_string())?
+        .tabs.iter().any(|tab|tab.id==id&&tab.tor);
+    if !tor_tab && url.as_ref().and_then(|site|site.host_str())
+        .is_some_and(|host|host.to_ascii_lowercase().ends_with(".onion")){
+        return Err("Onion addresses require an isolated Tor tab".into());
+    }
     #[cfg(any(windows,target_os="linux"))]
     if app.state::<Mutex<Browser>>().lock().map_err(|e|e.to_string())?
         .tabs.iter().any(|tab|tab.id==id&&tab.tor){
@@ -6705,7 +6716,10 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             if tor{return Err("Tor transport unavailable".into());}
             if url!=HOME {
                 let parsed=tauri::Url::parse(&url).map_err(|e|e.to_string())?;
-                if parsed.scheme()!="https" {return Err("Blocked unsafe duplicate URL".into());}
+                if parsed.scheme()!="https" && !(tor && parsed.scheme()=="http" &&
+                    parsed.host_str().is_some_and(|host|host.ends_with(".onion"))){
+                    return Err("Blocked unsafe duplicate URL".into());
+                }
                 navigate_tab(&app,new_id,Some(parsed),true)?;
             } else {display_active(&app);}
             return Ok(json!({"ok":true,"id":new_id}));
@@ -6740,7 +6754,18 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                     .or_else(||value.get("address").and_then(Value::as_str))
                     .ok_or("Missing address")?;
                 let engine=value.get("searchEngine").and_then(Value::as_str).unwrap_or("google");
-                let target=parse_address_with_engine(address,engine)?;
+                let onion=address.trim();
+                let active_is_tor=app.state::<Mutex<Browser>>().lock()
+                    .map(|b|b.active().is_some_and(|tab|tab.tor)).unwrap_or(false);
+                // A bare onion address in a Tor tab defaults to HTTP over
+                // Tor's authenticated onion-service routing.
+                let onion_host=onion.split('/').next().unwrap_or("");
+                let is_bare_onion=active_is_tor && !onion.contains("://") &&
+                    !onion.contains(char::is_whitespace) &&
+                    onion_host.to_ascii_lowercase().ends_with(".onion");
+                let target=if is_bare_onion{
+                    parse_address_with_engine(&format!("http://{onion}"),engine)?
+                }else{parse_address_with_engine(address,engine)?};
                 // A plain text address entry intentionally starts a new ChatGPT
                 // conversation. Explicit website URLs never auto-submit.
                 if let Some(ref target_url)=target {
