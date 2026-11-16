@@ -43,7 +43,7 @@ test('visual white-surface check is independent of DOM health and survives blank
  assert.match(visual,/COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG/);
  assert.match(visual,/fully_white\(&pixels\)/);
  assert.match(visual,/stage==1[\s\S]*force_compositor_rebind/);
- assert.match(visual,/stage==2[\s\S]*SAFE_TO_RESTART/);
+ assert.match(visual,/stage>=2[\s\S]*SAFE_TO_RESTART/);
  assert.match(visual,/white_seen\(id,&url,white\)/);
  assert.match(visual,/Duration::from_secs\(18\)/);
  const cargo=get('native/desktop/src-tauri/Cargo.toml');
