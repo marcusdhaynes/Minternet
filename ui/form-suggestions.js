@@ -97,6 +97,11 @@
         if(!logins.length&&ctx.origin==='https://access.wgu.edu')
           portalLogins=(Array.isArray(all)?all:[]).filter(item=>
             item.origin==='https://my.wgu.edu'&&item.autofill!==false);
+        // A single eligible saved account (or an explicitly selected
+        // default) is filled by native code without any popup or click.
+        // Only ambiguous multi-account sites need an account-choice menu.
+        const candidates=logins.length?logins:portalLogins;
+        if(candidates.length===1 || candidates.filter(x=>x.preferred===true).length===1)return;
         if(!logins.length&&!portalLogins.length&&!ctx.saveReady)return;
       }
     }else if(ctx.kind==='payment'){
@@ -114,7 +119,7 @@
     panel.replaceChildren();
     const head=create('div','form-suggestion-head');
     head.append(create('strong','',ctx.kind==='login'?'Logins':
-      ctx.kind==='payment'?'Payment Methods':'Identities'));
+      ctx.kind==='payment'?'Payments':'Identities'));
     head.append(action('×',()=>hide(true),'form-suggestion-x'));
     panel.append(head);
     if(ctx.kind==='login'){
