@@ -100,7 +100,7 @@ fn fetch_newest_published()->Result<Value,String>{
     }
     newest_installable(&candidates).cloned().ok_or_else(||
         if errors.len()==2{"GitHub Releases could not be checked".to_string()}
-        else{"No verified Windows release with EXE and SHA256SUMS is published".to_string())
+        else{"No verified Windows release with EXE and SHA256SUMS is published".to_string()}
     )
 }
 fn remote(url:&str)->Result<ureq::Response,String>{
