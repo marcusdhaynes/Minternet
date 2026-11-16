@@ -3047,6 +3047,50 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                 if matches!(event.event(), PageLoadEvent::Finished) {
                     media_devices::apply(&for_load,id,event.url().as_str(),private);
                     #[cfg(windows)]
+                    if tor && std::env::args().any(|a|a=="--minternet-tor-browser-smoke")
+                        && event.url().scheme()=="https"
+                        && event.url().host_str()==Some("check.torproject.org")
+                        && event.url().path()=="/api/ip"
+                    {
+                        // An actual WebView2 child, isolated profile and
+                        // Arti-managed circuit must observe Tor Project's
+                        // exit verdict. Also ensure the WebRTC constructor
+                        // has been removed in this website's JS world.
+                        let app=for_load.clone();
+                        let label=view.label().to_string();
+                        std::thread::spawn(move||{
+                            std::thread::sleep(Duration::from_millis(600));
+                            let handle=app.clone();
+                            let _=app.run_on_main_thread(move||{
+                                if let Some(site)=handle.get_webview(&label){
+                                    let marker=std::env::temp_dir().join(format!(
+                                        "minternet-tor-browser-{}.ok",std::process::id()));
+                                    let failure=std::env::temp_dir().join(format!(
+                                        "minternet-tor-browser-{}.failed",std::process::id()));
+                                    let _=site.eval_with_callback(r#"(()=>{
+                                        const raw=(document.body?.innerText||document.documentElement?.textContent||'').trim();
+                                        let data;
+                                        try{data=JSON.parse(raw)}catch{return 0}
+                                        const exit=data?.IsTor===true;
+                                        const noWebRTC=typeof RTCPeerConnection==='undefined' &&
+                                          typeof webkitRTCPeerConnection==='undefined';
+                                        return Number(exit)+2*Number(noWebRTC);
+                                      })()"#,move|result|{
+                                        // Never write/log the Tor exit IP.
+                                        let proof=result.trim().parse::<u8>().unwrap_or(0);
+                                        if proof==3{
+                                            let _=std::fs::write(marker,
+                                                "PASS: real WebView2 Tor exit confirmed; WebRTC constructor blocked");
+                                        }else{
+                                            let _=std::fs::write(failure,
+                                                format!("Tor site returned insufficient proof flags: {proof}"));
+                                        }
+                                    });
+                                }
+                            });
+                        });
+                    }
+                    #[cfg(windows)]
                     if event.url().scheme()=="https" || event.url().scheme()=="http"{
                         let task=for_load.clone();
                         let address=event.url().as_str().to_string();
@@ -4479,6 +4523,18 @@ fn browser_snapshot(app: tauri::AppHandle) -> Result<Snapshot,String> { snapshot
 async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Result<Value, String> {
     // Tor is deliberately opt-in. Never create a Tor WebView while bootstrapping,
     // and never replace a failed Tor connection with a direct network route.
+    if name=="tor-browser-smoke-failure" {
+        if !std::env::args().any(|a|a=="--minternet-tor-browser-smoke"){
+            return Err("Tor WebView probe reporting is available in CI smoke only".into());
+        }
+        let marker=std::env::temp_dir().join(format!(
+            "minternet-tor-browser-{}.failed",std::process::id()));
+        let info=value.as_str().unwrap_or("Unknown Tor WebView smoke failure");
+        let detail=info.chars().filter(|ch|ch.is_ascii_alphanumeric()||" -_:.()".contains(*ch))
+            .take(180).collect::<String>();
+        let _=std::fs::write(marker,format!("Tor WebView verification failed: {detail}"));
+        return Ok(json!({"ok":true}));
+    }
     if name=="tor-status" {
         #[cfg(any(windows,target_os="linux"))]
         {return Ok(tor_transport::status());}
@@ -7469,6 +7525,7 @@ fn main() {
             // not invoke the operating system's default browser.
             let smoke = std::env::args().any(|a| a == "--minternet-smoke");
             let turbo_smoke = std::env::args().any(|a| a == "--minternet-turbo-smoke");
+            let tor_browser_smoke = std::env::args().any(|a| a == "--minternet-tor-browser-smoke");
             let auth_popup_smoke = std::env::args().any(|a| a == "--minternet-auth-popup-smoke");
             let passkey_smoke = std::env::args().any(|a| a == "--minternet-passkey-smoke");
             let blank_render_smoke=std::env::args().any(|a|a=="--minternet-blank-render-smoke");
@@ -7518,7 +7575,27 @@ fn main() {
                                 let _=view.eval(r#"setTimeout(() =>
                                     window.minternetToast?.('Saved tabs were recovered from an interrupted session. Select a tab to reopen it.'),400)"#);
                             }
-                            if stability_smoke {
+                            if tor_browser_smoke {
+                                // Use the real chrome->native IPC route to create
+                                // a Tor tab, then load the Tor Project check inside
+                                // an actual child WebView2 (not curl or Node).
+                                let _=view.eval(r#"
+                                  setTimeout(async()=>{
+                                    try{
+                                      const invoke=window.__TAURI__.core.invoke;
+                                      const tor=await invoke("browser_action",{name:"tor",value:null});
+                                      if(!tor?.tor)throw Error("Native Tor tab not created");
+                                      await invoke("browser_action",{
+                                        name:"navigate",value:"https://check.torproject.org/api/ip"
+                                      });
+                                    }catch(error){
+                                      await window.__TAURI__.core.invoke("browser_action",{
+                                        name:"tor-browser-smoke-failure",value:String(error).slice(0,200)
+                                      }).catch(()=>{});
+                                    }
+                                  },800);
+                                "#);
+                            } else if stability_smoke {
                                 // Exercise the real trusted-chrome IPC, native
                                 // WebView2 creation, SPA URL capture and tab
                                 // controller teardown under rapid alternation.
