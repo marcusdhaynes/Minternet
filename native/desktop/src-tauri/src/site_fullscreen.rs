@@ -6,7 +6,7 @@ static FULLSCREEN_TAB:AtomicU32=AtomicU32::new(0);
 
 #[cfg(windows)]
 pub fn attach(app:&tauri::AppHandle,id:u32,view:&tauri::Webview){
-    use windows::Win32::Foundation::BOOL;
+    use windows::core::BOOL;
     use webview2_com::ContainsFullScreenElementChangedEventHandler;
     let host=app.clone();
     let _=view.with_webview(move|native|{
