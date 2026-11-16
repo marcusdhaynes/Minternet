@@ -46,7 +46,7 @@ test('API outage shows recoverable error rather than falsely saying up to date',
   assert.equal(await h.updates.checkForUpdate(),null);
   assert.equal(h.updates.lastStatus.kind,'offline');
   assert.ok(h.updates.lastStatus.message.includes('503'));
-  assert.equal(h.requests,2);
+  assert.equal(h.requests,4);
 });
 test('release without Windows EXE is not offered as Windows update',async()=>{
   const r={tag_name:'v9.0.0',assets:[{name:'checksums.txt'}],html_url:'https://github.com/example'};
@@ -68,7 +68,7 @@ test('the newest published release determines update availability without queryi
   assert.equal(await h.updates.checkForUpdate(),null);
   assert.equal(h.updates.lastStatus.kind,'verified');
   assert.match(h.updates.lastStatus.message,/latest published Minternet release/);
-  assert.equal(h.requests,1);
+  assert.equal(h.requests,2);
 });
 
 test('newer published release remains installable independently of later source changes',async()=>{
@@ -84,7 +84,7 @@ test('newer published release remains installable independently of later source 
   assert.equal(release.version,'0.3.0-build.1200-gaabbccdd');
   assert.equal(h.updates.lastStatus.kind,'verified');
   assert.match(h.updates.lastStatus.message,/New Minternet release available/);
-  assert.equal(h.requests,1);
+  assert.equal(h.requests,2);
 });
 
 test('release metadata API failures do not produce false up-to-date messages',async()=>{
@@ -92,4 +92,25 @@ test('release metadata API failures do not produce false up-to-date messages',as
   assert.equal(await h.updates.checkForUpdate(),null);
   assert.equal(h.updates.lastStatus.kind,'offline');
   assert.doesNotMatch(h.updates.lastStatus.message,/Up to date/);
+});
+
+test('newer stable release wins if releases/latest still points to an older build',async()=>{
+  const old={tag_name:'v0.3.0-build.949-g8e7f4c99',
+    assets:[{name:'Minternet-Windows-Portable-v0.3.0-build.949-g8e7f4c99.exe'}]};
+  const newer={tag_name:'v0.3.0-build.1200-gaabbccdd',
+    assets:[{name:'Minternet-Windows-Portable-v0.3.0-build.1200-gaabbccdd.exe'}]};
+  const h=harness(url=>response(200,url.includes('/latest')?old:[newer,old]));
+  const found=await h.updates.checkForUpdate();
+  assert.equal(found.version,'0.3.0-build.1200-gaabbccdd');
+  assert.equal(h.requests,2);
+});
+
+test('older out-of-order stable publications do not override the newer version',async()=>{
+  const versions=['v0.3.0-build.102-g12345678','v0.3.0-build.104-gabcdefab',
+    'v0.3.0-build.103-g12345678'];
+  const releases=versions.map(tag_name=>({tag_name,
+    assets:[{name:'Minternet-Windows-Portable-'+tag_name+'.exe'}]}));
+  const h=harness(url=>response(200,url.includes('/latest')?releases[2]:releases));
+  const result=await h.updates.checkForUpdate();
+  assert.equal(result.version,'0.3.0-build.104-gabcdefab');
 });
