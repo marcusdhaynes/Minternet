@@ -76,3 +76,25 @@ test('healthy blank DOM reloads its existing WebView2 controller once before ful
   assert.match(health,/"reloaded"/);
   assert.match(main,/proof-flags:\{flags\}/);
 });
+
+test('active page is checked beyond startup and completed navigations',()=>{
+ const main=read('native/desktop/src-tauri/src/main.rs');
+ const watchdog=main.slice(main.indexOf('fn schedule_startup_bounds_reconciliation('),
+   main.indexOf('fn schedule_page_bounds_reconciliation('));
+ assert.match(watchdog,/loop \{/);
+ assert.match(watchdog,/reconcile_visible_child_bounds\(&task\)/);
+ assert.match(watchdog,/render_health::schedule_blank_probe\(&task, id, url\)/);
+ assert.match(watchdog,/!tab\.loading && is_real_page_url\(&tab\.url\)/);
+});
+test('real GPU process loss rebinds the compositor without discarding user data',()=>{
+ const health=read('native/desktop/src-tauri/src/render_health.rs');
+ const surface=read('native/desktop/src-tauri/src/native_surface.rs');
+ const gpu=health.slice(health.indexOf('else if kind==COREWEBVIEW2_PROCESS_FAILED_KIND_GPU_PROCESS_EXITED'),
+   health.indexOf('Ok(())',health.indexOf('else if kind==COREWEBVIEW2_PROCESS_FAILED_KIND_GPU_PROCESS_EXITED')));
+ assert.match(gpu,/force_compositor_rebind\(&view\)/);
+ assert.match(gpu,/schedule_surface_restore\(&main\)/);
+ assert.doesNotMatch(gpu,/view\.reload\(|view\.close\(|remove_dir_all/);
+ assert.match(surface,/fn force_compositor_rebind\(/);
+ assert.match(surface,/controller\.SetBounds\(nudge\)/);
+ assert.match(surface,/controller\.SetBounds\(original\)/);
+});
