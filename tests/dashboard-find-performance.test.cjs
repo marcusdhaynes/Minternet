@@ -182,7 +182,7 @@ test('login autofill supports one-time password and delayed sign-in steps safely
   new vm.Script(script.replace('__MINTERNET_LOGIN_PAYLOAD__',
     JSON.stringify({origin:'https://accounts.example.com',username:'person',password:'secret'})));
   assert.match(script,/current-password/);
-  assert.match(script,/usernamePrepared=put/);
+  assert.match(script,/put\(username,credential\.username\)/);
   assert.match(script,/node\.shadowRoot/);
   assert.match(script,/frame\.defaultView\?\.location\.origin===credential\.origin/);
   assert.match(script,/register\.test\(location\.pathname\)/);
