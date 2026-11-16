@@ -765,6 +765,43 @@ jobs:
             if(!$p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}
             Remove-Item $geometryOk,$geometryFailed,$surfaceOk,$surfaceFailed,$watchdogOk,$watchdogFailed,$disturbedOk,$disturbedFailed -Force -ErrorAction SilentlyContinue
           }
+      - name: Verify replaced portable EXE restores last selected tab after update
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:TEMP 'minternet-update-e2e/Minternet.exe'
+          if(!(Test-Path -LiteralPath $exe)){throw 'Updated Minternet.exe is missing'}
+          $fixture = Join-Path $env:TEMP 'minternet-last-active-fixture.v1.json'
+          $data = @{
+            version = 1
+            tabs = @(
+              @{url='https://example.com/?minternet-last-active=previous';pinned=$false},
+              @{url='https://example.com/?minternet-last-active=selected';pinned=$false}
+            )
+            active = 1
+          } | ConvertTo-Json -Depth 5
+          [System.IO.File]::WriteAllText($fixture,$data)
+          $p = Start-Process -FilePath $exe -ArgumentList '--minternet-last-active-smoke' -PassThru
+          $proof = Join-Path $env:TEMP "minternet-last-active-$($p.Id).ok"
+          try {
+            $passed = $false
+            for($i=0;$i -lt 55;$i++){
+              Start-Sleep -Seconds 1
+              $p.Refresh()
+              if($p.HasExited){throw 'Updated EXE exited before restoring last active tab'}
+              if(Test-Path -LiteralPath $proof){$passed=$true;break}
+            }
+            if(!$passed){throw 'Updated EXE did not reopen the last selected saved website'}
+            $text=Get-Content -LiteralPath $proof -Raw
+            if($text -notmatch 'last active tab selected and rendered'){
+              throw "Updated EXE produced invalid session proof: $text"
+            }
+            "PASS: updated portable Minternet.exe restored previously selected website and real rendered DOM, not a blank dashboard." >> $env:GITHUB_STEP_SUMMARY
+          } finally {
+            $p.Refresh()
+            if(!$p.HasExited){Stop-Process -Id $p.Id -Force}
+            Remove-Item $fixture,$proof -Force -ErrorAction SilentlyContinue
+          }
       # Publish only after the full node, Rust and native Windows smoke suites.
       - name: Package verified and versioned portable EXE
         id: package
