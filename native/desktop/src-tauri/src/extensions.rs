@@ -91,6 +91,15 @@ fn parse_package(source:&str,path:&Path)->Result<(String,String,Vec<u8>),String>
     Ok((filename,id[..24].into(),bytes[offset..].to_vec()))
 }
 fn path_checked(path:&Path)->Result<(),String>{
+    // ZIP paths must be portable relative paths on every host OS. Unix Path
+    // treats C:/evil.js and backslash UNC paths as normal filenames; rejecting
+    // them only on Windows could allow the same archive to pass Linux CI and
+    // extract unsafely on a Windows device.
+    let portable=path.to_string_lossy();
+    if portable.contains(':') || portable.contains('\\') ||
+       portable.starts_with('/') || portable.starts_with("//"){
+        return Err("Extension archive contains an unsafe path".into());
+    }
     if path.components().all(|part|matches!(part,Component::Normal(_)))
         && path.components().count()>0 {Ok(())}
     else {Err("Extension archive contains an unsafe path".into())}
@@ -201,6 +210,9 @@ mod tests{
         assert!(path_checked(Path::new("manifest.json")).is_ok());
         assert!(path_checked(Path::new("../evil.js")).is_err());
         assert!(path_checked(Path::new("C:/evil.js")).is_err());
+        assert!(path_checked(Path::new("C:\\evil.js")).is_err());
+        assert!(path_checked(Path::new("\\\\server\\share\\unsafe.js")).is_err());
+        assert!(path_checked(Path::new("normal/assets/icon.png")).is_ok());
         assert!(!source_ok("other"));
     }
 }
