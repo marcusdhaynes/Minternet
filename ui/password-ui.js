@@ -142,7 +142,7 @@
   window.addEventListener?.('blur',()=>{if(!screen.hidden)close();});
   $('vaultClose').addEventListener('click',close);
   $('vaultLock').addEventListener('click',async()=>{
-    const result=await invoke('vault-lock');
+    const result=await invoke('vault-lock','logins');
     if(result?.ok){unlocked=false;sync();$('vaultMaster').value='';report('Vault locked.');}
   });
   $('vaultAuthForm').addEventListener('submit',async event=>{
