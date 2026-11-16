@@ -15,6 +15,8 @@ mod site_context_menu;
 #[cfg(windows)]
 mod render_health;
 #[cfg(windows)]
+mod render_visual;
+#[cfg(windows)]
 mod render_compat;
 mod extensions;
 mod portable_updater;
@@ -2267,7 +2269,10 @@ fn schedule_startup_bounds_reconciliation(app:&tauri::AppHandle){
                         })
                     };
                     if let Some((id, url)) = candidate {
-                        render_health::schedule_blank_probe(&task, id, url);
+                        render_health::schedule_blank_probe(&task,id,url.clone());
+                        // DOM health cannot see a DirectComposition texture
+                        // that has turned white while the webpage is alive.
+                        render_visual::schedule(&task,id,url,800);
                     }
                 }
             });
@@ -2489,7 +2494,8 @@ fn recover_stalled_site_if_url(app:&tauri::AppHandle,id:u32,
             let Some(tab)=b.tabs.iter().find(|tab|tab.id==id)else{return};
             if tab.url!=expected_url||!is_real_page_url(&tab.url){return;}
             let active=b.active_id==id;
-            if reason=="blank-document"&&(!active||tab.loading){return;}
+            if matches!(reason,"blank-document"|"visual-white")&&
+                (!active||tab.loading){return;}
             (tab.url.clone(),tab.view.clone(),active)
         };
         let Some(action)=render_health::claim(id,&current.0,reason) else {
@@ -3282,6 +3288,9 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                     #[cfg(windows)]
                     render_health::schedule_blank_probe(
                         &for_load,id,event.url().as_str().to_string());
+                    #[cfg(windows)]
+                    render_visual::schedule(&for_load,id,
+                        event.url().as_str().to_string(),2900);
                     if is_real_page_url(event.url().as_str()) {
                         apply_volume_to_site(&for_load,id,view.label(),true);
                     }
