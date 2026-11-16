@@ -84,13 +84,20 @@
     // saved logins disappeared: offer to unlock them at the login form.
     const needsUnlock=!status?.unlocked;
     if(needsUnlock && (ctx.kind!=='login'||!status?.exists))return;
-    let logins=[],cards=[],identities=[];
+    let logins=[],portalLogins=[],cards=[],identities=[];
     if(ctx.kind==='login'){
       if(!needsUnlock){
         const all=await cmd('vault-list');
         logins=(Array.isArray(all)?all:[]).filter(item=>
           item.origin===ctx.origin&&item.autofill!==false);
-        if(!logins.length&&!ctx.saveReady)return;
+        // WGU's MyWGU portal and its SSO provider use different HTTPS
+        // origins. Offer an explicit, one-time association only on the
+        // verified WGU authentication origin. Never silently share the
+        // password across subdomains or arbitrary redirects.
+        if(!logins.length&&ctx.origin==='https://access.wgu.edu')
+          portalLogins=(Array.isArray(all)?all:[]).filter(item=>
+            item.origin==='https://my.wgu.edu'&&item.autofill!==false);
+        if(!logins.length&&!portalLogins.length&&!ctx.saveReady)return;
       }
     }else if(ctx.kind==='payment'){
       const all=await cmd('vault-card-list');
@@ -121,6 +128,17 @@
             const answer=await cmd('vault-fill',item.username);
             if(answer?.filled)hide();
             else window.minternetToast?.('No matching login form found.');
+          },'form-suggestion-option'));
+        }
+        for(const item of portalLogins.slice(0,7)){
+          panel.append(action('Use WGU portal login · '+item.username,async()=>{
+            const answer=await cmd('vault-associate-login',{
+              origin:item.origin,username:item.username
+            });
+            if(answer?.ok){
+              hide();
+              window.minternetToast?.('WGU login linked to access.wgu.edu. Autofill is enabled while your vault is unlocked.');
+            }else window.minternetToast?.(answer?.message||'Could not link the WGU login.');
           },'form-suggestion-option'));
         }
         if(ctx.saveReady)panel.append(action('＋ Save this login',async()=>{
