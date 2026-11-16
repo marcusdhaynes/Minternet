@@ -175,7 +175,30 @@ test('retries respect deliberately cleared fields and never refill the same inpu
 test('WGU native retry is scoped to exact access.wgu.edu origin',()=>{
   const main=fs.readFileSync(path.join(__dirname,'../native/desktop/src-tauri/src/main.rs'),'utf8');
   assert.match(main,/fn schedule_wgu_login_autofill/);
-  assert.match(main,/tab\.url\.starts_with\("https:\/\/access\.wgu\.edu\/"\)/);
+  assert.match(main,/password_vault::origin\(&tab\.url\)\.ok\(\)\.as_deref\(\)/);
+  assert.match(main,/Some\("https:\/\/access\.wgu\.edu"\)/);
+  assert.match(main,/Duration::from_secs\(4\)/);
+  assert.match(main,/vault_section_allowed\(&owner,"logins"\)/);
   assert.match(main,/schedule_wgu_login_autofill\(app\.handle\(\)\)/);
   assert.match(main,/vault\.matching\("https:\/\/my\.wgu\.edu",false,None\)/);
+});
+
+test('WGU login uses direct matching or portal fallback without a popup',()=>{
+  const main=fs.readFileSync(path.join(__dirname,'../native/desktop/src-tauri/src/main.rs'),'utf8');
+  const start=main.indexOf('fn fill_saved_credential(');
+  const end=main.indexOf('const IDENTITY_FILL_JS',start);
+  const fill=main.slice(start,end);
+  assert.match(fill,/vault\.matching\(&actual_origin,manual,username\)/);
+  assert.match(fill,/vault\.matching\("https:\/\/my\.wgu\.edu",false,None\)/);
+  assert.match(fill,/view\.eval\(&script\)/);
+  assert.doesNotMatch(fill,/vault-associate-login|chrome-overlay|window\.confirm/);
+});
+test('no repeated WGU password prompt when optional Windows auto unlock is enabled',()=>{
+  const main=fs.readFileSync(path.join(__dirname,'../native/desktop/src-tauri/src/main.rs'),'utf8');
+  assert.match(main,/unlock_permitted_sections_from_device\(app\.handle\(\)\)/);
+  assert.match(main,/device_secrets::read\("vault"\)/);
+  const preferences=fs.readFileSync(path.join(__dirname,'../native/desktop/src-tauri/src/lock_preferences.rs'),'utf8');
+  assert.match(preferences,/logins:!policy\.logins/);
+  const script=file('login_autofill.js');
+  assert.match(script,/if\(\(password\.value&&!marked\.has\(password\)\)/);
 });
