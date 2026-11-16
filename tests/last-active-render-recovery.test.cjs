@@ -30,8 +30,8 @@ test('saved active index maps to the actual surviving tab, not the filtered arra
 });
 test('never writes private or secret tab locations to the persisted session',()=>{
  const saved=chunk('fn save_session(', 'fn snapshot(app:');
- assert.match(saved,/!tab\.private &&\s*tab\.secret_id\.is_none\(\)/);
- assert.match(saved,/!t\.private && t\.secret_id\.is_none\(\)/);
+ assert.match(saved,/!tab\.private && !tab\.tor &&\s*tab\.secret_id\.is_none\(\)/);
+ assert.match(saved,/!t\.private && !t\.tor && t\.secret_id\.is_none\(\)/);
  assert.match(saved,/tab\.sync_id/);
  assert.doesNotMatch(saved,/document\.cookie|localStorage/);
 });
