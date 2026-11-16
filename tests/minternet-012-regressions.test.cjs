@@ -72,7 +72,8 @@ test('blank-page recovery is origin-agnostic, double checked and nondestructive'
   assert.match(health,/matches!\(url\.scheme\(\),"https"\|"http"\)/);
   assert.match(health,/consecutive=Arc::new\(AtomicU8::new\(0\)\)/);
   assert.match(health,/hits\.fetch_add\(1,Ordering::AcqRel\)==0/);
-  assert.match(native,/if reason=="blank-document"/);
+  assert.match(native,/action==render_health::Recovery::Reload/);
+  assert.match(health,/Some\(Recovery::Recreate\)/);
   assert.match(native,/if view\.reload\(\)\.is_ok\(\)/);
   const updater=read('native/desktop/src-tauri/src/portable_updater.rs');
   assert.match(updater,/pub fn confirm_startup_when_ready\(app:&AppHandle\)/);
