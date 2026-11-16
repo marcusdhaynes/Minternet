@@ -2,11 +2,6 @@ name: Publish Minternet UI preview
 on:
   push:
     branches: [main]
-    paths:
-      - 'ui/**'
-      - 'docs/preview-bridge.js'
-      - 'docs/preview.css'
-      - '.github/workflows/pages.yml'
   workflow_dispatch:
 permissions:
   contents: read
@@ -26,8 +21,8 @@ jobs:
       - name: Assemble static UI preview
         run: |
           mkdir -p site
-          cp ui/minternet-brand.png ui/minternet-brand.png site/
-          cp ui/index.html ui/styles.css ui/app.js ui/native-bridge.js ui/bookmark-model.js ui/bookmark-ui.js ui/tab-group-model.js ui/tab-group-ui.js ui/chrome-native-menu.js ui/search-settings.js site/
+          # Include every UI module referenced by the page, not a handpicked subset.
+          cp -a ui/. site/
           cp docs/preview-bridge.js site/preview-bridge.js
           cp docs/preview.css site/preview.css
           python3 - <<'PY'
@@ -44,6 +39,15 @@ jobs:
           PY
           node --check site/preview-bridge.js
           test -s site/preview.css
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          Path('site/build-info.json').write_text(json.dumps({
+              'platform':'web-preview',
+              'sourceCommit':os.environ['GITHUB_SHA'],
+              'workflowRun':os.environ['GITHUB_RUN_ID']
+          }, indent=2))
+          PY
           touch site/.nojekyll
       - name: Configure Pages
         uses: actions/configure-pages@v5
@@ -51,6 +55,13 @@ jobs:
         uses: actions/upload-pages-artifact@v4
         with:
           path: site
+      - name: Archive this commit's web preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: minternet-web-preview-${{ github.sha }}
+          path: site/
+          if-no-files-found: error
+          retention-days: 90
       - name: Deploy site
         id: deployment
         uses: actions/deploy-pages@v4
