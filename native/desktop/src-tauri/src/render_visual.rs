@@ -3,7 +3,7 @@
 //! exposed to the toolbar, or sent over the network. Only a boolean survives.
 #![cfg(windows)]
 use std::{collections::HashMap,io::Cursor,
-    sync::{Mutex,OnceLock,atomic::{AtomicU64,Ordering}},time::{Duration,Instant}};
+    sync::{Mutex,OnceLock,atomic::{AtomicBool,AtomicU64,Ordering}},time::{Duration,Instant}};
 use tauri::Manager;
 use windows::Win32::{
     Foundation::HGLOBAL,
@@ -16,6 +16,10 @@ use webview2_com::{CapturePreviewCompletedHandler,
 const MAX_CAPTURE_BYTES:usize=12*1024*1024;
 static BUSY:OnceLock<Mutex<HashMap<u32,(Instant,u64)>>>=OnceLock::new();
 static CAPTURE_SEQ:AtomicU64=AtomicU64::new(1);
+static VISUAL_SMOKE_CONFIRMED:AtomicBool=AtomicBool::new(false);
+pub fn smoke_confirmed()->bool{
+    VISUAL_SMOKE_CONFIRMED.load(Ordering::Acquire)
+}
 static WHITE:OnceLock<Mutex<HashMap<u32,(String,Instant,u8)>>>=OnceLock::new();
 
 fn pending()->&'static Mutex<HashMap<u32,(Instant,u64)>>{
@@ -158,6 +162,9 @@ fn handle_visual_result(app:tauri::AppHandle,id:u32,url:String,white:bool){
             let _=task.run_on_main_thread(move||{
                 if match_active(&after,id,&expected_url).is_some(){
                     super::render_health::record(&after,id,"visual-white-confirmed");
+                    if std::env::args().any(|arg|arg=="--minternet-white-surface-smoke"){
+                        VISUAL_SMOKE_CONFIRMED.store(true,Ordering::Release);
+                    }
                     // The existing bounded recovery registry avoids looping.
                     super::recover_stalled_site_if_url(&after,id,
                         &expected_url,"visual-white");
