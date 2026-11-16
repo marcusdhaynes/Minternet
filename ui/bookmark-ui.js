@@ -316,6 +316,47 @@
   // Native HTML drag-and-drop in the trusted WebView2 chrome. A drag source
   // must have started here: never trust an externally supplied bookmark ID.
   let draggedBarId=null,draggedBarElement=null,barDropIndicator=null;
+  let folderHoverTimer=null,folderHoverId=null;
+  function cancelFolderHover(){
+    if(folderHoverTimer!==null)clearTimeout(folderHoverTimer);
+    folderHoverTimer=null;folderHoverId=null;
+  }
+  // Dragging over a Bookmark Bar folder opens the same cascading folder menu
+  // as clicking it, so a bookmark can be placed into an arbitrarily nested
+  // folder without first navigating into the bookmark manager.
+  function scheduleFolderHover(event,placement){
+    const barFolder=placement?.inside && placement.element?.closest('#bookmarkItems');
+    const folder=barFolder?placement.parentId:null;
+    if(!folder||folder===draggedBarId||draggedIds.includes(folder)){
+      cancelFolderHover();return;
+    }
+    if(folder===folderHoverId)return;
+    cancelFolderHover();
+    folderHoverId=folder;
+    const button=placement.element;
+    folderHoverTimer=setTimeout(()=>{
+      folderHoverTimer=null;
+      if(draggedBarId && folderHoverId===folder &&
+          model.find(data,folder)?.kind==='folder'){
+        void window.minternetMenus?.folder?.(folder,button);
+      }
+    },600);
+  }
+  // A long list or horizontal bar should scroll as the pointer approaches
+  // its visible edge during a drag, without changing any stored items.
+  function scrollDragTarget(event){
+    const scroller=event.target?.closest?.('#bookmarkItems,#bookmarkTree,#bookmarkFolderContents,.system-popup-list');
+    if(!scroller)return;
+    const bounds=scroller.getBoundingClientRect();
+    const edge=22;
+    if(scroller.id==='bookmarkItems'){
+      if(event.clientX<bounds.left+edge)scroller.scrollLeft-=14;
+      else if(event.clientX>bounds.right-edge)scroller.scrollLeft+=14;
+    }else{
+      if(event.clientY<bounds.top+edge)scroller.scrollTop-=12;
+      else if(event.clientY>bounds.bottom-edge)scroller.scrollTop+=12;
+    }
+  }
   let ignoreBarClick=null;
   // Long-press once to enter multi-select. Ctrl/Cmd-click also works.
   const selectedBookmarks=new Set(),expandedFolders=new Set();
@@ -366,6 +407,7 @@
     barDropIndicator=null;
   }
   function finishBarDrag(){
+    cancelFolderHover();
     clearBarIndicator();
     draggedBarElement?.classList.remove('bookmark-reorder-source');
     draggedBarElement=null;
@@ -385,8 +427,9 @@
       event.dataTransfer.setData('application/x-minternet-bookmark',
         JSON.stringify({id:item.id,url:item.url,name:item.name||''}));
       event.dataTransfer.setData('text/uri-list',item.url);
+      event.dataTransfer.setData('text/plain',item.url);
     }else event.dataTransfer.setData('text/plain','Bookmark folder');
-    event.dataTransfer.effectAllowed='move';
+    event.dataTransfer.effectAllowed='copyMove';
   }
   function barPlacement(event){
     const target=event.target;
@@ -669,12 +712,17 @@
   function dropTarget(event){
     const target=event.target;
     if(!target?.closest)return null;
-    const bookmark=target.closest('.bookmark-item, .bookmark-tree-line, .bookmark-folder-row');
+    const bookmark=target.closest('.bookmark-item,.bookmark-tree-line,.bookmark-folder-row,.bookmark-popup-item');
     if(bookmark){
       const id=bookmark.dataset.bookmarkId;
       const node=id&&model.find(data,id);
       if(node?.kind==='folder')return id;
+      // Dropping an external URL on a link in a nested folder should import
+      // beside that link, not unexpectedly onto the Bookmark Bar.
+      if(node?.kind==='link')return model.location(data,id)?.parent?.id||model.BOOKMARK_BAR_ID;
     }
+    const popup=target.closest('[data-bookmark-folder-id]');
+    if(popup?.dataset.bookmarkFolderId)return popup.dataset.bookmarkFolderId;
     if(target.closest('#bookmarkFolderMenu')&&mode==='folder')return folderId;
     if(target.closest('#bookmarkBar,#bookmarkManager,#bookmarkTree,#bookmarkItems'))return model.BOOKMARK_BAR_ID;
     return null;
@@ -697,7 +745,7 @@
     if(bar)return {...bar,parentId:bar.parentId||model.BOOKMARK_BAR_ID};
     const target=event.target;
     if(!target?.closest)return null;
-    const row=target.closest('.bookmark-tree-line,.bookmark-folder-row');
+    const row=target.closest('.bookmark-tree-line,.bookmark-folder-row,.bookmark-popup-item');
     if(row){
       const node=model.find(data,row.dataset.bookmarkId);
       if(!node)return null;
@@ -710,19 +758,31 @@
       const parent=model.location(data,node.id)?.parent?.id||model.BOOKMARK_BAR_ID;
       return {parentId:parent,anchorId:node.id,after:fraction>.5,element:row};
     }
+    // Nested flyout lists (including empty folders) accept drops in their
+    // blank space as well as on existing entries.
+    const popup=target.closest('[data-bookmark-folder-id]');
+    if(popup?.dataset.bookmarkFolderId)return {
+      parentId:popup.dataset.bookmarkFolderId,anchorId:null,inside:true,element:popup};
+    if(target.closest('#bookmarkFolderContents,#bookmarkFolderMenu')&&folderId)return {
+      parentId:folderId,anchorId:null,inside:true,element:null};
     if(target.closest('#bookmarkTree,#bookmarkManager'))return {
       parentId:model.BOOKMARK_BAR_ID,anchorId:null,element:null};
-    if(target.closest('#bookmarkFolderContents,#bookmarkFolderMenu')&&folderId)return {
-      parentId:folderId,anchorId:null,element:null};
     return null;
   }
   // Trusted in-browser move/reorder takes precedence over external imports.
   document.addEventListener('dragover',event=>{
     if(!draggedBarId)return;
     const placement=internalPlacement(event);
-    if(!placement){clearBarIndicator();return;}
+    if(!placement){clearBarIndicator();cancelFolderHover();return;}
     event.preventDefault();event.stopImmediatePropagation();
     if(event.dataTransfer)event.dataTransfer.dropEffect='move';
+    scrollDragTarget(event);
+    scheduleFolderHover(event,placement);
+    // HTML5 drag events do not reliably generate mouseenter, so explicitly
+    // expose the hovered cascading submenu while the pointer is dragging.
+    if(placement.inside && placement.element?.classList.contains('bookmark-popup-item')){
+      placement.element.closest('.system-popup-has-child')?.classList.add('system-popup-open');
+    }
     clearBarIndicator();
     if(placement.element){
       barDropIndicator=placement.element;
@@ -743,6 +803,7 @@
       if(placement.inside)expandedFolders.add(placement.parentId);
       selectedBookmarks.clear();
       persist();
+      window.minternetMenus?.dismissBookmarkDrag?.();
     }else if(ids.length>1||placement.inside)toast('Cannot move selection into this location.');
     refreshSelections();
   },true);
@@ -755,13 +816,14 @@
     if(event.target?.closest?.('[data-secret-target],#secretBookmarksBar,#secretTree'))return;
     if(!externalTransfer(event.dataTransfer))return;
     const parent=dropTarget(event);
+    scrollDragTarget(event);
     // Browser-chrome must never navigate to dropped external files or URLs.
     event.preventDefault();
     if(parent===null){clearDrop();return;}
     event.dataTransfer.dropEffect='copy';
     clearDrop();
-    hoverTarget=event.target.closest('.bookmark-item,.bookmark-tree-line,.bookmark-folder-row')
-      || event.target.closest('#bookmarkManager,#bookmarkBar,#bookmarkFolderMenu');
+    hoverTarget=event.target.closest('.bookmark-item,.bookmark-tree-line,.bookmark-folder-row,.bookmark-popup-item')
+      || event.target.closest('#bookmarkManager,#bookmarkBar,#bookmarkFolderMenu,.bookmark-folder-popup');
     hoverTarget?.classList.add('bookmark-drop-target');
     document.documentElement.classList.add('bookmark-drag-over');
   },true);
@@ -1246,6 +1308,13 @@
   // website WebView2 pages have neither this JS context nor native menu IPC.
   window.minternetBookmarks = {
     getState: () => data,
+    // Only exposes a trusted local drag already initiated by the user.
+    // The controller validates IDs against the live model.
+    beginDragById:(id,row,event)=>{
+      const node=model.find(data,id);
+      if(!node||id===model.BOOKMARK_BAR_ID)return event.preventDefault();
+      beginBookmarkDrag(node,row,event);
+    },
     edit, deleteBookmark, openInNewTab, newFolder: parent => openEditor('folder',null,parent||null),
     savePage: parent => {
       const target=model.url(currentUrl);
