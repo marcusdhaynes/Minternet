@@ -2,7 +2,7 @@
 //! CapturePreview stays strictly in memory: no screenshot is saved, logged,
 //! exposed to the toolbar, or sent over the network. Only a boolean survives.
 #![cfg(windows)]
-use std::{collections::{HashMap,HashSet},io::Cursor,
+use std::{collections::HashMap,io::Cursor,
     sync::{Mutex,OnceLock},time::{Duration,Instant}};
 use tauri::Manager;
 use windows::Win32::{
@@ -14,11 +14,19 @@ use webview2_com::{CapturePreviewCompletedHandler,
     Microsoft::Web::WebView2::Win32::COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG};
 
 const MAX_CAPTURE_BYTES:usize=12*1024*1024;
-static BUSY:OnceLock<Mutex<HashSet<u32>>>=OnceLock::new();
+static BUSY:OnceLock<Mutex<HashMap<u32,Instant>>>=OnceLock::new();
 static WHITE:OnceLock<Mutex<HashMap<u32,(String,Instant,u8)>>>=OnceLock::new();
 
-fn pending()->&'static Mutex<HashSet<u32>>{
-    BUSY.get_or_init(||Mutex::new(HashSet::new()))
+fn pending()->&'static Mutex<HashMap<u32,Instant>>{
+    BUSY.get_or_init(||Mutex::new(HashMap::new()))
+}
+fn begin_capture(id:u32)->bool{
+    let Ok(mut entries)=pending().lock() else{return false};
+    // WebView2 can return S_OK but omit the CapturePreview callback if a
+    // controller becomes hidden. A stale in-flight marker must not disable
+    // health supervision forever.
+    entries.retain(|_,when|when.elapsed()<Duration::from_secs(18));
+    entries.insert(id,Instant::now()).is_none()
 }
 fn clear_pending(id:u32){
     if let Ok(mut pending)=pending().lock(){pending.remove(&id);}
@@ -157,9 +165,7 @@ pub fn schedule(app:&tauri::AppHandle,id:u32,url:String,delay_ms:u64){
         let worker=task.clone();
         let _=task.run_on_main_thread(move||{
             let Some(label)=match_active(&worker,id,&url) else{return};
-            if !pending().lock().is_ok_and(|mut busy|busy.insert(id)){
-                return;
-            }
+            if !begin_capture(id){return;}
             let Some(view)=worker.get_webview(&label) else{
                 clear_pending(id);return;
             };
@@ -202,6 +208,31 @@ mod tests{
     #[test] fn invalid_png_is_not_a_white_page(){
         assert!(!fully_white(&[]));
         assert!(!fully_white(b"not an image"));
+    }
+    fn sample_png(with_mark:bool)->Vec<u8>{
+        let (width,height)=(300usize,220usize);
+        let mut source=vec![255u8;width*height*3];
+        if with_mark{
+            for y in 30..100{
+                for x in 50..200{
+                    let i=(y*width+x)*3;
+                    source[i]=15;source[i+1]=15;source[i+2]=15;
+                }
+            }
+        }
+        let mut output=Vec::new();
+        {
+            let mut encoder=png::Encoder::new(&mut output,width as u32,height as u32);
+            encoder.set_color(png::ColorType::Rgb);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer=encoder.write_header().unwrap();
+            writer.write_image_data(&source).unwrap();
+        }
+        output
+    }
+    #[test]fn captured_compositor_pixels_classify_white_not_ordinary_pages(){
+        assert!(fully_white(&sample_png(false)));
+        assert!(!fully_white(&sample_png(true)));
     }
     #[test] fn repeated_white_frames_required_for_destructive_recovery(){
         let id=std::process::id();
