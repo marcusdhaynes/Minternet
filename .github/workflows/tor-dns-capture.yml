@@ -10,6 +10,9 @@ on:
     - cron: '11 10 * * 2'
 permissions:
   contents: read
+concurrency:
+  group: tor-dns-main
+  cancel-in-progress: true
 jobs:
   transport-dns-capture:
     runs-on: ubuntu-22.04

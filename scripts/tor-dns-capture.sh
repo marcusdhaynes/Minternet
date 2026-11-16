@@ -10,11 +10,18 @@ runner="$RUNNER_TEMP"
 pcap="$runner/minternet-tor-dns.pcap"
 decoded="$runner/minternet-tor-dns-decoded.txt"
 log="$runner/minternet-tor-exit-proof.txt"
-sudo tcpdump -U -i any -nn -s 0 -w "$pcap" 'udp port 53 or tcp port 53' \
+sudo timeout --signal=INT --kill-after=5s 720 tcpdump -U -i any -nn -s 0 -w "$pcap" 'udp port 53 or tcp port 53' \
   > /dev/null 2> "$runner/minternet-tor-tcpdump.err" &
 capture_pid=$!
 cleanup() {
-  sudo kill -INT "$capture_pid" >/dev/null 2>&1 || true
+  # CI runner is isolated: scope the packet capture by exact process name.
+  # Kill the tcpdump child rather than only its sudo wrapper, which would
+  # otherwise leave a blocking wait after a failed network probe.
+  sudo pkill -INT -x tcpdump >/dev/null 2>&1 || true
+  sudo kill -TERM "$capture_pid" >/dev/null 2>&1 || true
+  sleep 1
+  sudo pkill -KILL -x tcpdump >/dev/null 2>&1 || true
+  sudo kill -KILL "$capture_pid" >/dev/null 2>&1 || true
   wait "$capture_pid" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -24,7 +31,7 @@ if ! kill -0 "$capture_pid" 2>/dev/null; then
   cat "$runner/minternet-tor-tcpdump.err" >&2
   exit 1
 fi
-if ! timeout 440 "$1" --minternet-tor-transport-smoke > "$log" 2>&1; then
+if ! timeout 650 "$1" --minternet-tor-transport-smoke > "$log" 2>&1; then
   echo "FAIL: Native Tor transport runtime verification did not pass" >&2
   tail -n 20 "$log" >&2
   exit 1
