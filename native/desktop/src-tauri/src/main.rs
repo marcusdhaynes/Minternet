@@ -2237,6 +2237,28 @@ fn schedule_startup_bounds_reconciliation(app:&tauri::AppHandle){
                 let Some(window)=task.get_window("main")else{return};
                 if window.is_minimized().unwrap_or(true){return;}
                 reconcile_visible_child_bounds(&task);
+                // A correctly sized WebView2 child can still display a white
+                // compositor/document after an SPA transition or GPU restart.
+                // NavigationCompleted only checks once; supervise the active
+                // settled HTTPS page throughout the browser session.
+                // The probe reads an allowlisted bitmask only (no page data).
+                #[cfg(windows)]
+                if cycles % (if cycles < 60 { 15 } else { 3 }) == 0 {
+                    let candidate = {
+                        let state = task.state::<Mutex<Browser>>();
+                        state.lock().ok().and_then(|browser| {
+                            browser.active().and_then(|tab| {
+                                if !tab.loading && is_real_page_url(&tab.url)
+                                    && tab.view.is_some() {
+                                    Some((tab.id, tab.url.clone()))
+                                } else { None }
+                            })
+                        })
+                    };
+                    if let Some((id, url)) = candidate {
+                        render_health::schedule_blank_probe(&task, id, url);
+                    }
+                }
             });
         }
     });
