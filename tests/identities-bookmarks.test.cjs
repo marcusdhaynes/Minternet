@@ -18,8 +18,8 @@ test('identities are encrypted by the native password vault, never localStorage'
 test('form inspection is metadata only and secret saving requires explicit action',()=>{
  const native=read('native/desktop/src-tauri/src/main.rs');
  const ui=read('ui/form-suggestions.js');
- const span=native.split('const FORM_FIELD_CONTEXT_JS:&str=')[1]
-   .split('const CAPTURE_LOGIN_JS:&str=')[0];
+ assert.match(native,/include_str!\("login_form_context\.js"\)/);
+ const span=read('native/desktop/src-tauri/src/login_form_context.js');
  assert.match(span,/hasValue:entered/);
  assert.match(span,/fieldIndex/);
  assert.doesNotMatch(span,/password:pw\[/);
