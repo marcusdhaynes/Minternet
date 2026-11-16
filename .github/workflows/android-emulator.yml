@@ -2,9 +2,6 @@ name: Android emulator browser and private-session smoke
 on:
   push:
     branches: [main]
-    paths:
-      - 'native/android/**'
-      - '.github/workflows/android-emulator.yml'
   workflow_dispatch:
 permissions:
   contents: read
