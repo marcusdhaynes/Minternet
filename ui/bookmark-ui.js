@@ -854,7 +854,7 @@
     const parent=dropTarget(event);
     if(!externalTransfer(event.dataTransfer))return;
     event.preventDefault();event.stopPropagation();
-    if(parent===null){clearDrop();return;}
+    if(parent===null){clearDrop();cancelFolderHover();return;}
     // Capture text formats synchronously: browser DataTransfer is cleared after
     // the drop event finishes, even while files are read asynchronously.
     const dt=event.dataTransfer;
