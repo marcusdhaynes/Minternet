@@ -70,17 +70,19 @@ pub fn verify(view:&tauri::Webview,parent:isize,wanted:Bounds){
 /// WebView2 can reset IsVisible after a renderer/browser process failure or
 /// child re-parent. Repair only a false state; don't repeatedly toggle healthy
 /// controllers (which would cause white flashes).
+fn correct_visibility(controller:&ICoreWebView2Controller)->bool{
+    let mut visible=BOOL::default();
+    if unsafe{controller.IsVisible(&mut visible)}.is_err(){return false;}
+    if visible.as_bool(){return false;}
+    if unsafe{controller.SetIsVisible(true)}.is_err(){return false;}
+    // A restored HWND may have a stale DirectComposition surface.
+    let _=unsafe{controller.NotifyParentWindowPositionChanged()};
+    true
+}
+
 pub fn ensure_visible(view:&tauri::Webview){
     let _=view.with_webview(|native|{
-        let controller=native.controller();
-        let mut visible=BOOL::default();
-        if unsafe{controller.IsVisible(&mut visible)}.is_ok() && !visible.as_bool(){
-            if unsafe{controller.SetIsVisible(true)}.is_ok(){
-                // The restored window can still hold an old DirectComposition
-                // surface after its controller silently became hidden.
-                let _=unsafe{controller.NotifyParentWindowPositionChanged()};
-            }
-        }
+        correct_visibility(&native.controller());
     });
 }
 
@@ -113,7 +115,18 @@ pub fn smoke(view:&tauri::Webview,parent:isize,wanted:Bounds){
                 && !different([inner.left,inner.top,
                     inner.right-inner.left,inner.bottom-inner.top],
                     [0,0,wanted[2],wanted[3]]);
+            // CI reproduces the other startup failure: a geometrically
+            // valid controller that WebView2 unexpectedly marks invisible.
+            let hidden=unsafe{controller.SetIsVisible(false)}.is_ok();
+            let mut invisible=BOOL::default();
+            let observed_hidden=unsafe{controller.IsVisible(&mut invisible)}.is_ok()
+                && !invisible.as_bool();
+            let restored=correct_visibility(&controller);
+            let mut visible_again=BOOL::default();
+            let visible=unsafe{controller.IsVisible(&mut visible_again)}.is_ok()
+                && visible_again.as_bool();
             moved&&viewport_changed&&was_wrong&&corrected&&host_right&&viewport_right
+                &&hidden&&observed_hidden&&restored&&visible
         }else{false};
         let marker=std::env::temp_dir().join(format!(
             "minternet-native-surface-{}.{}",
