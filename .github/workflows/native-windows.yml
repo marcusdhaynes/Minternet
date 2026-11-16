@@ -217,10 +217,30 @@ jobs:
             if ($proof -notmatch "PASS: actual WebView2 child HWND and controller corrected without navigation"){
               throw "Unexpected native surface proof: $proof"
             }
-            "PASS: both Tauri bounds and real HWND/controller bounds recovered from deliberately corrupted offset/size, without reloading a website." >> $env:GITHUB_STEP_SUMMARY
+            # The delayed fault occurs AFTER all one-shot startup passes.
+            # Require the periodic watchdog to restore native HWND/controller
+            # bounds autonomously. Without this, an update can still reopen
+            # on the user's displaced white rectangle despite passing CI.
+            $disturbedOk = Join-Path $env:TEMP "minternet-watchdog-disturbed-$($p.Id).ok"
+            $disturbedFail = Join-Path $env:TEMP "minternet-watchdog-disturbed-$($p.Id).failed"
+            $watchdogOk = Join-Path $env:TEMP "minternet-watchdog-$($p.Id).ok"
+            $watchdogFail = Join-Path $env:TEMP "minternet-watchdog-$($p.Id).failed"
+            $recovered = $false
+            for ($i = 0; $i -lt 50; $i++) {
+              Start-Sleep -Milliseconds 500
+              $p.Refresh()
+              if ($p.HasExited) { throw "Browser closed during delayed compositor repair" }
+              if (Test-Path $disturbedFail) { throw "Could not reproduce delayed native white rectangle" }
+              if (Test-Path $watchdogFail) { throw "Native watchdog failed to correct delayed white rectangle" }
+              if ((Test-Path $disturbedOk) -and (Test-Path $watchdogOk)) {
+                $recovered = $true; break
+              }
+            }
+            if (!$recovered) { throw "Automatic watchdog did not repair delayed native white rectangle" }
+            "PASS: deliberate real native HWND/controller drift after startup was repaired automatically, without reloading or resetting the profile." >> $env:GITHUB_STEP_SUMMARY
           } finally {
             if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
-            Remove-Item $passed,$failed,$nativeOk,$nativeFailed -Force -ErrorAction SilentlyContinue
+            Remove-Item $passed,$failed,$nativeOk,$nativeFailed,$disturbedOk,$disturbedFail,$watchdogOk,$watchdogFail -Force -ErrorAction SilentlyContinue
           }
       - name: Verify OAuth popup renders with a working native window.opener
         shell: pwsh
@@ -654,6 +674,10 @@ jobs:
           $geometryFailed = Join-Path $env:TEMP "minternet-geometry-$($p.Id).failed"
           $surfaceOk = Join-Path $env:TEMP "minternet-native-surface-$($p.Id).ok"
           $surfaceFailed = Join-Path $env:TEMP "minternet-native-surface-$($p.Id).failed"
+          $watchdogOk = Join-Path $env:TEMP "minternet-watchdog-$($p.Id).ok"
+          $watchdogFailed = Join-Path $env:TEMP "minternet-watchdog-$($p.Id).failed"
+          $disturbedOk = Join-Path $env:TEMP "minternet-watchdog-disturbed-$($p.Id).ok"
+          $disturbedFailed = Join-Path $env:TEMP "minternet-watchdog-disturbed-$($p.Id).failed"
           try {
             $success = $false
             for($i=0;$i -lt 80;$i++) {
@@ -662,17 +686,20 @@ jobs:
               if($p.HasExited){throw "Updated browser exited before native WebView2 surface was restored"}
               if(Test-Path -LiteralPath $geometryFailed){throw "Updated EXE geometry recovery failed"}
               if(Test-Path -LiteralPath $surfaceFailed){throw "Updated EXE visibility/compositor recovery failed"}
-              if((Test-Path -LiteralPath $geometryOk) -and (Test-Path -LiteralPath $surfaceOk)){
+              if(Test-Path -LiteralPath $disturbedFailed){throw "Updated EXE delayed compositor fault could not be reproduced"}
+              if(Test-Path -LiteralPath $watchdogFailed){throw "Updated EXE failed its automatic late compositor watchdog"}
+              if((Test-Path -LiteralPath $geometryOk) -and (Test-Path -LiteralPath $surfaceOk) -and
+                 (Test-Path -LiteralPath $disturbedOk) -and (Test-Path -LiteralPath $watchdogOk)){
                 $success = $true
                 break
               }
             }
             if(!$success){throw "Updated EXE failed to prove native WebView2 surface visibility and geometry"}
-            "PASS: replaced EXE repaired deliberately hidden WebView2 controller and displaced HWND." >> $env:GITHUB_STEP_SUMMARY
+            "PASS: replaced EXE repaired deliberately hidden WebView2 controller, displaced HWND, and delayed white rectangle without direct recovery." >> $env:GITHUB_STEP_SUMMARY
           } finally {
             $p.Refresh()
             if(!$p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}
-            Remove-Item $geometryOk,$geometryFailed,$surfaceOk,$surfaceFailed -Force -ErrorAction SilentlyContinue
+            Remove-Item $geometryOk,$geometryFailed,$surfaceOk,$surfaceFailed,$watchdogOk,$watchdogFailed,$disturbedOk,$disturbedFailed -Force -ErrorAction SilentlyContinue
           }
       # Publish only after the full node, Rust and native Windows smoke suites.
       - name: Package verified and versioned portable EXE
