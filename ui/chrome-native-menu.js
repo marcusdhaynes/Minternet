@@ -678,7 +678,13 @@
     inspectBookmark:id=>bookmarkMenu(id),
     inspectFolder:id=>folderItems(id),
     // A move changes the tree; discard stale popups before another drag.
-    dismissBookmarkDrag:()=>{if(fallback?.classList.contains('bookmark-folder-popup'))closeFallback();},
+    dismissBookmarkDrag:()=>{
+      if(!fallback?.classList.contains('bookmark-folder-popup'))return;
+      // The bookmark manager/folder panel can be a separate drag destination.
+      // Keep its native chrome overlay alive when closing the transient menu.
+      const activePanel=document.getElementById('bookmarkOverlay');
+      closeFallback(null,Boolean(activePanel&&!activePanel.hidden));
+    },
     nativePopupCount:()=>nativePopupCount
   };
   window.minternetMenus=handlers;
