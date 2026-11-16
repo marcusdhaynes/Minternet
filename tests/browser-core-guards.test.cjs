@@ -77,9 +77,12 @@ test('Password autofill uses unlocked unique HTTPS-origin logins and does not ov
   const injected=source('native/desktop/src-tauri/src/login_autofill.js');
   assert.match(main,/include_str!\("login_autofill\.js"\)/);
   assert.match(injected,/token\(el\)\.includes\('new-password'\)/);
-  assert.match(injected,/if\(password\.value \|\| \(account\?\.value/);
+  assert.match(injected,/password\.value&&!marked\.has\(password\)/);
+  assert.match(injected,/marked\.add\(element\)/);
   assert.match(injected,/setTimeout\(stop,90000\)/);
-  assert.match(vault,/if matches\.next\(\)\.is_some\(\)\{return None;\}/);
+  assert.match(vault,/let preferred=eligible\.into_iter\(\)\.filter\(\|e\|e\.preferred\)/);
+  assert.match(vault,/if preferred\.len\(\)==1/);
+  assert.match(main,/vault_section_allowed\(app,"logins"\)/);
 });
 
 test('Injected login script compiles before it is sent to WebView2',()=>{
