@@ -124,7 +124,7 @@ mod windows_resume {
             PCWSTR(result.as_ptr()),&view
         )}.map_err(|e|e.to_string())
     }
-    pub(super) fn attach(app:&AppHandle,id:u32,view:&tauri::Webview,private:bool){
+    pub fn attach(app:&AppHandle,id:u32,view:&tauri::Webview,private:bool){
         if private{return;} // Private tabs never persist file paths.
         let app=app.clone();
         let _=view.with_webview(move|native|{
