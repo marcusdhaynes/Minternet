@@ -4490,8 +4490,34 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         {return Err("This WebView2 setting is only available on Windows".into());}
     }
     if name=="render-surface-repair" {
+        // Explicitly requested by the user in trusted chrome. In addition to
+        // reconciling native HWND geometry, refresh the DirectComposition
+        // texture even when WebView2 reports already-correct controller bounds.
+        // Unlike reloading or recreating a tab this preserves unsaved forms,
+        // cookies, scroll position, playback and in-page editor state.
+        #[cfg(windows)]
+        {
+            reconcile_visible_child_bounds(&app);
+            let labels={
+                let split=visible_split(&app);
+                let state=app.state::<Mutex<Browser>>();
+                let browser=state.lock().map_err(|e|e.to_string())?;
+                if split.len()>1 {
+                    split.iter().filter_map(|id|browser.tabs.iter()
+                        .find(|tab|tab.id==*id).and_then(|tab|tab.view.clone()))
+                        .collect::<Vec<_>>()
+                }else{
+                    browser.active().and_then(|tab|tab.view.clone())
+                        .into_iter().collect::<Vec<_>>()
+                }
+            };
+            for label in labels {
+                if let Some(view)=app.get_webview(&label){
+                    native_surface::force_compositor_rebind(&view);
+                }
+            }
+        }
         schedule_surface_restore(&app);
-        schedule_page_bounds_reconciliation(&app);
         return Ok(json!({"ok":true}));
     }
     if matches!(name.as_str(),"site-media-get"|"site-media-set"|"site-media-revoke"){
