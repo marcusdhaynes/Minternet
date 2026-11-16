@@ -42,11 +42,13 @@ fn correct(hwnd:HWND,parent:HWND,controller:&ICoreWebView2Controller,
     let [x,y,w,h]=wanted;
     if w<16||h<16{return false;}
     let mut fixed=false;
+    let mut host_moved=false;
+    let mut viewport_resized=false;
     // WRY's container HWND and WebView2 controller have separate rectangles.
     // Comparing only Tauri's logical geometry misses both types of drift.
     if actual(hwnd,parent).is_some_and(|found|different(found,wanted)){
         if unsafe{SetWindowPos(hwnd,None,x,y,w,h,SWP_NOACTIVATE|SWP_NOZORDER)}.is_ok(){
-            fixed=true;
+            fixed=true;host_moved=true;
         }
     }
     let mut viewport=RECT::default();
@@ -57,8 +59,20 @@ fn correct(hwnd:HWND,parent:HWND,controller:&ICoreWebView2Controller,
         if different(current,desired){
             if unsafe{controller.SetBounds(RECT{
                 left:0,top:0,right:w,bottom:h,
-            })}.is_ok(){fixed=true;}
+            })}.is_ok(){fixed=true;viewport_resized=true;}
         }
+    }
+    // Changing only the HWND position does not necessarily regenerate the
+    // DirectComposition surface. Rebind with a single 1px bounds nudge then
+    // restore the exact viewport. Only on a verified native host drift:
+    // healthy sites never receive periodic resize flashes.
+    if host_moved && !viewport_resized && w>16{
+        let _=unsafe{controller.SetBounds(RECT{
+            left:0,top:0,right:w-1,bottom:h
+        })};
+        let _=unsafe{controller.SetBounds(RECT{
+            left:0,top:0,right:w,bottom:h
+        })};
     }
     if fixed{
         // WebView2's compositor needs an ancestor-position notification after
@@ -91,6 +105,29 @@ fn correct_visibility(controller:&ICoreWebView2Controller)->bool{
     // A restored HWND may have a stale DirectComposition surface.
     let _=unsafe{controller.NotifyParentWindowPositionChanged()};
     true
+}
+
+/// Explicit user-initiated non-destructive compositor reset. A persistent
+/// white pane can have *correct* reported geometry while the underlying
+/// DirectComposition texture is stale; NotifyParentWindowPositionChanged
+/// alone does not necessarily invalidate it.
+pub fn force_compositor_rebind(view:&tauri::Webview){
+    let _=view.with_webview(|native|{
+        let controller=native.controller();
+        let mut original=RECT::default();
+        if unsafe{controller.Bounds(&mut original)}.is_err(){return;}
+        let w=original.right-original.left;
+        let h=original.bottom-original.top;
+        if w<32||h<32{return;}
+        let nudge=RECT{
+            left:original.left,top:original.top,
+            right:original.right-1,bottom:original.bottom
+        };
+        if unsafe{controller.SetBounds(nudge)}.is_ok(){
+            let _=unsafe{controller.SetBounds(original)};
+        }
+        let _=unsafe{controller.NotifyParentWindowPositionChanged()};
+    });
 }
 
 pub fn ensure_visible(view:&tauri::Webview){
