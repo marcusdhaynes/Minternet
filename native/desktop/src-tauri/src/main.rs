@@ -1008,6 +1008,23 @@ fn session_file(app: &tauri::AppHandle) -> Result<PathBuf,String> {
     let dir=app.path().app_data_dir().map_err(|e|e.to_string())?;
     Ok(dir.join("browser-session.v1.json"))
 }
+// Updates can interrupt a replacement between writing .tmp and installing
+// the new session file. Recover the freshest complete JSON document, never
+// a partially copied file. All candidates remain under the same app profile.
+fn read_session_data(path:&std::path::Path)->Option<Value>{
+    let mut candidates=vec![
+        path.to_path_buf(),path.with_extension("tmp"),path.with_extension("bak")
+    ];
+    candidates.sort_by_key(|p|
+        std::fs::metadata(p).and_then(|m|m.modified()).ok());
+    for candidate in candidates.into_iter().rev(){
+        let Ok(bytes)=std::fs::read(candidate) else{continue};
+        if bytes.len()>16_000_000{continue;}
+        let Ok(data)=serde_json::from_slice::<Value>(&bytes) else{continue};
+        if data.get("tabs").and_then(Value::as_array).is_some(){return Some(data);}
+    }
+    None
+}
 fn save_session(app: &tauri::AppHandle) -> Result<(),String> {
     // Capture live locations even for background tabs. ChatGPT and other SPAs
     // can change routes without a top-level WebView navigation callback.
@@ -1052,8 +1069,25 @@ fn save_session(app: &tauri::AppHandle) -> Result<(),String> {
     };
     let file=session_file(app)?;
     let bytes=serde_json::to_vec(&data).map_err(|e|e.to_string())?;
-    if std::fs::read(&file).ok().as_deref()==Some(bytes.as_slice()){return Ok(());}
+    let previous=std::fs::read(&file).ok();
+    if previous.as_deref()==Some(bytes.as_slice()){return Ok(());}
     if let Some(dir)=file.parent(){std::fs::create_dir_all(dir).map_err(|e|e.to_string())?;}
+    // Keep the last complete checkpoint. A failed updater or interrupted
+    // Windows copy must not turn a valid prior session into a blank launch.
+    if let Some(ref old)=previous{
+        if old.len()<=16_000_000 &&
+            serde_json::from_slice::<Value>(old).ok()
+                .and_then(|value|value.get("tabs")?.as_array().cloned()).is_some(){
+            let backup=file.with_extension("bak");
+            let backup_temp=file.with_extension("bak-tmp");
+            if std::fs::write(&backup_temp,old).is_ok(){
+                if std::fs::rename(&backup_temp,&backup).is_err(){
+                    let _=std::fs::copy(&backup_temp,&backup);
+                    let _=std::fs::remove_file(&backup_temp);
+                }
+            }
+        }
+    }
     let temp=file.with_extension("tmp");
     std::fs::write(&temp,&bytes).map_err(|e|e.to_string())?;
     if std::fs::rename(&temp,&file).is_err(){
@@ -1068,9 +1102,7 @@ fn restore_session(app: &tauri::AppHandle) {
         restore_pinned(app);return;
     }
     let Ok(path)=session_file(app) else {restore_pinned(app);return};
-    let Ok(bytes)=std::fs::read(path) else {restore_pinned(app);return};
-    if bytes.len()>16_000_000 {restore_pinned(app);return;}
-    let Ok(data)=serde_json::from_slice::<Value>(&bytes) else {restore_pinned(app);return};
+    let Some(data)=read_session_data(&path) else {restore_pinned(app);return};
     let Some(saved)=data.get("tabs").and_then(Value::as_array) else {restore_pinned(app);return};
     let state=app.state::<Mutex<Browser>>();
     let Ok(mut browser)=state.lock() else {return};
