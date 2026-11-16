@@ -8,6 +8,8 @@
   const api=window.minternet;
   const command=(name,value)=>api.command(name,value);
   let dropdown=null,manager=null,entries=[],selected=-1,revision=0,hidden=false;
+  // Focus alone never opens the history dropdown, including when a URL is prefilled.
+  let typedThisFocus=false;
   let historyShown=0,historyRevision=0;
   const safe=url=>{try{const parsed=new URL(url);return parsed.protocol==='https:'&&!parsed.username&&!parsed.password;}catch{return false;}};
   const privateActive=()=>{
@@ -112,6 +114,7 @@
   }
   async function updateSuggestions(){
     const token=++revision,query=address.value.trim().toLowerCase();
+    if(!typedThisFocus||!query){hideSuggestions();return;}
     if(document.activeElement!==address||manager||hidden)return;
     const recent=privateActive()?[]:await command('history-search',query);
     if(token!==revision||document.activeElement!==address||manager)return;
@@ -126,8 +129,14 @@
     }
     show(merged);
   }
-  address.addEventListener('focus',()=>{hidden=false;void updateSuggestions();});
-  address.addEventListener('input',()=>{hidden=false;void updateSuggestions();});
+  address.addEventListener('focus',()=>{
+    hidden=false;typedThisFocus=false;
+    hideSuggestions();
+  });
+  address.addEventListener('input',()=>{
+    hidden=false;typedThisFocus=Boolean(address.value.trim());
+    void updateSuggestions();
+  });
   address.addEventListener('keydown',event=>{
     if(event.key==='Escape'&&dropdown){event.preventDefault();hidden=true;hideSuggestions();}
     else if(event.key==='ArrowDown'||event.key==='ArrowUp'){
@@ -142,7 +151,7 @@
     }
   });
   address.addEventListener('blur',()=>setTimeout(()=>{
-    if(document.activeElement!==address)hideSuggestions();
+    if(document.activeElement!==address){typedThisFocus=false;hideSuggestions();}
   },110));
   form.addEventListener('submit',hideSuggestions);
   window.addEventListener('resize',positionSuggestions);
