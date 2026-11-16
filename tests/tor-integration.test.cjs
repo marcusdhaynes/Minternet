@@ -151,3 +151,40 @@ test('25. Bare onion URLs default to HTTP only inside Tor and can be duplicated'
  assert.match(native,/format!\("http:\/\/\{onion\}"\)/);
  assert.match(native,/tor && parsed\.scheme\(\)=="http"/);
 });
+
+test('26. The native executable has a real Tor-network test, not only source assertions',()=>{
+ const probe=source('native/desktop/src-tauri/src/tor_live_probe.rs');
+ assert.match(native,/--minternet-tor-transport-smoke/);
+ assert.match(probe,/super::tor_transport::prepare\(SMOKE_ID\)/);
+ assert.match(probe,/https:\/\/check\.torproject\.org\/api\/ip/);
+ assert.match(probe,/check\.get\("IsTor"\)/);
+ assert.match(probe,/Some\(true\)/);
+});
+test('27. The live transport test requires a genuine v3 onion response through socks5h',()=>{
+ const probe=source('native/desktop/src-tauri/src/tor_live_probe.rs');
+ assert.match(probe,/duckduckgogg42xjoc72x3sjasowoarfbgcmvfimaftt6twagswzczad\.onion/);
+ assert.match(probe,/socks5h:\/\/127\.0\.0\.1:/);
+ assert.match(probe,/socks_deny_local\(port\)\.await/);
+ assert.match(probe,/if !\(200\.\.500\)\.contains\(&status\)/);
+});
+test('28. Native WebView2 probe checks an actual website Tor verdict and absent peer connections',()=>{
+ assert.match(native,/--minternet-tor-browser-smoke/);
+ assert.match(native,/document\.body\?\.innerText/);
+ assert.match(native,/data\?\.IsTor===true/);
+ assert.match(native,/typeof RTCPeerConnection==='undefined'/);
+ assert.match(native,/if proof==3/);
+});
+test('29. GitHub executes live Tor tests with independent failing jobs',()=>{
+ const workflow=source('.github/workflows/tor-live-security.yml');
+ assert.match(workflow,/windows-real-tor:/);
+ assert.match(workflow,/linux-real-tor:/);
+ assert.match(workflow,/--minternet-tor-transport-smoke/);
+ assert.match(workflow,/--minternet-tor-browser-smoke/);
+ assert.match(workflow,/Get-DnsClientCache/);
+ assert.doesNotMatch(workflow,/continue-on-error:\s*true/);
+});
+test('30. Runtime report distinguishes Tor routing from Tor Browser equivalence',()=>{
+ const docs=source('docs/TOR.md');
+ assert.match(docs,/not Tor Browser/i);
+ assert.match(docs,/packet.capture|network capture/i);
+});
