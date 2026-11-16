@@ -189,3 +189,51 @@ test('atomic moves preserve nested folders, sibling order, and reject descendant
  assert.deepEqual(b.find(s,z.id).children.map(x=>x.id),[n.id,l2.id,l.id]);
  assert.deepEqual(b.find(b.hydrate(JSON.stringify(s)),z.id).children.map(x=>x.id),[n.id,l2.id,l.id]);
 });
+
+
+test('dragging between bar, sibling folders and nested folders preserves identity and order',()=>{
+ const state=b.blank();
+ const work=b.add(state,'folder',null,{name:'Work'});
+ const school=b.add(state,'folder',null,{name:'School'});
+ const projects=b.add(state,'folder',work.id,{name:'Projects'});
+ const research=b.add(state,'folder',projects.id,{name:'Research'});
+ const a=b.add(state,'link',work.id,{name:'A',url:'https://a.example'});
+ const c=b.add(state,'link',work.id,{name:'C',url:'https://c.example'});
+ const middle=b.add(state,'link',school.id,{name:'Middle',url:'https://middle.example'});
+ const originalResearch=b.find(state,research.id);
+ // Move within and across folders with before/after insertion.
+ assert.equal(b.moveMany(state,[c.id],work.id,a.id,false),true);
+ assert.deepEqual(b.find(state,work.id).children.map(n=>n.id),[projects.id,c.id,a.id]);
+ assert.equal(b.moveMany(state,[a.id],school.id,middle.id,false),true);
+ assert.deepEqual(b.find(state,school.id).children.map(n=>n.id),[a.id,middle.id]);
+ assert.equal(b.moveMany(state,[c.id],research.id),true);
+ assert.equal(b.location(state,c.id).parent.id,research.id);
+ // Pull a deeply nested folder onto the bar, retaining its object and children.
+ assert.equal(b.moveMany(state,[research.id],b.BOOKMARK_BAR_ID,school.id,false),true);
+ assert.equal(b.find(state,research.id),originalResearch);
+ assert.equal(b.location(state,c.id).parent.id,research.id);
+ assert.deepEqual(b.barItems(state).map(n=>n.id),[work.id,research.id,school.id]);
+ assert.equal(b.moveMany(state,[research.id],work.id),true);
+ assert.equal(b.location(state,research.id).parent.id,work.id);
+ assert.equal(b.hydrate(JSON.stringify(state)).items[0].children.length,2);
+});
+test('multiple selected bookmarks move together, preserve order and reject illegal cycles atomically',()=>{
+ const state=b.blank();
+ const source=b.add(state,'folder',null,{name:'Source'});
+ const dest=b.add(state,'folder',null,{name:'Destination'});
+ const one=b.add(state,'link',source.id,{url:'https://1.example'});
+ const two=b.add(state,'link',source.id,{url:'https://2.example'});
+ const three=b.add(state,'link',source.id,{url:'https://3.example'});
+ const end=b.add(state,'link',dest.id,{url:'https://end.example'});
+ assert.equal(b.moveMany(state,[three.id,one.id],dest.id,end.id,false),true);
+ assert.deepEqual(b.find(state,dest.id).children.map(n=>n.id),[one.id,three.id,end.id]);
+ assert.deepEqual(b.find(state,source.id).children.map(n=>n.id),[two.id]);
+ const nested=b.add(state,'folder',dest.id,{name:'Nested'});
+ const snapshot=JSON.stringify(state);
+ assert.equal(b.moveMany(state,[dest.id],nested.id),false);
+ assert.equal(JSON.stringify(state),snapshot);
+ assert.equal(b.moveMany(state,[end.id],end.id),false);
+ assert.equal(JSON.stringify(state),snapshot);
+ assert.equal(b.moveMany(state,[nested.id,end.id],source.id),true);
+ assert.deepEqual(b.find(state,source.id).children.map(n=>n.id),[two.id,end.id,nested.id]);
+});
