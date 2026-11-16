@@ -54,7 +54,7 @@
     panel.querySelector('.payment-auth-button').textContent=exists?'Unlock':'Create Encrypted Vault';
   }
   async function refresh(){
-    const data=await invoke('vault-status');
+    const data=await invoke('vault-status','payments');
     if(!data)return;
     exists=Boolean(data.exists);locked=!data.unlocked;
     sync();
@@ -113,14 +113,14 @@
     window.minternetBookmarks?.closeOverlay();
     screen=create('section','payment-screen');
     toolbar?.setAttribute('aria-expanded','true');
-    screen.setAttribute('aria-label','Encrypted Payment Methods');
+    screen.setAttribute('aria-label','Encrypted Payments');
     const backdrop=create('div','payment-backdrop');
     backdrop.addEventListener('click',close);
     panel=create('aside','payment-panel');
     panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');
     panel.setAttribute('aria-label','Saved Payment Methods');
     const header=create('div','payment-head');
-    header.append(create('strong','','Payment Methods'));
+    header.append(create('strong','','Payments'));
     const lock=create('button','payment-lock','Lock');lock.type='button';
     lock.addEventListener('click',async()=>{
       const result=await invoke('vault-lock');
@@ -141,7 +141,7 @@
     auth.addEventListener('submit',async event=>{
       event.preventDefault();
       const secret=master.value;master.value='';
-      const result=await invoke(exists?'vault-unlock':'vault-create',secret);
+      const result=await invoke(exists?'vault-unlock':'vault-create',{password:secret,section:'payments'});
       if(result?.ok){exists=true;locked=false;sync();await renderCards();report('Encrypted vault unlocked.');}
     });
     form=create('form','payment-form');
