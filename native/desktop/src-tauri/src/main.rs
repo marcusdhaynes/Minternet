@@ -3375,6 +3375,60 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                     #[cfg(windows)]
                     render_visual::schedule(&for_load,id,
                         event.url().as_str().to_string(),2900);
+                    // CI: put an opaque white overlay on an otherwise fully
+                    // rendered page. Its DOM and document title remain valid,
+                    // so the ordinary blank-DOM detector cannot rescue it.
+                    // The visual pixel probe must independently recover it.
+                    #[cfg(windows)]
+                    if event.url().host_str()==Some("example.com") &&
+                        std::env::args().any(|a|a=="--minternet-white-surface-smoke"){
+                        static WHITE_PHASE:std::sync::atomic::AtomicU8=
+                            std::sync::atomic::AtomicU8::new(0);
+                        let phase=WHITE_PHASE.load(Ordering::Acquire);
+                        if phase==0 && WHITE_PHASE.compare_exchange(0,1,
+                            Ordering::AcqRel,Ordering::Acquire).is_ok(){
+                            let app=for_load.clone();
+                            let label=view.label().to_string();
+                            std::thread::spawn(move||{
+                                std::thread::sleep(Duration::from_millis(1100));
+                                let task=app.clone();
+                                let _=app.run_on_main_thread(move||{
+                                    let Some(site)=task.get_webview(&label) else{return};
+                                    let _=site.eval_with_callback(r#"(() => {
+                                        if(document.readyState!=='complete'||!document.body)return 0;
+                                        document.cookie='minternet_visual_ci=retained; Max-Age=3600; Path=/; SameSite=Lax; Secure';
+                                        localStorage.setItem('minternet_visual_ci','retained');
+                                        let mask=document.createElement('div');
+                                        mask.id='minternet-ci-white-mask';
+                                        mask.style.cssText='position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;background:#fff!important;z-index:2147483647!important;opacity:1!important;pointer-events:auto!important';
+                                        document.documentElement.append(mask);
+                                        return 1;
+                                    })()"#,move|response|{
+                                        if response.trim()=="1"{
+                                            WHITE_PHASE.store(2,Ordering::Release);
+                                        }
+                                    });
+                                });
+                            });
+                        }else if phase==2 && render_visual::smoke_confirmed(){
+                            let marker=std::env::temp_dir().join(format!(
+                                "minternet-visual-white-{}.ok",std::process::id()));
+                            let _=view.eval_with_callback(r#"Number(
+                                document.readyState==='complete' &&
+                                document.title==='Example Domain' &&
+                                (document.body?.innerText||'').includes('Example Domain') &&
+                                !document.getElementById('minternet-ci-white-mask') &&
+                                document.cookie.includes('minternet_visual_ci=retained') &&
+                                localStorage.getItem('minternet_visual_ci')==='retained'
+                            )"#,move|response|{
+                                if response.trim()=="1"{
+                                    WHITE_PHASE.store(3,Ordering::Release);
+                                    let _=std::fs::write(marker,
+                                        "PASS: recovered visually white composited page while preserving WebView2 storage");
+                                }
+                            });
+                        }
+                    }
                     if is_real_page_url(event.url().as_str()) {
                         apply_volume_to_site(&for_load,id,view.label(),true);
                     }
@@ -7686,6 +7740,7 @@ fn main() {
             let auth_popup_smoke = std::env::args().any(|a| a == "--minternet-auth-popup-smoke");
             let passkey_smoke = std::env::args().any(|a| a == "--minternet-passkey-smoke");
             let blank_render_smoke=std::env::args().any(|a|a=="--minternet-blank-render-smoke");
+            let white_surface_smoke=std::env::args().any(|a|a=="--minternet-white-surface-smoke");
             let cookie_smoke=std::env::args().any(|a|
                 a=="--minternet-cookie-set-smoke"||a=="--minternet-cookie-check-smoke");
             let media_smoke = std::env::args().any(|a| a == "--minternet-media-smoke");
@@ -7803,7 +7858,8 @@ fn main() {
                                     }
                                   },300);
                                 "#);
-                            } else if smoke || auth_popup_smoke || passkey_smoke || cookie_smoke || blank_render_smoke {
+                            } else if smoke || auth_popup_smoke || passkey_smoke || cookie_smoke ||
+                                blank_render_smoke || white_surface_smoke {
                                 let _ = view.eval(
                                     "setTimeout(() => window.minternet?.command('navigate', 'https://example.com'), 200)"
                                 );
