@@ -2287,3 +2287,31 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { di
   padding:6px 8px;background:var(--bg-2,#202438);color:inherit;border:1px solid rgba(175,190,225,.3)}
 .lock-preference-approval button{font-size:11px;padding:6px 8px;border-radius:5px}
 #passwordLockPreferencesStatus{font-size:12px;line-height:1.35;min-height:1em}
+
+/* Native-style bookmark flyouts are also drag sources and drop destinations.
+   Keep guides inside the actual row so no surrounding folder shifts. */
+.minternet-context-menu .bookmark-popup-item {
+  position:relative;cursor:grab;user-select:none;-webkit-user-select:none;
+}
+.minternet-context-menu .bookmark-popup-item:active{cursor:grabbing;}
+.minternet-context-menu .bookmark-popup-item.bookmark-reorder-source{
+  opacity:.5;cursor:grabbing;
+}
+.minternet-context-menu .bookmark-popup-item.bookmark-reorder-before::before,
+.minternet-context-menu .bookmark-popup-item.bookmark-reorder-after::after{
+  content:"";position:absolute;left:5px;right:5px;height:2px;
+  background:#c5b5ff;box-shadow:0 0 5px #c5b5ff88;
+  border-radius:2px;pointer-events:none;z-index:3;
+}
+.minternet-context-menu .bookmark-popup-item.bookmark-reorder-before::before{top:0;}
+.minternet-context-menu .bookmark-popup-item.bookmark-reorder-after::after{bottom:0;}
+.minternet-context-menu .bookmark-popup-item.bookmark-reorder-inside,
+.minternet-context-menu .system-popup-list.bookmark-reorder-inside{
+  outline:2px solid #b6e0cd!important;outline-offset:-2px;
+  background:#5e8e7850!important;border-radius:4px;
+}
+.minternet-context-menu .system-popup-list[data-bookmark-folder-id]{
+  min-height:24px;
+}
+.bookmark-folder-row[draggable="true"]{cursor:grab;}
+.bookmark-folder-row[draggable="true"]:active{cursor:grabbing;}
