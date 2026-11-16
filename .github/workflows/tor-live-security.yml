@@ -6,6 +6,8 @@ on:
       - 'native/desktop/src-tauri/src/tor_transport.rs'
       - 'native/desktop/src-tauri/src/tor_live_probe.rs'
       - 'native/desktop/src-tauri/src/main.rs'
+      - 'native/desktop/src-tauri/src/extensions.rs'
+      - 'tests/tor-integration.test.cjs'
       - 'ui/tor-site-hardening.js'
       - '.github/workflows/tor-live-security.yml'
   workflow_dispatch:
