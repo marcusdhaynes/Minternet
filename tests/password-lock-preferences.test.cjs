@@ -61,4 +61,10 @@ test('each manager requests its own native section access and password prompt',(
   assert.match(identity,/vault-status','identities'/);
   assert.match(payments,/section:'payments'/);
   assert.match(payments,/vault-status','payments'/);
+  assert.match(logins,/vault-lock','logins'/);
+  assert.match(identity,/vault-lock','identities'/);
+  assert.match(payments,/vault-lock','payments'/);
+  const policy=read('native/desktop/src-tauri/src/lock_preferences.rs');
+  assert.match(policy,/pub fn revoke\(&mut self,kind:&str\)/);
+  assert.match(policy,/pub fn any\(&self\)->bool/);
 });
