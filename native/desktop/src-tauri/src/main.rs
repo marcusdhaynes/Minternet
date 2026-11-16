@@ -2371,15 +2371,15 @@ fn recover_stalled_site_if_url(app:&tauri::AppHandle,id:u32,
             if reason=="blank-document"&&(!active||tab.loading){return;}
             (tab.url.clone(),tab.view.clone(),active)
         };
-        if !render_health::claim(id,&current.0){
+        let Some(action)=render_health::claim(id,&current.0,reason) else {
             render_health::record(app,id,"recovery-suppressed");
             return;
-        }
+        };
         // Empty DOM does not imply a dead WebView2 browser process. Reload
         // the existing controller once instead of destroying the browser
         // profile's active renderer. This keeps the cookie jar and storage
         // attached; failed/crashed renderers still use full reconstruction.
-        if reason=="blank-document"{
+        if reason=="blank-document" && action==render_health::Recovery::Reload{
             if let Some(label)=current.1.as_ref(){
                 if let Some(view)=app.get_webview(label){
                     if view.reload().is_ok(){
