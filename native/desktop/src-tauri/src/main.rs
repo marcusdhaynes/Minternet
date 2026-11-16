@@ -2712,7 +2712,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
             "--proxy-server={} --proxy-bypass-list=<-loopback> --force-webrtc-ip-handling-policy=disable_non_proxied_udp --disable-quic --disable-background-networking --no-pings",proxy.as_str()))
     }else{builder};
     let builder=if tor{
-        builder.initialization_script(include_str!("../../../../ui/tor-site-hardening.js"))
+        builder.initialization_script_for_all_frames(include_str!("../../../../ui/tor-site-hardening.js"))
     }else{builder};
     // Opt in to a separate WebView2 site profile only after a user imports
     // an enabled extension. Keeps trusted browser chrome, credentials and

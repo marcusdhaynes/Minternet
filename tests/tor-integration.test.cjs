@@ -188,3 +188,7 @@ test('30. Runtime report distinguishes Tor routing from Tor Browser equivalence'
  assert.match(docs,/not Tor Browser/i);
  assert.match(docs,/packet.capture|network capture/i);
 });
+
+test('31. Tor hardening runs inside all frames, not only the top-level document',()=>{
+ assert.match(native,/initialization_script_for_all_frames\(include_str!\("\.\.\/\.\.\/\.\.\/\.\.\/ui\/tor-site-hardening\.js"\)\)/);
+});
