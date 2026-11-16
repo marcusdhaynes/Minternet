@@ -7,10 +7,11 @@ on:
 permissions:
   contents: write
   issues: write
-# Prevent an older, slower Windows run from replacing a newer release.
+# Give each pushed commit its own Windows build. A newer push must
+# not cancel the preceding build before a release EXE can be published.
 concurrency:
-  group: minternet-windows-${{ github.ref }}
-  cancel-in-progress: true
+  group: minternet-windows-${{ github.sha }}
+  cancel-in-progress: false
 jobs:
   portable:
     if: github.ref == 'refs/heads/main'
