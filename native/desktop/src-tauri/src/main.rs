@@ -3080,10 +3080,10 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                                         // Never write/log the Tor exit IP.
                                         let proof=result.trim().parse::<u8>().unwrap_or(0);
                                         if proof==3{
-                                            let _=std::fs::write(marker,
+                                            let _=std::fs::write(&marker,
                                                 "PASS: real WebView2 Tor exit confirmed; WebRTC constructor blocked");
                                         }else{
-                                            let _=std::fs::write(failure,
+                                            let _=std::fs::write(&failure,
                                                 format!("Tor site returned insufficient proof flags: {proof}"));
                                         }
                                     });
