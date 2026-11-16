@@ -74,18 +74,21 @@ test('Password autofill uses unlocked unique HTTPS-origin logins and does not ov
   assert.match(main,/fill_saved_credential\(&app,active,false,None\)/);
   assert.match(main,/if actual_origin!=tab_origin\{return Ok\(false\);\}/);
   assert.match(main,/tab\.private\|\|tab\.secret_id\.is_some\(\)/);
-  assert.match(main,/token\(el\)\.includes\('new-password'\)/);
-  assert.match(main,/if\(password\.value \|\| \(account\?\.value/);
-  assert.match(main,/setTimeout\(stop,90000\)/);
+  const injected=source('native/desktop/src-tauri/src/login_autofill.js');
+  assert.match(main,/include_str!\("login_autofill\.js"\)/);
+  assert.match(injected,/token\(el\)\.includes\('new-password'\)/);
+  assert.match(injected,/if\(password\.value \|\| \(account\?\.value/);
+  assert.match(injected,/setTimeout\(stop,90000\)/);
   assert.match(vault,/if matches\.next\(\)\.is_some\(\)\{return None;\}/);
 });
 
 test('Injected login script compiles before it is sent to WebView2',()=>{
   const vm=require('node:vm');
   const main=source('native/desktop/src-tauri/src/main.rs');
-  const loginScript=main.match(/const LOGIN_FILL_JS:&str=r###"([\s\S]*?)"###;/);
-  assert.ok(loginScript,'Missing injected autofill script');
-  new vm.Script(loginScript[1],{filename:'login_form_autofill.js'});
+  assert.match(main,/const LOGIN_FILL_JS:&str=include_str!\("login_autofill\.js"\)/);
+  const loginScript=source('native/desktop/src-tauri/src/login_autofill.js');
+  assert.ok(loginScript.includes('__MINTERNET_LOGIN_PAYLOAD__'),'Missing native credential placeholder');
+  new vm.Script(loginScript,{filename:'login_autofill.js'});
 });
 
 test('Android and iOS both accept JavaScript-created popup windows',()=>{
