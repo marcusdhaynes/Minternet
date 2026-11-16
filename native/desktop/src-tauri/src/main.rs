@@ -8,6 +8,7 @@ mod firefox_bookmarks;
 mod secret_bookmarks;
 mod media_devices;
 mod site_fullscreen;
+mod site_video_resume;
 #[cfg(windows)]
 mod native_surface;
 mod site_context_menu;
@@ -3377,6 +3378,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     attach_browser_favicon(app,id,&created);
     media_devices::attach(app,id,&created,private);
     site_fullscreen::attach(app,id,&created);
+    site_video_resume::attach(app,id,&created,private);
     site_context_menu::attach(app,id,&created);
     #[cfg(windows)]
     render_health::attach(app,id,&created);
