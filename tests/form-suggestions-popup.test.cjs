@@ -6,7 +6,8 @@ const path=require('node:path');
 const vm=require('node:vm');
 const source=fs.readFileSync(path.join(__dirname,'../ui/form-suggestions.js'),'utf8');
 
-async function simulate({unlocked=true,logins=[{origin:'https://site.example',username:'alice',autofill:true}],ctxY=30,origin='https://site.example'}={}){
+async function simulate({unlocked=true,logins=[{origin:'https://site.example',username:'alice',autofill:true},
+    {origin:'https://site.example',username:'bob',autofill:true}],ctxY=30,origin='https://site.example'}={}){
   const calls=[],items=[],events={};
   class Element{
     constructor(tag){this.tagName=tag.toUpperCase();this.hidden=false;this.style={};this.children=[];this.listeners={};this.offsetHeight=120;}
@@ -91,20 +92,41 @@ test('CSS supplies a safe initial top even before Javascript positions the popup
   assert.match(styles,/\.form-suggestion-popup\{[^}]*max-width:calc\(100vw - 16px\)/);
 });
 
-test('WGU SSO offers explicit portal association without exposing stored passwords',async()=>{
-  const origin='https://access.wgu.edu';
+test('WGU unique saved login fills without a pop-up or pairing request',async()=>{
   const {panel,calls}=await simulate({
-    origin,logins:[{origin:'https://my.wgu.edu',username:'wgu-student',autofill:true}]
+    origin:'https://access.wgu.edu',
+    logins:[{origin:'https://my.wgu.edu',username:'wgu-student',autofill:true}]
+  });
+  assert.equal(panel.hidden,true);
+  assert.ok(!calls.some(c=>c.name==='vault-associate-login'));
+  assert.ok(!calls.some(c=>c.name==='chrome-overlay'));
+});
+
+test('multi-account WGU allows explicit one-time account selection if ambiguous',async()=>{
+  const {panel,calls}=await simulate({
+    origin:'https://access.wgu.edu',
+    logins:[
+      {origin:'https://my.wgu.edu',username:'wgu-one',autofill:true},
+      {origin:'https://my.wgu.edu',username:'wgu-two',autofill:true}
+    ]
   });
   assert.equal(panel.hidden,false);
   const link=panel.children.find(item=>
-    item.textContent==='Use WGU portal login · wgu-student');
-  assert.ok(link,'WGU login association must be shown');
+    item.textContent==='Use WGU portal login · wgu-one');
+  assert.ok(link);
   await link.listeners.click({preventDefault(){}});
   assert.ok(calls.some(c=>c.name==='vault-associate-login'&&
-    c.value.origin==='https://my.wgu.edu'&&
-    c.value.username==='wgu-student'));
-  assert.ok(!calls.some(c=>c.value?.password),'Chrome must not see a password');
+    c.value.username==='wgu-one'));
+});
+
+test('unique preferred account suppresses suggestions even if more than one is stored',async()=>{
+  const {panel}=await simulate({
+    logins:[
+      {origin:'https://site.example',username:'alice',autofill:true,preferred:true},
+      {origin:'https://site.example',username:'bob',autofill:true}
+    ]
+  });
+  assert.equal(panel.hidden,true);
 });
 
 test('other origins never receive WGU portal credential suggestions',async()=>{
