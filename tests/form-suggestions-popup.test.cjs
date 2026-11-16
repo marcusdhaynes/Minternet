@@ -71,12 +71,17 @@ test('a lower website field keeps its popup entirely inside the expanded browser
   assert.ok(top>=52&&top+panel.offsetHeight<=760);
 });
 
-test('no purple autofill popup when vault is locked or site has no saved login',async()=>{
-  for(const options of [{unlocked:false},{logins:[]}]){
-    const {panel,calls}=await simulate(options);
-    assert.equal(panel.hidden,true);
-    assert.equal(calls.filter(item=>item.name==='chrome-overlay').length,0);
-  }
+test('locked saved-login vault is recognized and offers an unlock action',async()=>{
+  const {panel,calls}=await simulate({unlocked:false});
+  assert.equal(panel.hidden,false);
+  assert.ok(panel.children.some(item=>item.textContent==='Unlock Saved Logins'));
+  assert.ok(calls.some(item=>item.name==='chrome-overlay'&&item.value===true));
+});
+
+test('no autofill popup is shown when the unlocked vault has no matching login',async()=>{
+  const {panel,calls}=await simulate({logins:[]});
+  assert.equal(panel.hidden,true);
+  assert.equal(calls.filter(item=>item.name==='chrome-overlay').length,0);
 });
 
 test('CSS supplies a safe initial top even before Javascript positions the popup',()=>{
