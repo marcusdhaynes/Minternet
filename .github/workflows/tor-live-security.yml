@@ -55,7 +55,7 @@ jobs:
           $errorFile = Join-Path $env:RUNNER_TEMP "tor-transport-error.txt"
           $p = Start-Process -FilePath $exe -ArgumentList "--minternet-tor-transport-smoke" -RedirectStandardOutput $outFile -RedirectStandardError $errorFile -PassThru -WindowStyle Hidden
           try {
-            if (!$p.WaitForExit(420000)) { throw "Live Tor transport timed out" }
+            if (!$p.WaitForExit(650000)) { throw "Live Tor transport timed out" }
             if ($p.ExitCode -ne 0) {
               $log=Get-Content $errorFile -Raw -ErrorAction SilentlyContinue
               throw "Embedded Arti test failed: $log"
@@ -133,7 +133,7 @@ jobs:
         working-directory: native/desktop
         run: |
           set -euo pipefail
-          timeout 450s src-tauri/target/release/minternet_native --minternet-tor-transport-smoke
+          timeout 650s src-tauri/target/release/minternet_native --minternet-tor-transport-smoke
           echo "PASS: Linux embedded Arti reached a real Tor exit and HTTPS onion service." >> "$GITHUB_STEP_SUMMARY"
       - name: Record verification limits
         if: always()
