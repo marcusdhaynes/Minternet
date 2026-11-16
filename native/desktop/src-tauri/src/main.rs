@@ -1013,11 +1013,15 @@ fn session_file(app: &tauri::AppHandle) -> Result<PathBuf,String> {
 // a partially copied file. All candidates remain under the same app profile.
 fn read_session_data(path:&std::path::Path)->Option<Value>{
     let mut candidates=vec![
-        path.to_path_buf(),path.with_extension("tmp"),path.with_extension("bak")
+        (path.to_path_buf(),2u8),
+        (path.with_extension("tmp"),1u8),
+        (path.with_extension("bak"),0u8)
     ];
-    candidates.sort_by_key(|p|
-        std::fs::metadata(p).and_then(|m|m.modified()).ok());
-    for candidate in candidates.into_iter().rev(){
+    // If filesystem timestamp resolution is coarse, prefer the committed
+    // primary file over its staging file and older checkpoint.
+    candidates.sort_by_key(|(p,priority)|
+        (std::fs::metadata(p).and_then(|m|m.modified()).ok(),*priority));
+    for (candidate,_) in candidates.into_iter().rev(){
         let Ok(bytes)=std::fs::read(candidate) else{continue};
         if bytes.len()>16_000_000{continue;}
         let Ok(data)=serde_json::from_slice::<Value>(&bytes) else{continue};
