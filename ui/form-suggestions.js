@@ -79,7 +79,9 @@
   async function render(ctx){
     // Do not open a toolbar-obscuring dialog merely because a site has a
     // login or email field. Show it only when there is something useful.
-    const status=await cmd('vault-status');
+    const status=await cmd('vault-status',
+      ctx.kind==='payment'?'payments':
+      ctx.kind==='identity'?'identities':'logins');
     // An update/restart intentionally locks the encrypted vault. Never imply
     // saved logins disappeared: offer to unlock them at the login form.
     const needsUnlock=!status?.unlocked;
