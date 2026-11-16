@@ -172,8 +172,9 @@ pub fn schedule(app:&tauri::AppHandle,id:u32,url:String,delay_ms:u64){
                 let Ok(stream)=(unsafe{CreateStreamOnHGlobal(HGLOBAL::default(),true)})else{
                     clear_pending(id);return
                 };
+                let callback_stream=stream.clone();
                 let callback=CapturePreviewCompletedHandler::create(Box::new(move|status|{
-                    let pixels=if status.is_ok(){read_preview(&stream)}else{None};
+                    let pixels=if status.is_ok(){read_preview(&callback_stream)}else{None};
                     clear_pending(id);
                     if let Some(pixels)=pixels{
                         let completed=app.clone();
