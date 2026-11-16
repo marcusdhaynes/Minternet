@@ -54,9 +54,9 @@ test('address focus alone never queries history, even with a prefilled URL',asyn
 
 test('username-first sign-in is recognized without classifying signup forms as login',()=>{
   const native=read('native/desktop/src-tauri/src/main.rs');
-  const start=native.indexOf('const FORM_FIELD_CONTEXT_JS');
-  const end=native.indexOf('const CAPTURE_LOGIN_JS',start);
-  const context=native.slice(start,end);
+  assert.match(native,/include_str!\("login_form_context\.js"\)/);
+  assert.match(native,/include_str!\("login_autofill\.js"\)/);
+  const context=read('native/desktop/src-tauri/src/login_form_context.js');
   assert.match(context,/hasPassword\.length===0&&usernameField&&loginRoute/);
   assert.match(context,/const registration=/);
   assert.match(context,/const login=!registration/);
