@@ -152,6 +152,65 @@ pub fn smoke(view:&tauri::Webview,parent:isize,wanted:Bounds){
     });
 }
 
+// Executable CI smoke: simulate the user's white WebView2 rectangle AFTER
+// all one-shot startup passes have finished. The watchdog must correct both
+// the real native host HWND and the COM controller WITHOUT a direct repair
+// call, navigation, or clearing profile data.
+pub fn watchdog_disturb(view:&tauri::Webview,parent:isize,wanted:Bounds){
+    if parent==0{return;}
+    let _=view.with_webview(move|native|{
+        let controller=native.controller();
+        let mut hwnd=HWND::default();
+        let mut success=false;
+        if unsafe{controller.ParentWindow(&mut hwnd)}.is_ok(){
+            let bad=[
+                wanted[0]+163,wanted[1]+81,
+                (wanted[2]-310).max(100),(wanted[3]-160).max(100)
+            ];
+            success=unsafe{SetWindowPos(
+                hwnd,None,bad[0],bad[1],bad[2],bad[3],
+                SWP_NOACTIVATE|SWP_NOZORDER)}.is_ok() &&
+                unsafe{controller.SetBounds(RECT{
+                    left:0,top:0,right:bad[2],bottom:bad[3]})}.is_ok() &&
+                actual(hwnd,HWND(parent as _))
+                    .is_some_and(|now|different(now,wanted));
+        }
+        let marker=std::env::temp_dir().join(format!(
+            "minternet-watchdog-disturbed-{}.{}",
+            std::process::id(),if success{"ok"}else{"failed"}));
+        let _=std::fs::write(marker,if success{
+            "PASS: corrupted native child after startup without invoking repair"
+        }else{"FAIL: could not corrupt real native child"});
+    });
+}
+pub fn watchdog_check(view:&tauri::Webview,parent:isize,wanted:Bounds){
+    if parent==0{return;}
+    let _=view.with_webview(move|native|{
+        let controller=native.controller();
+        let mut hwnd=HWND::default();
+        let ok=if unsafe{controller.ParentWindow(&mut hwnd)}.is_ok(){
+            let host_ok=actual(hwnd,HWND(parent as _))
+                .is_some_and(|now|!different(now,wanted));
+            let mut rect=RECT::default();
+            let viewport_ok=unsafe{controller.Bounds(&mut rect)}.is_ok() &&
+                !different([rect.left,rect.top,rect.right-rect.left,
+                    rect.bottom-rect.top],[0,0,wanted[2],wanted[3]]);
+            let mut visible=BOOL::default();
+            let visible_ok=unsafe{controller.IsVisible(&mut visible)}.is_ok()
+                && visible.as_bool();
+            host_ok&&viewport_ok&&visible_ok
+        }else{false};
+        let marker=std::env::temp_dir().join(format!(
+            "minternet-watchdog-{}.{}",
+            std::process::id(),if ok{"ok"}else{"failed"}));
+        let _=std::fs::write(marker,if ok{
+            "PASS: background watchdog autonomously repaired displaced WebView2 child and COM viewport"
+        }else{
+            "FAIL: background watchdog did not restore real child and COM viewport"
+        });
+    });
+}
+
 #[cfg(test)]
 mod tests{
     use super::*;
