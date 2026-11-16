@@ -2,11 +2,6 @@ name: Native Minternet iOS simulator build (under 50 MB)
 on:
   push:
     branches: [main]
-    paths:
-      - 'native/ios/**'
-      - 'ui/minternet-brand.png'
-      - 'native/desktop/scripts/generate_icons.py'
-      - '.github/workflows/native-ios.yml'
   workflow_dispatch:
 permissions:
   contents: read
@@ -28,6 +23,11 @@ jobs:
       - name: Generate native iOS project
         working-directory: native/ios
         run: xcodegen generate
+      - name: Resolve shared version and source identity
+        run: |
+          VERSION=$(python3 -c 'import json; print(json.load(open("native/desktop/src-tauri/tauri.conf.json"))["version"])')
+          echo "MINTERNET_BASE_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "Building commit $GITHUB_SHA as version $VERSION (run $GITHUB_RUN_NUMBER)" >> "$GITHUB_STEP_SUMMARY"
       - name: Build unsigned iPhone/iPad simulator app
         working-directory: native/ios
         run: |
@@ -35,6 +35,7 @@ jobs:
             -configuration Debug -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath build \
+            "MARKETING_VERSION=$MINTERNET_BASE_VERSION" "CURRENT_PROJECT_VERSION=$GITHUB_RUN_NUMBER" \
             CODE_SIGNING_ALLOWED=NO build
       - name: Launch Minternet on Apple iOS simulator and capture first frame
         run: |
@@ -67,7 +68,34 @@ jobs:
           test "$bytes" -lt 50000000
       - uses: actions/upload-artifact@v4
         with:
-          name: minternet-ios-simulator
+          name: minternet-ios-simulator-${{ github.sha }}
           path: /tmp/Minternet-iOS-Simulator.zip
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 90
+      # A simulator app cannot run on an actual iPhone. Compile the distinct
+      # iphoneos target too, but NEVER claim this unsigned archive is an IPA
+      # or installable without an Apple signing identity/provisioning profile.
+      - name: Compile unsigned physical iPhone and iPad target
+        working-directory: native/ios
+        run: |
+          xcodebuild -project Minternet.xcodeproj -scheme Minternet \
+            -configuration Release -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build-iphone \
+            "MARKETING_VERSION=$MINTERNET_BASE_VERSION" "CURRENT_PROJECT_VERSION=$GITHUB_RUN_NUMBER" \
+            CODE_SIGNING_ALLOWED=NO build
+      - name: Archive unsigned iPhone device build (not directly installable)
+        run: |
+          set -euo pipefail
+          cd native/ios/build-iphone/Build/Products/Release-iphoneos
+          test -d Minternet.app
+          zip -qr /tmp/Minternet-iPhone-Device-Unsigned.zip Minternet.app
+          bytes=$(wc -c < /tmp/Minternet-iPhone-Device-Unsigned.zip | tr -d ' ')
+          echo "iPhone hardware target compiled. Unsigned archive: $bytes bytes. Requires Apple developer signing before device installation." >> "$GITHUB_STEP_SUMMARY"
+          test "$bytes" -lt 50000000
+      - uses: actions/upload-artifact@v4
+        with:
+          name: minternet-ios-device-unsigned-${{ github.sha }}
+          path: /tmp/Minternet-iPhone-Device-Unsigned.zip
+          if-no-files-found: error
+          retention-days: 90
