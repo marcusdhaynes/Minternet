@@ -3468,6 +3468,34 @@ fn unlock_permitted_sections_from_device(app:&tauri::AppHandle){
         }
     }
 }
+// WebView2 may keep a PingFederate SSO document alive while its SPA replaces
+// login form nodes. The ordinary PageLoadEvent will not fire again. Retry on
+// the active WGU authentication origin only, with no prompt and no submit.
+// The injected JS tracks previously filled nodes so clearing a field manually
+// does not trigger another fill.
+fn schedule_wgu_login_autofill(app:&tauri::AppHandle){
+    let owner=app.clone();
+    std::thread::spawn(move||{
+        loop{
+            std::thread::sleep(Duration::from_secs(20));
+            if owner.get_window("main").is_none(){break;}
+            if !vault_section_allowed(&owner,"logins"){continue;}
+            let worker=owner.clone();
+            let _=owner.run_on_main_thread(move||{
+                let id={
+                    let state=worker.state::<Mutex<Browser>>();
+                    let Ok(browser)=state.lock()else{return};
+                    let Some(tab)=browser.active()else{return};
+                    if tab.private||tab.secret_id.is_some() ||
+                       !tab.url.starts_with("https://access.wgu.edu/"){return;}
+                    tab.id
+                };
+                let _=fill_saved_credential(&worker,id,false,None);
+            });
+        }
+    });
+}
+
 fn fill_saved_credential(app:&tauri::AppHandle,id:u32,manual:bool,username:Option<&str>)->Result<bool,String>{
     let (label,address,private)={
         let browser=app.state::<Mutex<Browser>>();
@@ -6249,7 +6277,21 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         "vault-fill" => {
             let username=value.as_str().ok_or("Choose a saved username")?;
             let id=app.state::<Mutex<Browser>>().lock().map_err(|e|e.to_string())?.active_id;
-            return Ok(json!({"filled":fill_saved_credential(&app,id,true,Some(username))?}));
+            let filled=fill_saved_credential(&app,id,true,Some(username))?;
+            if filled{
+                let origin={
+                    let state=app.state::<Mutex<Browser>>();
+                    let browser=state.lock().map_err(|e|e.to_string())?;
+                    let tab=browser.active().ok_or("No active tab")?;
+                    password_vault::origin(&tab.url)?
+                };
+                let state=app.state::<Mutex<password_vault::Vault>>();
+                let mut vault=state.lock().map_err(|e|e.to_string())?;
+                if vault.prefer(&origin,username){
+                    vault.save(&password_vault::file(&app)?)?;
+                }
+            }
+            return Ok(json!({"filled":filled}));
         }
         "stability-smoke-proof" | "stability-smoke-failure" => {
             if !std::env::args().any(|a|a=="--minternet-stability-smoke"){
@@ -7866,6 +7908,7 @@ fn main() {
             // WebView2 add_child. Fix native child bounds once the startup
             // window has settled; future passes are no-ops when already aligned.
             schedule_startup_bounds_reconciliation(app.handle());
+            schedule_wgu_login_autofill(app.handle());
             if geometry_smoke {
                 let id=app.state::<Mutex<Browser>>().lock()
                     .ok().map(|b|b.active_id).unwrap_or(0);
