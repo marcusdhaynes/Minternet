@@ -3882,7 +3882,7 @@ fn open_site_popup_tab(app:&tauri::AppHandle,opener:u32,target:tauri::Url)
         let original=b.tabs.iter().find(|t|t.id==opener).ok_or("Opener tab closed")?;
         if original.tor{return Err("Tor popup blocked: cannot open using an ordinary connection".into());}
         let private=original.private||original.secret_id.is_some();
-        (b.active_id,b.add_after(private,opener,false)?)
+        (b.active_id,b.add_after(private,opener,true)?)
     };
     if target.as_str()!="about:blank"{
         if let Err(err)=navigate_tab(app,id,Some(target),true){
