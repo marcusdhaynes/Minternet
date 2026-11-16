@@ -4919,12 +4919,15 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             if section=="bookmarks" {
                 if locked{device_secrets::remove("bookmarks")?;}
             }else{
-                if let Ok(mut access)=app.state::<Mutex<lock_preferences::Access>>().lock(){
-                    if locked{match section{
-                        "logins"=>access.logins=false,
-                        "identities"=>access.identities=false,
-                        "payments"=>access.payments=false,_=>()
-                    }}
+                let any_allowed={
+                    let state=app.state::<Mutex<lock_preferences::Access>>();
+                    let mut access=state.lock().map_err(|e|e.to_string())?;
+                    if locked{access.revoke(section);}
+                    access.any()
+                };
+                if locked && !any_allowed{
+                    app.state::<Mutex<password_vault::Vault>>().lock()
+                        .map_err(|e|e.to_string())?.lock();
                 }
                 if !policy.any_unlocked_vault(){device_secrets::remove("vault")?;}
                 else if !locked{unlock_permitted_sections_from_device(&app);}
@@ -6065,9 +6068,21 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             return Ok(json!({"ok":true}));
         }
         "vault-lock" => {
-            app.state::<Mutex<password_vault::Vault>>().lock().map_err(|e|e.to_string())?.lock();
-            if let Ok(mut access)=app.state::<Mutex<lock_preferences::Access>>().lock(){
-                *access=lock_preferences::Access::default();
+            let section=value.as_str().unwrap_or("all");
+            if !matches!(section,"all"|"logins"|"identities"|"payments"){
+                return Err("Unknown vault section".into());
+            }
+            let any_allowed={
+                let state=app.state::<Mutex<lock_preferences::Access>>();
+                let mut access=state.lock().map_err(|e|e.to_string())?;
+                access.revoke(section);
+                access.any()
+            };
+            // Do not destroy the shared key if another intentionally unlocked
+            // section is still in use. When all sections lock, clear it.
+            if !any_allowed{
+                app.state::<Mutex<password_vault::Vault>>().lock()
+                    .map_err(|e|e.to_string())?.lock();
             }
             return Ok(json!({"ok":true}));
         }
