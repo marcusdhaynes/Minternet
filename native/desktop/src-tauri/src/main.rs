@@ -7703,7 +7703,7 @@ fn main() {
             }
             // A verified replacement is healthy only after native windows,
             // restored tabs, and the browser's event handlers are initialized.
-            portable_updater::confirm_startup();
+            portable_updater::confirm_startup_when_ready(app.handle());
             Ok(())
         })
         .run(tauri::generate_context!())
