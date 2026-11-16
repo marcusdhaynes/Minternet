@@ -117,7 +117,7 @@ impl Vault {
     pub fn list(&self) -> Result<serde_json::Value,String> {
         if !self.unlocked(){return Err("Unlock your password vault first".into());}
         Ok(serde_json::json!(self.entries.iter().map(|e|
-            serde_json::json!({"origin":e.origin,"username":e.username,"autofill":e.autofill})
+            serde_json::json!({"origin":e.origin,"username":e.username,"autofill":e.autofill,"preferred":e.preferred})
         ).collect::<Vec<_>>()))
     }
     /// An explicit Fill remembers the selected account. If another account
