@@ -55,12 +55,16 @@ function fakePage({origin='https://access.wgu.edu',route='/pingfed/idp/SSO.saml2
   view.top=view;
   doc.defaultView=view;
   for(const input of inputs)input.ownerDocument=doc;
-  let scheduled=0;
+  let scheduled=0,notifyChanges=()=>{};
   const globals={
     window:view,document:doc,
     location:{protocol:'https:',origin,pathname:route},
     HTMLInputElement:Input,HTMLFormElement:Form,Event:view.Event,
-    MutationObserver:class {observe(){}disconnect(){}},
+    MutationObserver:class {
+      constructor(callback){notifyChanges=callback;}
+      observe(){}
+      disconnect(){}
+    },
     setTimeout(){scheduled++;return scheduled;},clearTimeout(){},
     Date,Set,WeakSet,Math
   };
@@ -74,7 +78,15 @@ function fakePage({origin='https://access.wgu.edu',route='/pingfed/idp/SSO.saml2
     doc.activeElement=focused;
     return vm.runInNewContext(probeSource,globals,{filename:'login_form_context.js'});
   }
-  return {user,pw,inputs,events,fill,inspect,doc};
+  function replaceLoginFields(){
+    const nextUser=new Input('text',accountName);
+    const nextPassword=new Input('password','pf.pass');
+    nextUser.ownerDocument=doc;nextPassword.ownerDocument=doc;
+    inputs.splice(0,inputs.length,nextUser,nextPassword);
+    notifyChanges();
+    return {user:nextUser,pw:nextPassword};
+  }
+  return {user,pw,inputs,events,fill,inspect,doc,replaceLoginFields};
 }
 
 test('WGU/PingFederate sign-on fills unique text username and password even without helpful field names',()=>{
@@ -141,4 +153,29 @@ test('WGU association in native Rust requires exact origins and private-tab excl
   assert.match(main,/tab\.private\|\|tab\.secret_id\.is_some\(\)/);
   assert.match(main,/permitted_wgu_login_association\(source,&target\)/);
   assert.match(main,/entry\.password\.zeroize\(\)/);
+});
+
+test('WGU form remount re-fills newly created fields without another prompt or navigation',()=>{
+  const page=fakePage();
+  page.fill();
+  const second=page.replaceLoginFields();
+  assert.equal(second.user.value,'student-name');
+  assert.equal(second.pw.value,'secret-login');
+});
+
+test('retries respect deliberately cleared fields and never refill the same input',()=>{
+  const page=fakePage();
+  page.fill();
+  page.user.value='';page.pw.value='';
+  page.fill();
+  assert.equal(page.user.value,'');
+  assert.equal(page.pw.value,'');
+});
+
+test('WGU native retry is scoped to exact access.wgu.edu origin',()=>{
+  const main=fs.readFileSync(path.join(__dirname,'../native/desktop/src-tauri/src/main.rs'),'utf8');
+  assert.match(main,/fn schedule_wgu_login_autofill/);
+  assert.match(main,/tab\.url\.starts_with\("https:\/\/access\.wgu\.edu\/"\)/);
+  assert.match(main,/schedule_wgu_login_autofill\(app\.handle\(\)\)/);
+  assert.match(main,/vault\.matching\("https:\/\/my\.wgu\.edu",false,None\)/);
 });
