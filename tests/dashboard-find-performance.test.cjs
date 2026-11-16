@@ -177,16 +177,16 @@ test('Windows tabs consume actual WebView2 favicon bytes, not root guesses',()=>
 
 test('login autofill supports one-time password and delayed sign-in steps safely',()=>{
   const native=read('native/desktop/src-tauri/src/main.rs');
-  const match=native.match(/const LOGIN_FILL_JS:&str=r###"([\s\S]*?)"###;/);
-  assert.ok(match,'missing login autofill script');
-  new vm.Script(match[1].replace('__MINTERNET_LOGIN_PAYLOAD__',
+  assert.match(native,/include_str!\("login_autofill\.js"\)/);
+  const script=read('native/desktop/src-tauri/src/login_autofill.js');
+  new vm.Script(script.replace('__MINTERNET_LOGIN_PAYLOAD__',
     JSON.stringify({origin:'https://accounts.example.com',username:'person',password:'secret'})));
-  assert.match(match[1],/current-password/);
-  assert.match(match[1],/usernamePrepared=put/);
-  assert.match(match[1],/node\.shadowRoot/);
-  assert.match(match[1],/frame\.defaultView\?\.location\.origin===credential\.origin/);
-  assert.match(match[1],/register\.test\(location\.pathname\)/);
-  assert.match(match[1],/credential\.password=''/);
+  assert.match(script,/current-password/);
+  assert.match(script,/usernamePrepared=put/);
+  assert.match(script,/node\.shadowRoot/);
+  assert.match(script,/frame\.defaultView\?\.location\.origin===credential\.origin/);
+  assert.match(script,/register\.test\(location\.pathname\)/);
+  assert.match(script,/credential\.password=''/);
   assert.match(native,/minternet-autofill\.invalid\/__retry/);
   assert.match(native,/duration_since\(\*last\)<Duration::from_millis\(700\)/);
   assert.match(native,/fill_saved_credential\(&main,id,false,None\)/);
