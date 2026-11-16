@@ -106,7 +106,7 @@ test('Bitwarden JSON credit-card exports import only complete card numbers',asyn
 test('source importer never scans browser profiles and uses unlocked vault',()=>{
   const src=read('ui/credential-import.js');
   assert.match(src,/chooser\.click\(\)/);
-  assert.match(src,/command\('vault-status'\)/);
+  assert.match(src,/command\('vault-status',/);
   assert.match(src,/!state\?\.unlocked/);
   assert.match(src,/command\('vault-import',\{kind,entries:candidates\}\)/);
   assert.doesNotMatch(src,/localStorage\.setItem|fetch\(|XMLHttpRequest/);
