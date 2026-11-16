@@ -641,6 +641,38 @@ jobs:
               Where-Object { $_.ExecutablePath -eq $target } |
               ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
           }
+      # Exercise the *replaced*, verified EXE, not just the original build.
+      - name: Verify native WebView2 surface recovers after EXE replacement
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = Join-Path $env:TEMP "minternet-update-e2e/Minternet.exe"
+          if (!(Test-Path -LiteralPath $exe)) { throw "Installed portable EXE not found" }
+          $p = Start-Process -FilePath $exe -ArgumentList "--minternet-geometry-smoke" -PassThru
+          $geometryOk = Join-Path $env:TEMP "minternet-geometry-$($p.Id).ok"
+          $geometryFailed = Join-Path $env:TEMP "minternet-geometry-$($p.Id).failed"
+          $surfaceOk = Join-Path $env:TEMP "minternet-native-surface-$($p.Id).ok"
+          $surfaceFailed = Join-Path $env:TEMP "minternet-native-surface-$($p.Id).failed"
+          try {
+            $success = $false
+            for($i=0;$i -lt 80;$i++) {
+              Start-Sleep -Milliseconds 500
+              $p.Refresh()
+              if($p.HasExited){throw "Updated browser exited before native WebView2 surface was restored"}
+              if(Test-Path -LiteralPath $geometryFailed){throw "Updated EXE geometry recovery failed"}
+              if(Test-Path -LiteralPath $surfaceFailed){throw "Updated EXE visibility/compositor recovery failed"}
+              if((Test-Path -LiteralPath $geometryOk) -and (Test-Path -LiteralPath $surfaceOk)){
+                $success = $true
+                break
+              }
+            }
+            if(!$success){throw "Updated EXE failed to prove native WebView2 surface visibility and geometry"}
+            "PASS: replaced EXE repaired deliberately hidden WebView2 controller and displaced HWND." >> $env:GITHUB_STEP_SUMMARY
+          } finally {
+            $p.Refresh()
+            if(!$p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}
+            Remove-Item $geometryOk,$geometryFailed,$surfaceOk,$surfaceFailed -Force -ErrorAction SilentlyContinue
+          }
       # Publish only after the full node, Rust and native Windows smoke suites.
       - name: Package verified and versioned portable EXE
         id: package
