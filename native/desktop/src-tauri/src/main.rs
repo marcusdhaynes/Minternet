@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod password_vault;
+mod device_secrets;
+mod lock_preferences;
 mod browsing_history;
 mod google_account;
 mod firefox_bookmarks;
@@ -3440,6 +3442,32 @@ mod wgu_login_association_tests{
     }
 }
 
+// An unlocked encryption key does not imply that every section was
+// authorized. The three data types share one encrypted file for compatibility,
+// but native commands enforce separate user-visible access permissions.
+fn vault_section_allowed(app:&tauri::AppHandle,section:&str)->bool{
+    app.state::<Mutex<lock_preferences::Access>>().lock()
+        .map(|access|access.granted(section)).unwrap_or(false)
+}
+fn unlock_permitted_sections_from_device(app:&tauri::AppHandle){
+    let policy=lock_preferences::load(app);
+    if !policy.any_unlocked_vault(){return;}
+    let Ok(Some(mut master))=device_secrets::read("vault")else{return};
+    let path=match password_vault::file(app){Ok(v)=>v,Err(_)=>{master.zeroize();return}};
+    let ok={
+        let state=app.state::<Mutex<password_vault::Vault>>();
+        match state.lock(){
+            Ok(mut vault)=>vault.unlock(&path,&master,false).is_ok(),
+            Err(_)=>false
+        }
+    };
+    master.zeroize();
+    if ok{
+        if let Ok(mut access)=app.state::<Mutex<lock_preferences::Access>>().lock(){
+            *access=lock_preferences::Access::from_policy(&policy);
+        }
+    }
+}
 fn fill_saved_credential(app:&tauri::AppHandle,id:u32,manual:bool,username:Option<&str>)->Result<bool,String>{
     let (label,address,private)={
         let browser=app.state::<Mutex<Browser>>();
@@ -3447,7 +3475,7 @@ fn fill_saved_credential(app:&tauri::AppHandle,id:u32,manual:bool,username:Optio
         let tab=b.tabs.iter().find(|t|t.id==id).ok_or("Tab not found")?;
         (tab.view.clone(),tab.url.clone(),tab.private||tab.secret_id.is_some())
     };
-    if private{return Ok(false);}
+    if private || !vault_section_allowed(app,"logins"){return Ok(false);}
     let Some(label)=label else {return Ok(false)};
     let Some(view)=app.get_webview(&label) else{return Ok(false)};
     let actual=view.url().map_err(|e|e.to_string())?;
@@ -3457,7 +3485,15 @@ fn fill_saved_credential(app:&tauri::AppHandle,id:u32,manual:bool,username:Optio
     let credential={
         let state=app.state::<Mutex<password_vault::Vault>>();
         let vault=state.lock().map_err(|e|e.to_string())?;
-        vault.matching(&actual_origin,manual,username)
+        // WGU portal and its PingFederate sign-on service are the SAME
+        // institution on two explicitly allowlisted HTTPS origins. Prefer a
+        // directly saved SSO credential; when absent, fill the unique portal
+        // credential automatically. No popup or one-time pairing required.
+        vault.matching(&actual_origin,manual,username).or_else(||{
+            if !manual && actual_origin=="https://access.wgu.edu" {
+                vault.matching("https://my.wgu.edu",false,None)
+            }else{None}
+        })
     };
     let Some(mut entry)=credential else {return Ok(false)};
     let data=serde_json::json!({"origin":actual_origin,"username":entry.username,"password":entry.password});
@@ -7160,6 +7196,7 @@ fn main() {
         .manage(Mutex::new(Browser::new()))
         .manage(BrowserPreferenceState(Mutex::new(BrowserPreferences::default())))
         .manage(Mutex::new(password_vault::Vault::default()))
+        .manage(Mutex::new(lock_preferences::Access::default()))
         .manage(Mutex::new(secret_bookmarks::SecretVault::default()))
         .manage(AuthorizedSecrets::default())
         .manage(Mutex::new(google_account::restore()))
@@ -7198,6 +7235,9 @@ fn main() {
                 *h=browsing_history::History::load(app.handle());
             }
             restore_recent_downloads(app.handle());
+            // Release only the sections the user explicitly configured not
+            // to prompt. Windows Credential Manager holds the opt-in key.
+            unlock_permitted_sections_from_device(app.handle());
             // Automated tests use a deterministic fresh session. Real users
             // restore their pinned pages or start with a tabless home.
             let smoke=std::env::args().any(|a|a.starts_with("--minternet-")&&a.ends_with("-smoke"));
