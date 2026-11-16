@@ -48,3 +48,32 @@ Arti's **live** `bootstrap_status()` readiness and rough progress are exposed in
 ## Onion navigation
 
 Bare `.onion` addresses entered inside a Tor tab now default to `http://` over the authenticated onion-service circuit. Explicit `https://...onion` addresses remain unchanged. Ordinary tabs, site redirects and separate ordinary Minternet windows refuse `.onion` destinations to avoid direct DNS requests. HTTP onion URLs can also be duplicated into another isolated Tor tab. Runtime onion-service verification remains necessary.
+
+
+## Live network and browser tests (November 16, 2026)
+
+Native Minternet has two independent opt-in probes:
+
+1. --minternet-tor-transport-smoke starts the embedded Arti client, rejects direct IP-literal SOCKS CONNECT, requests https://check.torproject.org/api/ip through its real SOCKS5h listener, requires IsTor=true, and separately connects over HTTPS to the verified DuckDuckGo v3 onion service. Failing any part exits nonzero. This validates the transport, not the browser.
+
+2. --minternet-tor-browser-smoke starts the real Windows native UI, creates a Tor tab through trusted chrome commands, navigates its actual WebView2 child to the Tor Project endpoint, and accepts a success marker only if the page reports IsTor=true and the WebRTC peer-connection constructors are unavailable. A failed bootstrap or bad verdict cannot produce a passing marker.
+
+The new GitHub Actions workflow is https://github.com/marcusdhaynes/Minternet/actions/workflows/tor-live-security.yml . Windows checks both probes and the DNS client cache before/after browsing. Linux checks the actual Arti SOCKS transport and v3 onion service. These jobs fail independently when a required test fails; no failures are silently ignored. They run on relevant source pushes, manually, and weekly. The Windows DNS cache check is only one indicator, not packet-capture proof or comprehensive DNS safety.
+
+### Tor Browser parity gate
+
+| Dimension | Current status |
+| --- | --- |
+| Transport exit verified in real runtime | Live CI probe added; result requires a successful run |
+| V3 onion service access | Live Tor transport probe added; actual embedded-browser access remains unverified |
+| Direct IPv4 SOCKS refusal and remote hostname resolution | Implemented with runtime test |
+| WebRTC browser API exposure | WebView2 runtime test added; broader UDP leaks remain unverified |
+| Real packet capture and DNS leaks across browsers and system processes | Not completed |
+| Separate storage/circuit per first-party site | Not implemented: current design isolates by tab |
+| Standardized fingerprint, letterboxing, fonts, canvas, audio, WebGL and worker policies | Not implemented |
+| Full Tor Browser bridges, identity management and hardened Firefox patches | Not implemented |
+| Independent professional audit and cross-platform real-device testing | Not completed |
+
+**Security architecture:** A normal WebView2 browser cannot achieve Tor Browser's hardened Gecko protections simply by using an Arti SOCKS proxy and injecting JavaScript. Tor Browser's own maintainers discourage conventional browsers with Tor. Full parity requires actually integrating or launching a verified Tor Browser engine, with its matching first-party isolation, fingerprint defenses and security patch cadence. Until that architecture is implemented and independently tested, Minternet Tor remains experimental. Even official Tor Browser cannot promise perfect anonymity.
+
+Reference: https://support.torproject.org/tor-browser/security/using-tor-with-other-browsers/
