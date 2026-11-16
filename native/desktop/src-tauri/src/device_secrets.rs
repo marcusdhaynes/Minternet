@@ -5,10 +5,15 @@
 //! Anyone with full access to that Windows account can unlock these records.
 use zeroize::Zeroize;
 
-fn target(kind:&str)->Result<&'static str,String>{
+fn target(kind:&str)->Result<String,String>{
     match kind{
-        "vault"=>Ok("Minternet:BrowserVaultAutoUnlock:v1"),
-        "bookmarks"=>Ok("Minternet:SecretBookmarksAutoUnlock:v1"),
+        "vault"=>Ok("Minternet:BrowserVaultAutoUnlock:v1".into()),
+        "bookmarks"=>Ok("Minternet:SecretBookmarksAutoUnlock:v1".into()),
+        #[cfg(test)]
+        id if id.starts_with("ci-self-test-") &&
+            id.bytes().all(|c|c.is_ascii_alphanumeric()||c==b'-') &&
+            id.len()<64 =>
+            Ok(format!("Minternet:CredentialRoundtrip:{id}")),
         _=>Err("Unsupported credential area".into()),
     }
 }
@@ -94,5 +99,24 @@ mod tests{
         assert!(target("vault").is_ok());
         assert!(target("bookmarks").is_ok());
         assert!(target("http://some.website").is_err());
+    }
+    #[cfg(windows)]
+    #[test]
+    fn real_windows_credential_manager_round_trip_survives_separate_reads(){
+        // This never uses or overwrites the user's Minternet vault credential.
+        // The unique process-scoped test key is removed even on read failure.
+        let kind=format!("ci-self-test-{}",std::process::id());
+        let token=format!("ci-encrypted-token-{}",std::process::id());
+        let result=(||{
+            write(&kind,&token)?;
+            let readback=read(&kind)?;
+            if readback.as_deref()!=Some(token.as_str()){
+                return Err("Windows Credential Manager roundtrip failed".into());
+            }
+            Ok::<(),String>(())
+        })();
+        let _=remove(&kind);
+        result.unwrap();
+        assert!(read(&kind).unwrap().is_none());
     }
 }
