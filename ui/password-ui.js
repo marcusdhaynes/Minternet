@@ -149,7 +149,7 @@
     event.preventDefault();
     const input=$('vaultMaster'),password=input.value;
     input.value='';
-    const result=await invoke(existing?'vault-unlock':'vault-create',password);
+    const result=await invoke(existing?'vault-unlock':'vault-create',{password,section:'logins'});
     if(result?.ok){existing=true;unlocked=true;sync();await list();$('vaultUsername').focus();report('Vault unlocked on this device.');}
   });
   $('vaultEntryForm').addEventListener('submit',async event=>{
