@@ -22,6 +22,8 @@ mod auth_popup;
 mod passkey_support;
 #[cfg(any(windows,target_os="linux"))]
 mod tor_transport;
+#[cfg(any(windows,target_os="linux"))]
+mod tor_live_probe;
 use base64::Engine as _;
 use rand::{rngs::OsRng,RngCore};
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -7359,6 +7361,16 @@ fn install_panic_diagnostics(app:&tauri::AppHandle){
     }));
 }
 fn main() {
+    #[cfg(any(windows,target_os="linux"))]
+    if std::env::args().any(|arg|arg=="--minternet-tor-transport-smoke"){
+        match tor_live_probe::run(){
+            Ok(())=>std::process::exit(0),
+            Err(error)=>{
+                eprintln!("FAIL: live Tor transport verification: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
     if portable_updater::maybe_version_smoke(){return;}
     if portable_updater::maybe_run_helper(){return;}
     tauri::Builder::default()
