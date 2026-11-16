@@ -52,7 +52,7 @@ pub fn read(kind:&str)->Result<Option<String>,String>{
     let name=target(kind)?;
     let wide=name.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
     let mut record:*mut CREDENTIALW=ptr::null_mut();
-    if unsafe{CredReadW(PCWSTR(wide.as_ptr()),CRED_TYPE_GENERIC,0,&mut record)}.is_err(){
+    if unsafe{CredReadW(PCWSTR(wide.as_ptr()),CRED_TYPE_GENERIC,None,&mut record)}.is_err(){
         return Ok(None);
     }
     if record.is_null(){return Ok(None);}
@@ -80,7 +80,7 @@ pub fn remove(kind:&str)->Result<(),String>{
     let wide=target(kind)?.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
     // Deleting an absent credential is harmless; caller changes the policy to
     // locked regardless of whether the opt-in existed on this machine.
-    let _=unsafe{CredDeleteW(PCWSTR(wide.as_ptr()),CRED_TYPE_GENERIC,0)};
+    let _=unsafe{CredDeleteW(PCWSTR(wide.as_ptr()),CRED_TYPE_GENERIC,None)};
     Ok(())
 }
 #[cfg(not(windows))]
