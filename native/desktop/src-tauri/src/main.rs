@@ -3456,10 +3456,11 @@ fn unlock_permitted_sections_from_device(app:&tauri::AppHandle){
     let path=match password_vault::file(app){Ok(v)=>v,Err(_)=>{master.zeroize();return}};
     let ok={
         let state=app.state::<Mutex<password_vault::Vault>>();
-        match state.lock(){
+        let unlocked=match state.lock(){
             Ok(mut vault)=>vault.unlock(&path,&master,false).is_ok(),
             Err(_)=>false
-        }
+        };
+        unlocked
     };
     master.zeroize();
     if ok{
