@@ -27,7 +27,9 @@ test('a truly blank SPA gets one bounded recovery without clearing user data',()
  assert.match(src,/if flags!=127\{hits\.store\(0,Ordering::Release\);return;\}/);
  assert.match(src,/if !smoke && hits\.fetch_add\(1,Ordering::AcqRel\)==0\{return;\}/);
  assert.match(src,/smoke_stage\(&format!\("probe-flags:\{flags\}"\)\)/);
- assert.match(src,/if map\.get\(&id\)\.is_some_and/);
+ assert.match(src,/let entry=map\.entry\(id\)/);
+ assert.match(src,/Some\(Recovery::Reload\)/);
+ assert.match(src,/Some\(Recovery::Recreate\)/);
  assert.match(main,/recover_stalled_site_if_url/);
  assert.match(main,/cache\.shown\.remove\(label\)/);
  assert.match(main,/tab\.view=None/);
@@ -70,7 +72,7 @@ test('healthy blank DOM reloads its existing WebView2 controller once before ful
   assert.match(recovery,/if reason=="blank-document"/);
   assert.match(recovery,/if view.reload\(\).is_ok\(\)/);
   assert.ok(recovery.indexOf('view.reload().is_ok()') < recovery.indexOf('let _=view.close()'));
-  assert.match(recovery,/render_health::claim\(id,&current\.0\)/);
+  assert.match(recovery,/render_health::claim\(id,&current\.0,reason\)/);
   assert.match(health,/"reloaded"/);
   assert.match(main,/proof-flags:\{flags\}/);
 });
