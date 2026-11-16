@@ -178,6 +178,7 @@ pub fn schedule_blank_probe(app:&tauri::AppHandle,id:u32,expected_url:String){
             std::thread::sleep(Duration::from_millis(delay));
             let task=owner.clone();
             let expected=expected_url.clone();
+            let consecutive_for_probe=consecutive.clone();
             let _=owner.run_on_main_thread(move||{
                 smoke_stage("probe-wait");
                 let label={
@@ -193,7 +194,7 @@ pub fn schedule_blank_probe(app:&tauri::AppHandle,id:u32,expected_url:String){
                 let Some(view)=task.get_webview(&label)else{smoke_stage("view-missing");return};
                 let callback=task.clone();
                 let address=expected.clone();
-                let hits=consecutive.clone();
+                let hits=consecutive_for_probe.clone();
                 let result=view.eval_with_callback(BLANK_PROBE,move|result|{
                     let flags=result.trim().parse::<u8>().unwrap_or(0);
                     smoke_stage(&format!("probe-flags:{flags}"));
