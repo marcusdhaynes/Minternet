@@ -6,12 +6,25 @@ use windows::core::BOOL;
 use windows::Win32::Foundation::{HWND,POINT,RECT};
 use windows::Win32::Graphics::Gdi::ScreenToClient;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetWindowRect, SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER,
+    GetClientRect, GetWindowRect, SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER,
 };
 use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller;
 
 // [parent-client x, parent-client y, physical width, physical height]
 type Bounds=[i32;4];
+
+// Win32's live CLIENT rectangle, not the size Tauri last cached. After a
+// portable EXE relaunch, a restored/maximized borderless window can settle
+// to a new DPI and client size without a corresponding Tauri resize event.
+pub fn parent_client_size(parent:isize)->Option<(u32,u32)>{
+    if parent==0{return None;}
+    let mut rect=RECT::default();
+    unsafe{GetClientRect(HWND(parent as _),&mut rect)}.ok()?;
+    let width=rect.right-rect.left;
+    let height=rect.bottom-rect.top;
+    if width<64||height<64{return None;}
+    Some((width as u32,height as u32))
+}
 
 fn actual(hwnd:HWND,parent:HWND)->Option<Bounds>{
     let mut rect=RECT::default();
