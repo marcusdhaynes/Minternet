@@ -1,0 +1,65 @@
+'use strict';
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const {readFileSync}=require('node:fs');
+const {join}=require('node:path');
+const root=join(__dirname,'..');
+const get=path=>readFileSync(join(root,path),'utf8');
+const main=get('native/desktop/src-tauri/src/main.rs');
+const visual=get('native/desktop/src-tauri/src/render_visual.rs');
+const win=get('.github/workflows/native-windows.yml');
+function chunk(start,end){
+ const a=main.indexOf(start),b=main.indexOf(end,a+start.length);
+ assert.ok(a>=0&&b>a,'section missing: '+start);return main.slice(a,b);
+}
+test('reopens last active tab on normal and interrupted launches, not an empty dashboard',()=>{
+ const startup=chunk('restore_session(app.handle());','let builder = WindowBuilder::new(app, "main")');
+ assert.doesNotMatch(startup,/active_id\s*=\s*0/);
+ const launch=chunk('if let Some((address,_private))=new_window_target','window.on_window_event(move |event|');
+ assert.match(launch,/activated\(app\.handle\(\)\)/);
+ assert.match(main,/Restoring your last active tab after an interrupted session/);
+ assert.doesNotMatch(main,/Select a tab to reopen it/);
+});
+test('saved active index maps to the actual surviving tab, not the filtered array position',()=>{
+ const saved=chunk('fn save_session(', 'fn snapshot(app:');
+ assert.match(saved,/let saved_active=data\.get\("active"\)/);
+ assert.match(saved,/for \(saved_index,record\) in saved\.iter\(\)\.enumerate\(\)/);
+ assert.match(saved,/if Some\(saved_index\)==saved_active\{restored_active=Some\(id\);\}/);
+ assert.match(saved,/browser\.active_id=restored_active/);
+ assert.match(saved,/\.rev\(\)\.find\(\|t\|t\.url!=HOME\)/);
+});
+test('never writes private or secret tab locations to the persisted session',()=>{
+ const saved=chunk('fn save_session(', 'fn snapshot(app:');
+ assert.match(saved,/!tab\.private &&\s*tab\.secret_id\.is_none\(\)/);
+ assert.match(saved,/!t\.private && t\.secret_id\.is_none\(\)/);
+ assert.match(saved,/tab\.sync_id/);
+ assert.doesNotMatch(saved,/document\.cookie|localStorage/);
+});
+test('visual white-surface check is independent of DOM health and survives blank navigation',()=>{
+ assert.match(main,/mod render_visual/);
+ assert.match(main,/render_visual::schedule\(&for_load,id/);
+ assert.match(main,/render_visual::schedule\(&task,id,url,800\)/);
+ assert.match(visual,/CapturePreviewCompletedHandler::create/);
+ assert.match(visual,/COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG/);
+ assert.match(visual,/fully_white\(&pixels\)/);
+ assert.match(visual,/stage==1[\s\S]*force_compositor_rebind/);
+ assert.match(visual,/stage==2[\s\S]*SAFE_TO_RESTART/);
+ assert.match(visual,/white_seen\(id,&url,white\)/);
+ assert.match(visual,/Duration::from_secs\(18\)/);
+ const cargo=get('native/desktop/src-tauri/Cargo.toml');
+ assert.match(cargo,/png = "0\.17"/);
+ assert.match(cargo,/Win32_System_Com_StructuredStorage/);
+});
+test('no capture pixels or visited URLs are persisted by the visual checker',()=>{
+ assert.doesNotMatch(visual,/fs::write|std::fs::write|OpenOptions|document\.cookie|localStorage/);
+ assert.match(visual,/MAX_CAPTURE_BYTES/);
+ assert.match(visual,/SAFE_TO_RESTART/);
+ assert.match(visual,/tab\.private\|\|tab\.tor\|\|tab\.secret_id\.is_some\(\)/);
+});
+test('Windows release is gated by actual native executable and Rust tests',()=>{
+ assert.match(win,/npm run build/);
+ assert.match(win,/cargo test --manifest-path src-tauri\/Cargo\.toml/);
+ assert.match(win,/--minternet-blank-render-smoke/);
+ assert.match(win,/--minternet-geometry-smoke/);
+ assert.match(win,/Publish verified portable EXE as a GitHub Release/);
+});
