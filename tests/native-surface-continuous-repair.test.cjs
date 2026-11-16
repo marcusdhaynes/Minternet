@@ -49,3 +49,24 @@ test('CI verifies automatic delayed native HWND and COM controller repair',()=>{
   assert.match(pipeline,/Updated EXE failed its automatic late compositor watchdog/);
   assert.match(pipeline,/minternet-watchdog-\$\(\$p\.Id\)/);
 });
+
+test('verified displaced host rebinds compositor; healthy hosts are never force-resized',()=>{
+  const native=load('native/desktop/src-tauri/src/native_surface.rs');
+  assert.match(native,/if host_moved && !viewport_resized && w>16/);
+  assert.match(native,/right:w-1,bottom:h/);
+  assert.match(native,/controller.SetBounds\(RECT\{/);
+  assert.match(native,/NotifyParentWindowPositionChanged/);
+});
+test('manual surface repair rebinds only visible website WebView2 without navigation',()=>{
+  const main=load('native/desktop/src-tauri/src/main.rs');
+  const src=main.slice(main.indexOf('if name=="render-surface-repair"'),
+    main.indexOf('if matches!(name.as_str(),"site-media-get"',main.indexOf('if name=="render-surface-repair"')));
+  assert.match(src,/native_surface::force_compositor_rebind\(&view\)/);
+  assert.match(src,/reconcile_visible_child_bounds\(&app\)/);
+  assert.match(src,/visible_split\(&app\)/);
+  assert.doesNotMatch(src,/view\.reload\(|view\.navigate\(|view\.hide\(|view\.close\(/);
+  const native=load('native/desktop/src-tauri/src/native_surface.rs');
+  assert.match(native,/pub fn force_compositor_rebind\(view:&tauri::Webview\)/);
+  assert.match(native,/controller.SetBounds\(nudge\)/);
+  assert.match(native,/controller.SetBounds\(original\)/);
+});
