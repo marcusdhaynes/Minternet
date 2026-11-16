@@ -4933,7 +4933,22 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
     if name=="secret-status"{
         let path=secret_bookmarks::file(&app)?;
         let vault=app.state::<Mutex<secret_bookmarks::SecretVault>>();
-        return vault.lock().map_err(|e|e.to_string())?.status(&path);
+        let mut secret=vault.lock().map_err(|e|e.to_string())?;
+        // Normal Bookmarks have no password. The Bookmarks preference
+        // controls this *separate* Secret Bookmarks vault. The opt-in code
+        // is read from Windows Credential Manager, never browser storage.
+        let policy=lock_preferences::load(&app);
+        if !policy.bookmarks{
+            let locked=secret.status(&path).ok().and_then(|v|
+                v.get("unlocked").and_then(Value::as_bool))!=Some(true);
+            if locked {
+                if let Ok(Some(mut code))=device_secrets::read("bookmarks"){
+                    let _=secret.open(&path,&code,false);
+                    code.zeroize();
+                }
+            }
+        }
+        return secret.status(&path);
     }
     if name=="secret-auth"{
         let mut code=value.get("code").and_then(Value::as_str)
