@@ -2,10 +2,6 @@ name: Native Minternet macOS and Linux (under 50 MB)
 on:
   push:
     branches: [main]
-    paths:
-      - 'native/desktop/**'
-      - 'ui/**'
-      - '.github/workflows/native-unix.yml'
   workflow_dispatch:
 permissions:
   contents: read
@@ -53,6 +49,9 @@ jobs:
           python native/desktop/scripts/generate_icons.py
       - name: Compile and bundle system-webview application
         working-directory: native/desktop
+        env:
+          MINTERNET_BUILD_RUN_ID: ${{ github.run_number }}
+          MINTERNET_BUILD_SHA: ${{ github.sha }}
         run: npm exec tauri build -- --bundles ${{ matrix.target }}
       - name: Locate, measure and enforce package size
         shell: bash
@@ -74,9 +73,9 @@ jobs:
           done < files.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: minternet-native-${{ matrix.label }}
+          name: minternet-native-${{ matrix.label }}-${{ github.sha }}
           path: |
             native/desktop/src-tauri/target/release/bundle/deb/*.deb
             native/desktop/src-tauri/target/release/bundle/dmg/*.dmg
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 90
