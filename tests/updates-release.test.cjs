@@ -55,66 +55,41 @@ test('release without Windows EXE is not offered as Windows update',async()=>{
   assert.equal(h.updates.lastStatus.kind,'unpublished');
 });
 
-test('a published release older than main is NOT reported as fully up to date',async()=>{
-  const sha='8e7f4c991e995a54c1403992f6a9bb6aab87932f';
-  const h=harness(url=>url.includes('/compare/')
-    ?response(200,{status:'ahead',ahead_by:27,behind_by:0})
-    :response(200,{
-      tag_name:'v0.3.0',target_commitish:sha,
+test('the newest published release determines update availability without querying unreleased commits',async()=>{
+  const h=harness(url=>{
+    if(url.includes('/compare/')||url.includes('/branches/main'))
+      throw Error('Unreleased source commits must not affect release checks');
+    return response(200,{
+      tag_name:'v0.3.0',
       assets:[{name:'Minternet-Windows-Portable-v0.3.0.exe',
         browser_download_url:'https://github.com/example.exe'}]
-    }));
+    });
+  });
   assert.equal(await h.updates.checkForUpdate(),null);
-  assert.equal(h.updates.lastStatus.kind,'pending');
-  assert.equal(h.updates.lastStatus.sourceState,'pending');
-  assert.equal(h.updates.lastStatus.pendingCommits,27);
-  assert.match(h.updates.lastStatus.message,/27 newer source commit/);
-  assert.doesNotMatch(h.updates.lastStatus.message,/Up to date/);
-  assert.equal(h.requests,2);
-});
-
-test('an installable verified release remains available even when later commits are pending',async()=>{
-  const sha='8e7f4c991e995a54c1403992f6a9bb6aab87932f';
-  const h=harness(url=>url.includes('/compare/')
-    ?response(200,{status:'ahead',ahead_by:3,behind_by:0})
-    :response(200,{
-      tag_name:'v0.3.0-build.12-g8e7f4c99',target_commitish:sha,
-      assets:[{name:'Minternet-Windows-Portable-v0.3.0-build.12-g8e7f4c99.exe',
-        browser_download_url:'https://github.com/example.exe'}]
-    }));
-  const update=await h.updates.checkForUpdate();
-  assert.equal(update.version,'0.3.0-build.12-g8e7f4c99');
   assert.equal(h.updates.lastStatus.kind,'verified');
-  assert.equal(h.updates.lastStatus.sourceState,'pending');
-  assert.match(h.updates.lastStatus.message,/Published update available/);
-  assert.match(h.updates.lastStatus.message,/still awaiting a Windows release/);
+  assert.match(h.updates.lastStatus.message,/latest published Minternet release/);
+  assert.equal(h.requests,1);
 });
 
-test('rate limited source comparison cannot give a false all-clear',async()=>{
-  const sha='8e7f4c991e995a54c1403992f6a9bb6aab87932f';
-  const h=harness(url=>url.includes('/compare/')
-    ?response(403,{message:'rate limited'})
-    :response(200,{
-      tag_name:'v0.3.0',target_commitish:sha,
-      assets:[{name:'Minternet-Windows-Portable-v0.3.0.exe',
+test('newer published release remains installable independently of later source changes',async()=>{
+  const h=harness(url=>{
+    if(url.includes('/compare/'))throw Error('Unreleased code was queried');
+    return response(200,{
+      tag_name:'v0.3.0-build.1200-gaabbccdd',
+      assets:[{name:'Minternet-Windows-Portable-v0.3.0-build.1200-gaabbccdd.exe',
         browser_download_url:'https://github.com/example.exe'}]
-    }));
+    });
+  });
+  const release=await h.updates.checkForUpdate();
+  assert.equal(release.version,'0.3.0-build.1200-gaabbccdd');
+  assert.equal(h.updates.lastStatus.kind,'verified');
+  assert.match(h.updates.lastStatus.message,/New Minternet release available/);
+  assert.equal(h.requests,1);
+});
+
+test('release metadata API failures do not produce false up-to-date messages',async()=>{
+  const h=harness(()=>response(403,{message:'rate limit'}));
   assert.equal(await h.updates.checkForUpdate(),null);
-  assert.equal(h.updates.lastStatus.sourceState,'unknown');
-  assert.match(h.updates.lastStatus.message,/Could not verify whether main has newer commits/);
+  assert.equal(h.updates.lastStatus.kind,'offline');
   assert.doesNotMatch(h.updates.lastStatus.message,/Up to date/);
-});
-
-test('up-to-date status requires comparison confirming no unpublished source commits',async()=>{
-  const sha='8e7f4c991e995a54c1403992f6a9bb6aab87932f';
-  const h=harness(url=>url.includes('/compare/')
-    ?response(200,{status:'identical',ahead_by:0,behind_by:0})
-    :response(200,{
-      tag_name:'v0.3.0',target_commitish:sha,
-      assets:[{name:'Minternet-Windows-Portable-v0.3.0.exe',
-        browser_download_url:'https://github.com/example.exe'}]
-    }));
-  assert.equal(await h.updates.checkForUpdate(),null);
-  assert.equal(h.updates.lastStatus.sourceState,'current');
-  assert.match(h.updates.lastStatus.message,/Up to date/);
 });
