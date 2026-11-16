@@ -3474,20 +3474,14 @@ fn unlock_permitted_sections_from_device(app:&tauri::AppHandle){
         }
     }
 }
-// WebView2 may keep a PingFederate SSO document alive while its SPA replaces
-// login form nodes. The ordinary PageLoadEvent will not fire again. Retry on
-// the active WGU authentication origin only, with no prompt and no submit.
-// The injected JS tracks previously filled nodes so clearing a field manually
-// does not trigger another fill.
+// Modern login providers replace forms without a top-level navigation event.
+// Recheck the selected real HTTPS page without prompting or submitting; the
+// native vault still enforces an unlocked login section and origin matching.
 fn schedule_wgu_login_autofill(app:&tauri::AppHandle){
     let owner=app.clone();
     std::thread::spawn(move||{
         loop{
-            // WGU can replace its form within the same document, without
-            // PageLoadEvent::Finished. Recheck on a short cadence instead of
-            // leaving a blank form for 20 seconds. Actual DOM edits remain
-            // conditional on empty fields and the exact target origin.
-            std::thread::sleep(Duration::from_secs(4));
+            std::thread::sleep(Duration::from_secs(3));
             if owner.get_window("main").is_none(){break;}
             if !vault_section_allowed(&owner,"logins"){continue;}
             let worker=owner.clone();
@@ -3496,11 +3490,12 @@ fn schedule_wgu_login_autofill(app:&tauri::AppHandle){
                     let state=worker.state::<Mutex<Browser>>();
                     let Ok(browser)=state.lock()else{return};
                     let Some(tab)=browser.active()else{return};
-                    if tab.private||tab.secret_id.is_some() || tab.loading ||
-                       password_vault::origin(&tab.url).ok().as_deref()
-                           !=Some("https://access.wgu.edu"){return;}
+                    if tab.private||tab.secret_id.is_some()||tab.loading||
+                       password_vault::origin(&tab.url).is_err(){return;}
                     tab.id
                 };
+                // A saved eligible credential is mandatory; this is not a
+                // generic form scraper and cannot fill another site's login.
                 let _=fill_saved_credential(&worker,id,false,None);
             });
         }
