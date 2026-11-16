@@ -6,8 +6,14 @@
       const credential=__MINTERNET_LOGIN_PAYLOAD__;
       if(location.protocol!=='https:'||location.origin!==credential.origin||
          window!==window.top)return;
+      // A website can replace a sign-on form without changing its URL.
+      // Keep per-input fill history across native retries so clearing a
+      // previously filled field is respected as a user choice.
+      const marked=window.__minternetFilledLoginInputs||new WeakSet();
+      window.__minternetFilledLoginInputs=marked;
+      try{window.__minternetLoginJob?.stop?.();}catch{}
       const register=/(?:sign.?up|register|create.?account|join|forgot.?password|reset.?password|change.?password)/i;
-      const signin=/(?:log.?in|sign.?in|auth|account|session|identify)/i;
+      const signin=/(?:log.?in|sign.?in|sign.?on|pingfed|saml|sso|auth|account|session|identify)/i;
       const safeRoute=()=>!register.test(location.pathname);
       const visible=el=>el?.tagName==='INPUT'&&
         !el.disabled&&!el.readOnly&&el.getClientRects().length>0&&
@@ -61,7 +67,8 @@
         return list.filter(visible);
       }
       const put=(element,value)=>{
-        if(!element||element.value||typeof value!=='string'||!value)return false;
+        if(!element||element.value||marked.has(element)||
+           typeof value!=='string'||!value)return false;
         // Use the input's own Window: same-origin frames have different DOM
         // prototypes, so the parent Window's setter can silently fail.
         const win=element.ownerDocument?.defaultView||window;
@@ -71,6 +78,7 @@
         const EventType=win.Event||Event;
         element.dispatchEvent(new EventType('input',{bubbles:true,composed:true}));
         element.dispatchEvent(new EventType('change',{bubbles:true,composed:true}));
+        marked.add(element);
         return true;
       };
       const userCandidate=el=>
@@ -96,7 +104,7 @@
         return form instanceof HTMLFormElement &&
           register.test([form.getAttribute('action')||'',form.id,form.className].join(' '));
       };
-      let usernamePrepared=false,done=false,observer=null,delayed=0;
+      let done=false,observer=null,delayed=0;
       const watchOptions={childList:true,subtree:true,attributes:true,
         attributeFilter:['type','autocomplete','style','class']};
       const stop=()=>{
@@ -111,7 +119,10 @@
         if(delayed)clearTimeout(delayed);
         // Avoid retaining the password in a long-lived page closure.
         credential.password='';
+        if(window.__minternetLoginJob?.stop===stop)
+          window.__minternetLoginJob=null;
       };
+      window.__minternetLoginJob={stop};
       function tryFill(){
         if(done)return true;
         if(location.origin!==credential.origin||!safeRoute()){stop();return true;}
@@ -128,11 +139,16 @@
           if(dangerousForm(password)){stop();return true;}
           const account=accountFor(inputs,password);
           // Never replace anything the person has already entered.
-          if(password.value || (account?.value&&account.value!==credential.username)){
+          if((password.value&&!marked.has(password)) ||
+             (account?.value&&account.value!==credential.username)){
+            // Existing unrecognized input is user-typed; never overwrite it.
             stop();return true;
           }
           if(account)put(account,credential.username);
-          if(put(password,credential.password)){stop();return true;}
+          // Do not stop observing after one successful fill: PingFederate
+          // and other SPAs can replace an already-filled input with a new
+          // blank node without issuing a navigation event.
+          put(password,credential.password);
           return false;
         }
         // Username-first providers (Google, Microsoft and many SPAs) show
@@ -142,9 +158,8 @@
             (signin.test(location.pathname)||signin.test(
               (el.form?.getAttribute('action')||'')+' '+
               (el.form?.id||'')+' '+(el.form?.className||''))));
-        if(username&&!dangerousForm(username) &&
-           !usernamePrepared && !username.value){
-          usernamePrepared=put(username,credential.username);
+        if(username&&!dangerousForm(username) && !username.value){
+          put(username,credential.username);
         }
         // Retain the bounded observer until the password step mounts.
         return false;
