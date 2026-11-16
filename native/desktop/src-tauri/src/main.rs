@@ -1030,11 +1030,13 @@ fn save_session(app: &tauri::AppHandle) -> Result<(),String> {
     let data={
         let store=app.state::<Mutex<Browser>>();
         let browser=store.lock().map_err(|e|e.to_string())?;
-        let tabs=browser.tabs.iter().filter(|tab|!tab.private).map(|tab|{
+        let tabs=browser.tabs.iter().filter(|tab|!tab.private &&
+            tab.secret_id.is_none()).map(|tab|{
             let location=actual_urls.get(&tab.id).unwrap_or(&tab.url);
             json!({"url":location,"pinned":tab.pinned,"syncId":tab.sync_id})
         }).collect::<Vec<_>>();
-        let selected=browser.active().filter(|t|!t.private).map(|t|t.id);
+        let selected=browser.active().filter(|t|!t.private &&
+            t.secret_id.is_none()).map(|t|t.id);
         // Persist a valid selected ordinary tab even when the active tab is
         // private or a WebView controller was destroyed by an update. Never
         // serialize private URLs.
