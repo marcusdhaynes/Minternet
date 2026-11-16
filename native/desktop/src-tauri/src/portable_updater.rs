@@ -5,6 +5,7 @@ use std::{fs,io::{Read,Write},path::{Path,PathBuf},process::Command,sync::atomic
 use serde_json::{json,Value};
 use sha2::{Digest,Sha256};
 use tauri::{AppHandle,Emitter,Manager};
+use std::sync::Arc;
 
 static RUNNING:AtomicBool=AtomicBool::new(false);
 const API:&str="https://api.github.com/repos/marcusdhaynes/Minternet/releases/latest";
@@ -332,7 +333,36 @@ fn run_helper(target:&Path,old_pid:u32,expected:&str)->Result<(),String>{
     }
     Ok(())
 }
-/// New main process acknowledges startup after the chrome child WebView exists.
+// A native window existing is NOT evidence that the newly installed frontend
+// loaded. Only acknowledge a portable replacement after the trusted chrome DOM
+// and its command bridge actually execute inside WebView2. Otherwise the helper
+// retains the previous binary for automatic rollback on startup failure.
+pub fn confirm_startup_when_ready(app:&AppHandle){
+    if !std::env::args_os().any(|arg|
+        arg==std::ffi::OsStr::new("--minternet-update-confirm")){return;}
+    let app=app.clone();
+    let acknowledged=Arc::new(AtomicBool::new(false));
+    std::thread::spawn(move||{
+        for _ in 0..45 {
+            if acknowledged.load(Ordering::Acquire){break;}
+            std::thread::sleep(Duration::from_millis(700));
+            let handle=app.clone();
+            let done=acknowledged.clone();
+            if app.run_on_main_thread(move||{
+                let Some(chrome)=handle.get_webview("chrome") else{return};
+                let _=chrome.eval_with_callback(
+                    "Boolean(document.readyState==='complete' && document.getElementById('addressForm') && document.getElementById('address') && typeof window.minternet?.command==='function')",
+                    move |value|{
+                        if value.trim()=="true" && !done.swap(true,Ordering::AcqRel){
+                            confirm_startup();
+                        }
+                    });
+            }).is_err(){break;}
+        }
+    });
+}
+
+/// New main process acknowledges startup only after the trusted UI is ready.
 pub fn confirm_startup(){
     let mut args=std::env::args_os();
     while let Some(arg)=args.next(){
