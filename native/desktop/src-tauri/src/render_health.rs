@@ -94,7 +94,8 @@ pub fn record(app:&tauri::AppHandle,id:u32,reason:&str){
     let accepted=matches!(reason,
       "renderer-exited"|"browser-exited"|"renderer-unresponsive"|
       "gpu-exited"|"navigation-failed"|"blank-document"|"recreated"|
-      "recovery-suppressed"|"script-probe-error"|"reloaded");
+      "recovery-suppressed"|"script-probe-error"|"reloaded"|
+      "visual-surface-rebound"|"visual-white-confirmed");
     if !accepted{return;}
     if let Ok(folder)=app.path().app_data_dir(){
         let _=fs::create_dir_all(&folder);
