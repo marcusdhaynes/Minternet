@@ -70,6 +70,11 @@ impl Access{
         match kind{"logins"=>self.logins=true,"identities"=>self.identities=true,
           "payments"=>self.payments=true,_=>()}
     }
+    pub fn revoke(&mut self,kind:&str){
+        match kind{"logins"=>self.logins=false,"identities"=>self.identities=false,
+          "payments"=>self.payments=false,"all"=>*self=Self::default(),_=>()}
+    }
+    pub fn any(&self)->bool{self.logins||self.identities||self.payments}
     pub fn from_policy(policy:&Policy)->Self{
         Self{logins:!policy.logins,identities:!policy.identities,
              payments:!policy.payments}
@@ -90,5 +95,11 @@ mod tests{
         assert!(a.granted("logins"));assert!(!a.granted("payments"));
         assert!(!a.granted("identities"));
         assert!(p.set("other",false).is_err());
+        let mut access=Access::from_policy(&p);
+        access.permit("payments");
+        access.revoke("payments");
+        assert!(access.granted("logins")&&!access.granted("payments"));
+        access.revoke("all");
+        assert!(!access.any());
     }
 }
