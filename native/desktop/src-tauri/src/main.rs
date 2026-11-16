@@ -2303,6 +2303,42 @@ fn start_geometry_smoke(app:&tauri::AppHandle,id:u32){
                 ]);
             }
         });
+        // Reproduce an out-of-bounds native WebView2 child only AFTER startup
+        // reconciliation ends. Verify that the continuous watchdog fixes it,
+        // without invoking reconciliation from the smoke itself.
+        #[cfg(windows)]
+        {
+            std::thread::sleep(Duration::from_millis(6900));
+            let late=worker.clone();
+            let _=worker.run_on_main_thread(move||{
+                let Some(window)=late.get_window("main")else{return};
+                let Ok((width,height))=dimensions(&window)else{return};
+                let Ok(hwnd)=window.hwnd()else{return};
+                let scale=window.scale_factor().unwrap_or(1.0).max(0.1);
+                let top=chrome_top(&late)+if find_visible(&late){FIND_BAR}else{0.0};
+                let Some(view)=late.get_webview(&format!("tab-{id}"))else{return};
+                native_surface::watchdog_disturb(&view,hwnd.0 as isize,[
+                    0,(top*scale).round() as i32,
+                    (width*scale).round() as i32,
+                    ((height-top)*scale).round() as i32
+                ]);
+            });
+            std::thread::sleep(Duration::from_millis(4900));
+            let late=worker.clone();
+            let _=worker.run_on_main_thread(move||{
+                let Some(window)=late.get_window("main")else{return};
+                let Ok((width,height))=dimensions(&window)else{return};
+                let Ok(hwnd)=window.hwnd()else{return};
+                let scale=window.scale_factor().unwrap_or(1.0).max(0.1);
+                let top=chrome_top(&late)+if find_visible(&late){FIND_BAR}else{0.0};
+                let Some(view)=late.get_webview(&format!("tab-{id}"))else{return};
+                native_surface::watchdog_check(&view,hwnd.0 as isize,[
+                    0,(top*scale).round() as i32,
+                    (width*scale).round() as i32,
+                    ((height-top)*scale).round() as i32
+                ]);
+            });
+        }
     });
 }
 
