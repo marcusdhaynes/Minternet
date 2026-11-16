@@ -3341,6 +3341,30 @@ fn native_audio_poll(app:&tauri::AppHandle,id:u32,label:&str)->Result<(),String>
     Ok(())
 }
 
+// WGU's portal and sign-on are distinct HTTPS origins. Connecting a portal
+// credential to the authentication origin must require an explicit action in
+// trusted browser chrome. Never use broad wildcard or suffix matching.
+fn permitted_wgu_login_association(source:&str,target:&str)->bool{
+    source=="https://my.wgu.edu" && target=="https://access.wgu.edu"
+}
+
+#[cfg(test)]
+mod wgu_login_association_tests{
+    use super::permitted_wgu_login_association;
+    #[test] fn wgu_sso_requires_exact_explicitly_approved_origins(){
+        assert!(permitted_wgu_login_association(
+            "https://my.wgu.edu","https://access.wgu.edu"));
+        assert!(!permitted_wgu_login_association(
+            "https://my.wgu.edu.evil.example","https://access.wgu.edu"));
+        assert!(!permitted_wgu_login_association(
+            "https://my.wgu.edu","https://access.wgu.edu.evil.example"));
+        assert!(!permitted_wgu_login_association(
+            "http://my.wgu.edu","https://access.wgu.edu"));
+        assert!(!permitted_wgu_login_association(
+            "https://another.wgu.edu","https://access.wgu.edu"));
+    }
+}
+
 fn fill_saved_credential(app:&tauri::AppHandle,id:u32,manual:bool,username:Option<&str>)->Result<bool,String>{
     let (label,address,private)={
         let browser=app.state::<Mutex<Browser>>();
@@ -5946,6 +5970,45 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             vault.save(&password_vault::file(&app)?)?;
             let _=app.emit_to("chrome","minternet:vault-changed",());
             return Ok(json!({"ok":true}));
+        }
+        "vault-associate-login" => {
+            // One-time, user-selected association for WGU's known separate
+            // sign-on origin. The website can never call this chrome action.
+            // Do not leak any password into JavaScript or accept a target from
+            // the untrusted page. Verify the active WebView's actual URL.
+            let source=value.get("origin").and_then(Value::as_str)
+                .ok_or("Choose the portal credential's origin")?;
+            let username=value.get("username").and_then(Value::as_str)
+                .ok_or("Choose the WGU account")?;
+            let (view_label,tab_url,private)={
+                let state=app.state::<Mutex<Browser>>();
+                let browser=state.lock().map_err(|e|e.to_string())?;
+                let tab=browser.active().ok_or("No active tab")?;
+                (tab.view.clone().ok_or("No active website")?,tab.url.clone(),
+                  tab.private||tab.secret_id.is_some())
+            };
+            if private{return Err("Cannot associate credentials in private or Secret Tabs".into());}
+            let webview=app.get_webview(&view_label).ok_or("Website no longer open")?;
+            let target=password_vault::origin(webview.url().map_err(|e|e.to_string())?.as_str())?;
+            if target!=password_vault::origin(&tab_url)? ||
+               !permitted_wgu_login_association(source,&target){
+                return Err("The selected page is not WGU's verified sign-on origin".into());
+            }
+            {
+                let state=app.state::<Mutex<password_vault::Vault>>();
+                let mut vault=state.lock().map_err(|e|e.to_string())?;
+                let mut entry=vault.matching(source,true,Some(username))
+                    .ok_or("Unlock the vault and select an existing WGU portal login")?;
+                if !entry.autofill{return Err("Autofill is disabled for that saved login".into());}
+                vault.put(target,entry.username.clone(),entry.password.clone(),true)?;
+                vault.save(&password_vault::file(&app)?)?;
+                entry.password.zeroize();
+            }
+            let _=app.emit_to("chrome","minternet:vault-changed",());
+            // On subsequent visits the new exact-origin entry fills
+            // automatically when the encrypted vault is unlocked.
+            let id=app.state::<Mutex<Browser>>().lock().map_err(|e|e.to_string())?.active_id;
+            return Ok(json!({"ok":true,"filled":fill_saved_credential(&app,id,false,None)?}));
         }
         "vault-fill" => {
             let username=value.as_str().ok_or("Choose a saved username")?;
