@@ -10,6 +10,7 @@ type Client = TorClient<PreferredRuntime>;
 struct TabProxy {
     port: u16,
     task: JoinHandle<()>,
+    shutdown: tokio::sync::watch::Sender<bool>,
 }
 static CLIENT: tokio::sync::OnceCell<Arc<Client>> = tokio::sync::OnceCell::const_new();
 static PROXIES: OnceLock<Mutex<HashMap<u32,TabProxy>>> = OnceLock::new();
@@ -28,7 +29,10 @@ pub fn proxy_url(id:u32)->Result<tauri::Url,String>{
 
 pub fn release(id:u32){
     if let Ok(mut state)=proxies().lock(){
-        if let Some(proxy)=state.remove(&id){proxy.task.abort();}
+        if let Some(proxy)=state.remove(&id){
+            let _=proxy.shutdown.send(true);
+            proxy.task.abort();
+        }
     }
 }
 
@@ -62,20 +66,40 @@ pub async fn prepare(id:u32)->Result<(),String>{
         let listener=TcpListener::bind(("127.0.0.1",0)).await
             .map_err(|e|format!("Could not bind Tor loopback proxy: {e}"))?;
         let port=listener.local_addr().map_err(|e|e.to_string())?.port();
+        // Closing a Tor tab shuts down both its listener and every accepted
+        // connection. Never leave an orphan Tor stream running after closure.
+        let (shutdown,mut listening)=tokio::sync::watch::channel(false);
         let task=tokio::spawn(async move{
             loop{
-                let Ok((socket,peer))=listener.accept().await else{break;};
-                if !peer.ip().is_loopback(){continue;}
-                let client=isolated.clone();
-                tokio::spawn(async move{
-                    // Long-lived downloads and streaming sessions must not
-                    // disconnect after an arbitrary five-minute deadline.
-                    let _=serve(socket,client).await;
-                });
+                tokio::select!{
+                    changed=listening.changed()=>{
+                        if changed.is_err() || *listening.borrow(){break;}
+                    }
+                    incoming=listener.accept()=>{
+                        let Ok((socket,peer))=incoming else{break;};
+                        if !peer.ip().is_loopback(){continue;}
+                        let client=isolated.clone();
+                        let mut session_shutdown=listening.clone();
+                        tokio::spawn(async move{
+                            tokio::select!{
+                                _=async{
+                                    loop{
+                                        if *session_shutdown.borrow(){break;}
+                                        if session_shutdown.changed().await.is_err(){break;}
+                                    }
+                                }=>{},
+                                _=serve(socket,client)=>{}
+                            }
+                        });
+                    }
+                }
             }
         });
         let mut state=proxies().lock().map_err(|e|e.to_string())?;
-        if let Some(old)=state.insert(id,TabProxy{port,task}){old.task.abort();}
+        if let Some(old)=state.insert(id,TabProxy{port,task,shutdown}){
+            let _=old.shutdown.send(true);
+            old.task.abort();
+        }
         Ok(())
     }
 }
