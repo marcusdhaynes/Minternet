@@ -1033,10 +1033,14 @@ fn save_session(app: &tauri::AppHandle) -> Result<(),String> {
             json!({"url":location,"pinned":tab.pinned,"syncId":tab.sync_id})
         }).collect::<Vec<_>>();
         let selected=browser.active().filter(|t|!t.private).map(|t|t.id);
-        let active=tabs.iter().enumerate().find_map(|(i,_)|{
-            let target=browser.tabs.iter().filter(|t|!t.private).nth(i)?;
-            if Some(target.id)==selected{Some(i)}else{None}
-        });
+        // Persist a valid selected ordinary tab even when the active tab is
+        // private or a WebView controller was destroyed by an update. Never
+        // serialize private URLs.
+        let persistent=browser.tabs.iter().filter(|t|!t.private && t.secret_id.is_none())
+            .collect::<Vec<_>>();
+        let active=persistent.iter().position(|tab|Some(tab.id)==selected)
+            .or_else(||persistent.iter().rposition(|tab|tab.url!=HOME))
+            .or_else(||persistent.len().checked_sub(1));
         json!({"version":1,"tabs":tabs,"active":active})
     };
     let file=session_file(app)?;
@@ -1062,7 +1066,10 @@ fn restore_session(app: &tauri::AppHandle) {
     let Some(saved)=data.get("tabs").and_then(Value::as_array) else {restore_pinned(app);return};
     let state=app.state::<Mutex<Browser>>();
     let Ok(mut browser)=state.lock() else {return};
-    for record in saved.iter() {
+    let saved_active=data.get("active").and_then(Value::as_u64)
+        .and_then(|n|usize::try_from(n).ok());
+    let mut restored_active=None;
+    for (saved_index,record) in saved.iter().enumerate() {
         let Some(address)=record.get("url").and_then(Value::as_str) else {continue};
         if address!=HOME {
             let Ok(url)=tauri::Url::parse(address) else {continue};
@@ -1070,6 +1077,7 @@ fn restore_session(app: &tauri::AppHandle) {
                 !url.username().is_empty()||url.password().is_some(){continue;}
         }
         if let Ok(id)=browser.add(false){
+            if Some(saved_index)==saved_active{restored_active=Some(id);}
             if let Some(tab)=browser.tabs.iter_mut().find(|t|t.id==id){
                 tab.url=address.to_string();
                 tab.title=title_for(address);
@@ -1083,9 +1091,12 @@ fn restore_session(app: &tauri::AppHandle) {
             }
         }
     }
-    let index=data.get("active").and_then(Value::as_u64).map(|n|n as usize);
-    browser.active_id=index.and_then(|i|browser.tabs.get(i).map(|t|t.id))
-        .or_else(||browser.tabs.iter().find(|t|t.pinned).map(|t|t.id)).unwrap_or(0);
+    // Saved indices refer to the unfiltered records; a skipped invalid URL
+    // must never make the wrong tab active. Fall back to the last real page.
+    browser.active_id=restored_active
+        .or_else(||browser.tabs.iter().rev().find(|t|t.url!=HOME).map(|t|t.id))
+        .or_else(||browser.tabs.last().map(|t|t.id))
+        .unwrap_or(0);
 }
 
 fn snapshot(app: &tauri::AppHandle) -> Result<Snapshot, String> {
@@ -7531,13 +7542,9 @@ fn main() {
             } else {
                 restore_session(app.handle());
             }
-            if previous_crash {
-                if let Ok(mut b)=app.state::<Mutex<Browser>>().lock(){
-                    // Existing tabs remain in the strip, but no page is
-                    // opened until the user explicitly selects one.
-                    b.active_id=0;
-                }
-            }
+            // Do not reset the selected tab after an interrupted process or
+            // updater replacement. The session's last active ordinary site
+            // will be created and navigated below by activated().
             let builder = WindowBuilder::new(app, "main")
                 .title("Minternet")
                 // Request dark OS chrome and native menus where supported.
@@ -7603,7 +7610,7 @@ fn main() {
                         if matches!(event.event(), PageLoadEvent::Finished) {
                             if previous_crash {
                                 let _=view.eval(r#"setTimeout(() =>
-                                    window.minternetToast?.('Saved tabs were recovered from an interrupted session. Select a tab to reopen it.'),400)"#);
+                                    window.minternetToast?.('Restoring your last active tab after an interrupted session.'),400)"#);
                             }
                             if tor_browser_smoke {
                                 // Use the real chrome->native IPC route to create
