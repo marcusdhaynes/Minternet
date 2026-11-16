@@ -1012,7 +1012,7 @@ fn save_session(app: &tauri::AppHandle) -> Result<(),String> {
     let live_views={
         let store=app.state::<Mutex<Browser>>();
         let browser=store.lock().map_err(|e|e.to_string())?;
-        browser.tabs.iter().filter(|t|!t.private && t.secret_id.is_none() &&
+        browser.tabs.iter().filter(|t|!t.private && !t.tor && t.secret_id.is_none() &&
             !t.loading).filter_map(|t|t.view.as_ref().map(|v|(t.id,v.clone())))
             .collect::<Vec<_>>()
     };
@@ -1030,17 +1030,17 @@ fn save_session(app: &tauri::AppHandle) -> Result<(),String> {
     let data={
         let store=app.state::<Mutex<Browser>>();
         let browser=store.lock().map_err(|e|e.to_string())?;
-        let tabs=browser.tabs.iter().filter(|tab|!tab.private &&
+        let tabs=browser.tabs.iter().filter(|tab|!tab.private && !tab.tor &&
             tab.secret_id.is_none()).map(|tab|{
             let location=actual_urls.get(&tab.id).unwrap_or(&tab.url);
             json!({"url":location,"pinned":tab.pinned,"syncId":tab.sync_id})
         }).collect::<Vec<_>>();
-        let selected=browser.active().filter(|t|!t.private &&
+        let selected=browser.active().filter(|t|!t.private && !t.tor &&
             t.secret_id.is_none()).map(|t|t.id);
         // Persist a valid selected ordinary tab even when the active tab is
         // private or a WebView controller was destroyed by an update. Never
         // serialize private URLs.
-        let persistent=browser.tabs.iter().filter(|t|!t.private && t.secret_id.is_none())
+        let persistent=browser.tabs.iter().filter(|t|!t.private && !t.tor && t.secret_id.is_none())
             .collect::<Vec<_>>();
         let active=persistent.iter().position(|tab|Some(tab.id)==selected)
             .or_else(||persistent.iter().rposition(|tab|tab.url!=HOME))
@@ -1077,7 +1077,8 @@ fn restore_session(app: &tauri::AppHandle) {
         let Some(address)=record.get("url").and_then(Value::as_str) else {continue};
         if address!=HOME {
             let Ok(url)=tauri::Url::parse(address) else {continue};
-            if url.scheme()!="https"||url.host_str().is_none()||
+            if !matches!(url.scheme(),"http"|"https")||url.host_str().is_none()||
+                url.host_str().is_some_and(|host|host.to_ascii_lowercase().ends_with(".onion"))||
                 !url.username().is_empty()||url.password().is_some(){continue;}
         }
         if let Ok(id)=browser.add(false){
