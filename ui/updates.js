@@ -54,7 +54,12 @@
     return {
       version:clean(data.tag_name),tag:String(data.tag_name),
       notes:String(data.body||''),url:String(data.html_url||RELEASES),
-      downloadUrl:asset?.browser_download_url||null
+      downloadUrl:asset?.browser_download_url||null,
+      // Use the exact source commit embedded in an official release, never
+      // assume the latest GitHub Release is also the current main branch.
+      sourceSha:/^[0-9a-f]{40}$/i.test(data.target_commitish||'')
+        ?String(data.target_commitish)
+        :(/-g([0-9a-f]{8,40})$/i.exec(String(data.tag_name||''))?.[1]||null)
     };
   }
   async function request(path){
@@ -95,6 +100,24 @@
     }
     throw firstError||new Error('Update service unavailable.');
   }
+  async function sourceStatus(release){
+    // The downloaded EXE must come from an audited Release, never an Actions
+    // artifact or an unverified source commit. This is informational only.
+    if(!release?.sourceSha)return {state:'unknown'};
+    try{
+      const result=await request('/compare/'+encodeURIComponent(release.sourceSha)+'...main');
+      const compare=result.data;
+      if(!compare||!Number.isInteger(compare.ahead_by)||!Number.isInteger(compare.behind_by))
+        return {state:'unknown'};
+      if(compare.ahead_by>0)return {state:'pending',commits:compare.ahead_by};
+      if(compare.status==='identical'||compare.status==='behind'||compare.ahead_by===0)
+        return {state:'current',commits:0};
+    }catch{
+      // A rate-limited compare must not hide a verified, installable release.
+      // Nor may it be presented as proof that all source commits shipped.
+    }
+    return {state:'unknown'};
+  }
   async function checkForUpdate(){
     if(checking)return checking;
     checking=(async()=>{
@@ -106,8 +129,25 @@
           return null;
         }
         saveCache(found.release);
-        lastStatus={kind:'verified',message:'Last check succeeded.'};
-        return isNewer(found.release.version,installed)?found.release:null;
+        const updateAvailable=isNewer(found.release.version,installed);
+        const source=await sourceStatus(found.release);
+        const published='v'+found.release.version;
+        const pending=source.state==='pending';
+        const message=pending
+          ?(updateAvailable
+            ?'Published update available ('+published+'); '+source.commits+
+              ' newer source commit(s) are still awaiting a Windows release.'
+            :'Latest published Windows release: '+published+'. '+source.commits+
+              ' newer source commit(s) are not published yet.')
+          :updateAvailable
+            ?'Verified Windows update available: '+published+'.'
+            :source.state==='current'
+              ?'Up to date — installed version matches the latest published Windows release and main.'
+              :'No newer published Windows release. Could not verify whether main has newer commits.';
+        lastStatus={kind:pending&&!updateAvailable?'pending':'verified',
+          message,releaseVersion:found.release.version,
+          sourceState:source.state,pendingCommits:source.commits||0};
+        return updateAvailable?found.release:null;
       }catch(err){
         const previous=cached();
         lastStatus={kind:'offline',message:(err?.name==='AbortError'
@@ -150,14 +190,18 @@
       row.append(caption,number);return row;
     }
     versions.append(versionRow('Installed Version','v'+installed));
-    if(info)versions.append(versionRow('Available Version','v'+info.version));
+    if(lastStatus?.releaseVersion)
+      versions.append(versionRow('Published Windows Release','v'+lastStatus.releaseVersion));
+    if(info)versions.append(versionRow('Available Update','v'+info.version));
     el.append(versions);
     const message=document.createElement('div');message.className='updates-current-status';
     message.setAttribute('role','status');message.setAttribute('aria-live','polite');
     message.textContent=status||'';
     message.dataset.state=checking?'checking':
       lastStatus?.kind==='offline'?'error':
-      lastStatus?.kind==='unpublished'?'unpublished':info?'available':'current';
+      lastStatus?.kind==='unpublished'?'unpublished':
+      lastStatus?.kind==='pending'?'pending':info?'available':
+      lastStatus?.sourceState==='current'?'current':'unverified';
     el.append(message);
     if(info?.notes){
       const notes=document.createElement('details');notes.className='updates-release-notes';
@@ -165,9 +209,14 @@
       const body=document.createElement('p');body.textContent=info.notes;
       notes.append(summary,body);el.append(notes);
     }
-    if(lastStatus?.kind==='unpublished'){
-      const link=document.createElement('a');link.href=RELEASES;
-      link.target='_blank';link.rel='noopener';link.textContent='View GitHub Releases';
+    if(lastStatus?.kind==='unpublished'||lastStatus?.kind==='pending'){
+      const link=document.createElement('a');
+      link.href=lastStatus?.kind==='pending'
+        ?'https://github.com/'+REPO+'/actions/workflows/native-windows.yml'
+        :RELEASES;
+      link.target='_blank';link.rel='noopener';
+      link.textContent=lastStatus?.kind==='pending'
+        ?'View Windows Build Status':'View GitHub Releases';
       el.append(link);
     }
     const controls=document.createElement('div');controls.className='updates-actions';
@@ -191,7 +240,7 @@
     let status;
     if(lastStatus?.kind==='unpublished')status=lastStatus.message;
     else if(lastStatus?.kind==='offline')status=lastStatus.message;
-    else status=info?'Verified update available.':'Up to date — verified against GitHub Releases.';
+    else status=lastStatus?.message||'Unable to verify update status.';
     renderSection(el,info,status);
   }
   function mountRibbon(info){
