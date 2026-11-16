@@ -152,7 +152,9 @@ fn handle_visual_result(app:tauri::AppHandle,id:u32,url:String,white:bool){
         super::native_surface::force_compositor_rebind(&view);
         super::render_health::record(&app,id,"visual-surface-rebound");
         schedule(&app,id,url,1800);
-    }else if stage==2{
+    }else if stage>=2{
+        // A page with unsaved form input is not reconstructed. Keep checking
+        // later: once its draft is saved/cleared, recovery can proceed.
         let task=app.clone();
         let expected=url.clone();
         let _=view.eval_with_callback(SAFE_TO_RESTART,move|reply|{
