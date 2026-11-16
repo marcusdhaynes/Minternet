@@ -3465,7 +3465,12 @@ fn unlock_permitted_sections_from_device(app:&tauri::AppHandle){
     master.zeroize();
     if ok{
         if let Ok(mut access)=app.state::<Mutex<lock_preferences::Access>>().lock(){
-            *access=lock_preferences::Access::from_policy(&policy);
+            // Do not revoke an independently authorized manual section
+            // when one unrelated password prompt is disabled in Settings.
+            let permitted=lock_preferences::Access::from_policy(&policy);
+            access.logins|=permitted.logins;
+            access.identities|=permitted.identities;
+            access.payments|=permitted.payments;
         }
     }
 }
