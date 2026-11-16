@@ -10,6 +10,7 @@ on:
       - "Native Minternet macOS and Linux (under 50 MB)"
       - "Native Minternet Android APK (< 50 MB)"
       - "Native Minternet iOS simulator build (under 50 MB)"
+      - "Publish Minternet UI preview"
     types: [completed]
   workflow_dispatch:
     inputs:
@@ -40,7 +41,7 @@ jobs:
           # Include recent full-native builds across all platforms. All old
           # confirmed releases remain untouched, and later runs are retried
           # on future hourly checks while Actions artifacts remain available.
-          for entry in "native-windows.yml" "native-unix.yml" "native-android.yml" "native-ios.yml"; do
+          for entry in "native-windows.yml" "native-unix.yml" "native-android.yml" "native-ios.yml" "pages.yml"; do
             mapfile -t runs < <(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$entry" \
               --branch main --limit 100 --json databaseId,conclusion \
               | jq -r '[.[] | select(.conclusion=="success") | .databaseId] | .[]')
@@ -120,6 +121,7 @@ jobs:
             "Native Minternet macOS and Linux (under 50 MB)") PLATFORM=Unix ;;
             "Native Minternet Android APK (< 50 MB)") PLATFORM=Android ;;
             "Native Minternet iOS simulator build (under 50 MB)") PLATFORM=iOS-Simulator ;;
+            "Publish Minternet UI preview") PLATFORM=Web-Preview ;;
             *) echo "Unrecognized native build workflow: $NAME"; exit 1 ;;
           esac
           TAG="minternet-build-$RUN_ID"
@@ -135,13 +137,21 @@ jobs:
           count=0
           for artifact in "${ARTIFACTS[@]}"; do
             case "$PLATFORM:$artifact" in
-              Windows:Minternet-Portable-Windows-x64|Windows:Minternet-Windows-Portable-v*|Unix:minternet-native-*|Android:minternet-android-debug-apk|iOS-Simulator:minternet-ios-simulator) ;;
+              Windows:Minternet-Portable-Windows-x64|Windows:Minternet-Windows-Portable-v*|Unix:minternet-native-*|Android:minternet-android-debug-apk|Android:minternet-android-debug-apk-*|iOS-Simulator:minternet-ios-simulator|iOS-Simulator:minternet-ios-simulator-*|iOS-Simulator:minternet-ios-device-unsigned-*|Web-Preview:minternet-web-preview-*) ;;
               *) continue ;;
             esac
             echo "Retrieving: $artifact"
             dir="release/downloaded/$artifact"
             mkdir -p "$dir"
             gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$artifact" --dir "$dir"
+            if [ "$PLATFORM" = "Web-Preview" ]; then
+              test -s "$dir/index.html" || { echo "Web preview is missing its entry page"; exit 1; }
+              filename="Minternet-Web-Preview-${SHA:0:12}.zip"
+              (cd "$dir" && zip -qr "$GITHUB_WORKSPACE/release/assets/$filename" .)
+              test "$(stat -c%s "release/assets/$filename")" -gt 100000
+              count=$((count+1))
+              continue
+            fi
             while IFS= read -r -d '' candidate; do
               case "$candidate" in
                 *.exe|*.dmg|*.deb|*.apk|*.zip|*.AppImage) ;;
@@ -180,7 +190,7 @@ jobs:
 
           Every successful build is archived under its own immutable-by-policy tag.
           This workflow never clobbers or overwrites an earlier EXE, APK, DMG,
-          DEB or simulator package. GitHub Actions' temporary artifacts may expire,
+          DEB, web preview or simulator package. GitHub Actions' temporary artifacts may expire,
           but release assets remain available unless explicitly deleted.
           Checksums are supplied in SHA256SUMS.txt.
 
