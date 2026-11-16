@@ -4,7 +4,7 @@
 //! never URLs, cookies, entered form text, or screenshot pixels.
 #![cfg(windows)]
 use std::{collections::HashMap,fs::{self,OpenOptions},io::Write,
- sync::{Mutex,OnceLock},time::{Duration,Instant,SystemTime,UNIX_EPOCH}};
+ sync::{Arc,Mutex,OnceLock,atomic::{AtomicU8,Ordering}},time::{Duration,Instant,SystemTime,UNIX_EPOCH}};
 use tauri::Manager;
 use webview2_com::Microsoft::Web::WebView2::Win32::{
  COREWEBVIEW2_PROCESS_FAILED_KIND,
@@ -159,10 +159,14 @@ pub fn attach(app:&tauri::AppHandle,id:u32,view:&tauri::Webview){
 pub fn schedule_blank_probe(app:&tauri::AppHandle,id:u32,expected_url:String){
     let smoke=std::env::args().any(|arg|arg=="--minternet-blank-render-smoke");
     let origin=tauri::Url::parse(&expected_url).ok();
+    // A frozen white document can occur on *any* HTTPS/HTTP website after
+    // an update, not only ChatGPT. Restrict inspection to active real pages.
     if !origin.is_some_and(|url|
-        url.host_str()==Some("chatgpt.com") ||
-        (smoke&&url.host_str()==Some("example.com"))){return;}
+        matches!(url.scheme(),"https"|"http") && url.host_str().is_some()){return;}
     smoke_stage("probe-scheduled");
+    // Two consecutive settled-blank samples protect slow SPAs and genuine
+    // transient white states from premature navigation/reload.
+    let consecutive=Arc::new(AtomicU8::new(0));
     let owner=app.clone();
     std::thread::spawn(move||{
         // SPA hydration must have a generous chance. A second probe also
@@ -170,7 +174,7 @@ pub fn schedule_blank_probe(app:&tauri::AppHandle,id:u32,expected_url:String){
         // In smoke mode the test empties the DOM after its initial content is
         // ready (~2.5 seconds after navigation). Probe afterward, never
         // before the deliberate fault is injected.
-        for delay in if smoke{vec![5100u64]}else{vec![14000u64,12000]} {
+        for delay in if smoke{vec![5100u64]}else{vec![5500u64,5500]} {
             std::thread::sleep(Duration::from_millis(delay));
             let task=owner.clone();
             let expected=expected_url.clone();
@@ -189,10 +193,12 @@ pub fn schedule_blank_probe(app:&tauri::AppHandle,id:u32,expected_url:String){
                 let Some(view)=task.get_webview(&label)else{smoke_stage("view-missing");return};
                 let callback=task.clone();
                 let address=expected.clone();
+                let hits=consecutive.clone();
                 let result=view.eval_with_callback(BLANK_PROBE,move|result|{
                     let flags=result.trim().parse::<u8>().unwrap_or(0);
                     smoke_stage(&format!("probe-flags:{flags}"));
-                    if flags!=127{return;}
+                    if flags!=127{hits.store(0,Ordering::Release);return;}
+                    if !smoke && hits.fetch_add(1,Ordering::AcqRel)==0{return;}
                     smoke_stage("probe-true");
                     record(&callback,id,"blank-document");
                     // Defer teardown out of the COM ExecuteScript callback.
