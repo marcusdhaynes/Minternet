@@ -14,6 +14,8 @@ pub struct Entry {
     pub password: String,
     #[serde(default = "default_autofill")]
     pub autofill: bool,
+    #[serde(default)]
+    pub preferred:bool,
 }
 fn default_autofill() -> bool { true }
 #[derive(Clone, Serialize, Deserialize)]
@@ -118,6 +120,18 @@ impl Vault {
             serde_json::json!({"origin":e.origin,"username":e.username,"autofill":e.autofill})
         ).collect::<Vec<_>>()))
     }
+    /// An explicit Fill remembers the selected account. If another account
+    /// exists at this exact origin, the choice becomes the only default.
+    pub fn prefer(&mut self,origin:&str,username:&str)->bool{
+        if !self.unlocked(){return false;}
+        let known=self.entries.iter().any(|e|
+            e.origin==origin&&e.username==username&&e.autofill);
+        if !known{return false;}
+        for item in &mut self.entries{
+            if item.origin==origin{item.preferred=item.username==username;}
+        }
+        true
+    }
     pub fn matching(&self, origin:&str, manual:bool, username:Option<&str>) -> Option<Entry> {
         if !self.unlocked(){return None;}
         if manual {
@@ -125,12 +139,13 @@ impl Vault {
                 e.origin==origin && username.map(|name|name==e.username).unwrap_or(true)
             ).cloned();
         }
-        // Auto-fill must never guess which account to use for a website.
-        // When more than one saved login is enabled, require manual choice.
-        let mut matches=self.entries.iter().filter(|e|e.origin==origin&&e.autofill);
-        let only=matches.next()?;
-        if matches.next().is_some(){return None;}
-        Some(only.clone())
+        let eligible=self.entries.iter().filter(|e|e.origin==origin&&e.autofill)
+            .collect::<Vec<_>>();
+        if eligible.len()==1{return Some(eligible[0].clone());}
+        // Multiple accounts: automatically use only an account the person
+        // explicitly designated during a previous Fill. Do not guess.
+        let preferred=eligible.into_iter().filter(|e|e.preferred).collect::<Vec<_>>();
+        if preferred.len()==1{Some(preferred[0].clone())}else{None}
     }
     fn key_from(password:&str,salt:&[u8;16]) -> Result<[u8;32],String> {
         if password.len()<12||password.len()>1024{return Err("Master password must contain 12–1024 characters".into());}
@@ -287,7 +302,7 @@ impl Vault {
                 }else{
                     if self.entries.len()>=MAX_ENTRIES{return Err("Credential capacity exceeded".into());}
                     self.entries.push(Entry{origin:domain,username:username.to_owned(),
-                        password:pass.to_owned(),autofill});
+                        password:pass.to_owned(),autofill,preferred:false});
                     Ok(true)
                 }
             }
@@ -399,7 +414,7 @@ impl Vault {
             old.password.zeroize();old.password=password;old.autofill=autofill;
         }else{
             if self.entries.len()>=MAX_ENTRIES{return Err("Vault limit reached".into());}
-            self.entries.push(Entry{origin,username,password,autofill});
+            self.entries.push(Entry{origin,username,password,autofill,preferred:false});
         }
         Ok(())
     }
