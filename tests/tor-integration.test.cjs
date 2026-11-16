@@ -141,3 +141,13 @@ test('22. Tor readiness reports current bootstrap condition, not merely a cached
 test('23. Ordinary tab closes do not spawn Tor profile cleanup threads',()=>{
  assert.match(transport,/if removed\{cleanup_profile\(app,id\);\}/);
 });
+
+test('24. Onion destinations cannot navigate through ordinary system DNS',()=>{
+ assert.match(native,/Onion addresses require an isolated Tor tab/);
+ assert.match(native,/if !tor && url\.host_str\(\)\.is_some_and/);
+});
+test('25. Bare onion URLs default to HTTP only inside Tor and can be duplicated',()=>{
+ assert.match(native,/let is_bare_onion=active_is_tor/);
+ assert.match(native,/format!\("http:\/\/\{onion\}"\)/);
+ assert.match(native,/tor && parsed\.scheme\(\)=="http"/);
+});
