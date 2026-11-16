@@ -193,8 +193,9 @@
     }
     const tab=(state.tabs||[]).find(t=>t.id===id);
     const observed=lastState?.tabId===id?lastState.status:{};
-    activeStatus=Boolean(tab?.audioPlaying||observed?.microphone||
-      observed?.camera||observed?.speaker||observed?.requested);
+    // Playback output and unapproved, pending or denied requests never
+    // indicate camera/microphone access; only verified live capture does.
+    activeStatus=Boolean(observed?.microphone||observed?.camera);
     // A fresh tab update must not erase a still-active capture indicator.
     if(!panel)trigger.hidden=!activeStatus;
   }
@@ -206,8 +207,7 @@
       if(result?.message)return;
       if(result?.origin){
         lastState=result;
-        activeStatus=Boolean(result.status?.microphone||result.status?.camera||
-          result.status?.speaker||result.status?.requested);
+        activeStatus=Boolean(result.status?.microphone||result.status?.camera);
         trigger.hidden=!activeStatus&&!panel;
         if(panel)render(result);
       }
