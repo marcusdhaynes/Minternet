@@ -123,7 +123,7 @@
     header.append(create('strong','','Payments'));
     const lock=create('button','payment-lock','Lock');lock.type='button';
     lock.addEventListener('click',async()=>{
-      const result=await invoke('vault-lock');
+      const result=await invoke('vault-lock','payments');
       if(result?.ok){locked=true;sync();report('Vault locked.');master?.focus();}
     });
     const x=create('button','payment-close','×');x.type='button';
