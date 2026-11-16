@@ -60,18 +60,33 @@ pub fn recoverable_failure(kind:COREWEBVIEW2_PROCESS_FAILED_KIND)->bool{
     kind==COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED ||
     kind==COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED
 }
-type Attempt=(String,Instant);
+#[derive(Debug,Clone,Copy,PartialEq,Eq)]
+pub enum Recovery { Reload, Recreate }
+struct Attempt {url:String,when:Instant,stage:u8}
 static ATTEMPTS:OnceLock<Mutex<HashMap<u32,Attempt>>>=OnceLock::new();
 
-pub fn claim(id:u32,url:&str)->bool{
+// First confirmed blank document: reload the live controller. If the same
+// settled blank page returns, reconstruct its controller once. Then stop.
+// Fatal renderer exits skip reload. This avoids an infinite browser flash
+// loop while preserving the persistent WebView2 profile and cookie jar.
+pub fn claim(id:u32,url:&str,reason:&str)->Option<Recovery>{
     let registry=ATTEMPTS.get_or_init(||Mutex::new(HashMap::new()));
-    let Ok(mut map)=registry.lock() else{return false};
-    map.retain(|_,(_,when)|when.elapsed()<Duration::from_secs(180));
-    if map.get(&id).is_some_and(|(previous,_)|previous==url){
-        return false;
+    let Ok(mut map)=registry.lock() else{return None};
+    map.retain(|_,attempt|attempt.when.elapsed()<Duration::from_secs(180));
+    let entry=map.entry(id).or_insert_with(||Attempt{
+        url:url.to_string(),when:Instant::now(),stage:0
+    });
+    if entry.url!=url{
+        *entry=Attempt{url:url.to_string(),when:Instant::now(),stage:0};
     }
-    map.insert(id,(url.to_string(),Instant::now()));
-    true
+    if entry.stage>=2{return None;}
+    if reason=="blank-document" && entry.stage==0{
+        entry.stage=1;
+        Some(Recovery::Reload)
+    }else{
+        entry.stage=2;
+        Some(Recovery::Recreate)
+    }
 }
 pub fn record(app:&tauri::AppHandle,id:u32,reason:&str){
     // Fixed allowlisted event names; no URL/selection/form contents. Never
@@ -228,11 +243,13 @@ mod tests{
         assert!(!recoverable_failure(COREWEBVIEW2_PROCESS_FAILED_KIND_GPU_PROCESS_EXITED));
         assert!(!recoverable_failure(COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE));
     }
-    #[test]fn at_most_one_restart_for_same_tab_url(){
+    #[test]fn one_reload_then_one_reconstruction_per_blank_tab_url(){
         let id=std::process::id();
-        assert!(claim(id,"https://one.example/"));
-        assert!(!claim(id,"https://one.example/"));
-        assert!(claim(id,"https://two.example/"));
+        assert_eq!(claim(id,"https://one.example/","blank-document"),Some(Recovery::Reload));
+        assert_eq!(claim(id,"https://one.example/","blank-document"),Some(Recovery::Recreate));
+        assert_eq!(claim(id,"https://one.example/","blank-document"),None);
+        assert_eq!(claim(id,"https://two.example/","renderer-exited"),Some(Recovery::Recreate));
+        assert_eq!(claim(id,"https://two.example/","renderer-exited"),None);
     }
     #[test]fn inspection_cannot_read_page_contents_or_send_a_url(){
         assert!(!BLANK_PROBE.contains("localStorage"));
