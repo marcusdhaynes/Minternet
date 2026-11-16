@@ -1029,6 +1029,41 @@ fn read_session_data(path:&std::path::Path)->Option<Value>{
     }
     None
 }
+#[cfg(test)]
+mod session_checkpoint_tests {
+    use super::*;
+    #[test]
+    fn incomplete_primary_session_recovers_valid_backup(){
+        let dir=std::env::temp_dir().join(format!(
+            "minternet-checkpoint-{}-{}",std::process::id(),
+            std::time::SystemTime::now().duration_since(
+                std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file=dir.join("browser-session.v1.json");
+        std::fs::write(&file,b"{ interrupted").unwrap();
+        std::fs::write(file.with_extension("bak"),
+            br#"{"version":1,"tabs":[{"url":"https://example.com/"}],"active":0}"#).unwrap();
+        let snapshot=read_session_data(&file).unwrap();
+        assert_eq!(snapshot["active"],0);
+        assert_eq!(snapshot["tabs"][0]["url"],"https://example.com/");
+        let _=std::fs::remove_dir_all(dir);
+    }
+    #[test]
+    fn corrupt_staging_file_does_not_override_committed_session(){
+        let dir=std::env::temp_dir().join(format!(
+            "minternet-staging-{}-{}",std::process::id(),
+            std::time::SystemTime::now().duration_since(
+                std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file=dir.join("browser-session.v1.json");
+        std::fs::write(&file,
+            br#"{"version":1,"tabs":[{"url":"https://example.org/"}],"active":0}"#).unwrap();
+        std::fs::write(file.with_extension("tmp"),b"{ half-written").unwrap();
+        let snapshot=read_session_data(&file).unwrap();
+        assert_eq!(snapshot["tabs"][0]["url"],"https://example.org/");
+        let _=std::fs::remove_dir_all(dir);
+    }
+}
 fn save_session(app: &tauri::AppHandle) -> Result<(),String> {
     // Capture live locations even for background tabs. ChatGPT and other SPAs
     // can change routes without a top-level WebView navigation callback.
