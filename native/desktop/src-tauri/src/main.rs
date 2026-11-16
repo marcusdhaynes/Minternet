@@ -3600,9 +3600,18 @@ const FORM_FIELD_CONTEXT_JS:&str=r#"(function(){
   const hasPassword=[...document.querySelectorAll('input[type="password"]')]
     .filter(e=>!e.disabled&&e.getBoundingClientRect().width>0);
   const loginUser=document.querySelector('input[autocomplete="username"],input[type="email"],input[name*="user" i],input[id*="user" i]');
-  const login=hasPassword.length===1 &&
-    (field.type==='password'||auto.includes('username')||
-      (loginUser===field));
+  const routeHint=[location.hostname,location.pathname,
+    field.form?.getAttribute('action')||'',field.form?.id||'',
+    field.form?.className||''].join(' ');
+  const registration=/(?:sign.?up|register|create.?account|forgot.?password|reset.?password|new.?password)/i.test(routeHint);
+  const loginRoute=/(?:log.?in|sign.?in|auth|account|session|identify|sso)/i.test(routeHint);
+  const usernameField=auto.includes('username')||loginUser===field;
+  // Username-first SSO pages have no password input until the next step.
+  // Do not misclassify ordinary email/newsletter boxes or signup forms.
+  const login=!registration && (
+    (hasPassword.length===1&&(field.type==='password'||usernameField))||
+    (hasPassword.length===0&&usernameField&&loginRoute)
+  );
   let kind='',key='';
   if(login){kind='login';key='login';}
   else if(auto.some(x=>x.startsWith('cc-'))||/credit.?card|card.?number|cc.?number|expir/i.test(desc)){
