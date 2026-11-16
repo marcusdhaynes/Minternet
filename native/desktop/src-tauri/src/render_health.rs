@@ -147,8 +147,23 @@ pub fn attach(app:&tauri::AppHandle,id:u32,view:&tauri::Webview){
                     std::thread::spawn(move||{
                         std::thread::sleep(Duration::from_millis(280));
                         let main=app.clone();
-                        let _=app.run_on_main_thread(move||
-                            super::schedule_surface_restore(&main));
+                        let _=app.run_on_main_thread(move|| {
+                            // GPU recovery can leave a valid DOM behind a
+                            // stale DirectComposition texture. Bounds and
+                            // NavigationCompleted are insufficient evidence
+                            // of a repainted frame. Rebind only the affected
+                            // live controller after an actual GPU failure,
+                            // without navigating or replacing its profile.
+                            if let Some(label) = main.state::<Mutex<super::Browser>>()
+                                .lock().ok().and_then(|browser|
+                                    browser.tabs.iter().find(|tab|tab.id==id)
+                                        .and_then(|tab|tab.view.clone())) {
+                                if let Some(view) = main.get_webview(&label) {
+                                    super::native_surface::force_compositor_rebind(&view);
+                                }
+                            }
+                            super::schedule_surface_restore(&main);
+                        });
                     });
                 }
                 Ok(())
@@ -250,6 +265,10 @@ mod tests{
         assert_eq!(claim(id,"https://one.example/","blank-document"),None);
         assert_eq!(claim(id,"https://two.example/","renderer-exited"),Some(Recovery::Recreate));
         assert_eq!(claim(id,"https://two.example/","renderer-exited"),None);
+    }
+    #[test]fn gpu_failure_is_not_misclassified_as_document_crash(){
+        // GPU exits need a compositor rebind, not a destructive reload.
+        assert!(!recoverable_failure(COREWEBVIEW2_PROCESS_FAILED_KIND_GPU_PROCESS_EXITED));
     }
     #[test]fn inspection_cannot_read_page_contents_or_send_a_url(){
         assert!(!BLANK_PROBE.contains("localStorage"));
