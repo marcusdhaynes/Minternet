@@ -148,3 +148,30 @@ test('Secret tabs cannot be pinned from browser menus',()=>{
  assert.equal(normal.some(entry=>entry.action&&entry.text?.includes('Pin Tab')),false);
  assert.equal(h.window.minternetMenus.inspectTabQuick(1).some(entry=>entry.title?.includes('Pin Tab')),false);
 });
+
+test('cascading bookmark menu entries carry stable drag IDs including nested folders',()=>{
+ const h=harness();
+ const menu=h.window.minternetMenus.inspectFolder(h.root.id);
+ const folder=menu.find(spec=>spec.folderId===h.sub.id);
+ const linkId=bm.find(h.bookmarks,h.sub.id).children[0].id;
+ assert.ok(folder,'nested folder is a draggable target, not just text');
+ assert.ok(folder.items.some(spec=>spec.bookmarkId===linkId),
+   'links inside nested submenus expose their own source IDs');
+ assert.ok(!menu.some(spec=>spec.bookmarkId===h.root.id),
+   'the opened folder is not accidentally emitted as its own child');
+});
+test('bookmark drag controller can start from cascading menus and place into subfolder',()=>{
+ const code=fs.readFileSync(path.join(__dirname,'../ui/bookmark-ui.js'),'utf8');
+ const menus=fs.readFileSync(path.join(__dirname,'../ui/chrome-native-menu.js'),'utf8');
+ const styles=fs.readFileSync(path.join(__dirname,'../ui/styles.css'),'utf8');
+ assert.match(code,/beginDragById:\(id,row,event\)=>/);
+ assert.match(code,/\.bookmark-popup-item/);
+ assert.match(code,/popup\.dataset\.bookmarkFolderId/);
+ assert.match(code,/scheduleFolderHover\(event,placement\)/);
+ assert.match(code,/scrollDragTarget\(event\)/);
+ assert.match(code,/model\.moveMany\(data,ids,placement\.parentId,placement\.anchorId,placement\.after\)/);
+ assert.match(menus,/row\.addEventListener\('dragstart',event=>/);
+ assert.match(menus,/child\.dataset\.bookmarkFolderId=spec\.folderId/);
+ assert.match(menus,/bookmarkFolderId:id/);
+ assert.match(styles,/\.bookmark-popup-item\.bookmark-reorder-before/);
+});
