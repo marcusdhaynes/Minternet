@@ -125,9 +125,10 @@
     if(file.size>10_000_000){say('Export exceeds 10 MB. Split it into smaller files.');return;}
     passwords.disabled=cards.disabled=true;
     try{
-      const state=await api.command('vault-status');
+      const state=await api.command('vault-status',
+        kind==='password'?'logins':'payments');
       if(!state?.unlocked)
-        throw Error('Unlock Passwords or Payment Methods in Settings first.');
+        throw Error('Unlock '+(kind==='password'?'Logins':'Payments')+' in Settings first.');
       const text=await file.text();
       const parsed=recordsFrom(text,file.name);
       const candidates=parsed.map(kind==='password'?asLogin:asCard).filter(Boolean);
