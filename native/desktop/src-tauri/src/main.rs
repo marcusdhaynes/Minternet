@@ -4553,6 +4553,45 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 "message":"Tor circuit ready. This is Tor-routed Minternet, not the hardened Tor Browser."}));
         }
     }
+    if name=="tor-new-identity" {
+        #[cfg(not(any(windows,target_os="linux")))]
+        {return Err("Tor is unavailable on this platform".into());}
+        #[cfg(any(windows,target_os="linux"))]
+        {
+            // Closing every Tor tab and building a completely new isolation
+            // context is the only honest "new identity" operation available to
+            // a WebView2-based browser. Normal tabs and sessions are untouched.
+            let (ids,views,new_id)={
+                let store=app.state::<Mutex<Browser>>();
+                let mut browser=store.lock().map_err(|e|e.to_string())?;
+                let ids=browser.tabs.iter().filter(|tab|tab.tor)
+                    .map(|tab|tab.id).collect::<Vec<_>>();
+                let views=browser.tabs.iter().filter(|tab|tab.tor)
+                    .filter_map(|tab|tab.view.clone()).collect::<Vec<_>>();
+                browser.tabs.retain(|tab|!tab.tor);
+                if !browser.tabs.iter().any(|t|t.id==browser.active_id){
+                    browser.active_id=0;
+                }
+                let new_id=browser.add(true)?;
+                if let Some(tab)=browser.tabs.iter_mut().find(|t|t.id==new_id){tab.tor=true;}
+                (ids,views,new_id)
+            };
+            for label in views{
+                if let Some(view)=app.get_webview(&label){let _=view.close();}
+            }
+            for id in &ids{tor_transport::release(&app,*id);}
+            prune_splits(&app);
+            if let Err(error)=prepare_new_tor_tab(&app,new_id).await {
+                return Err(error);
+            }
+            display_active(&app);
+            focus_address_bar(&app);
+            notify(&app);
+            return Ok(json!({"ok":true,"tor":true,"tabId":new_id,
+                "closedTorTabs":ids.len(),
+                "message":"Old Tor tabs closed. Fresh isolation context ready; Tor Browser-equivalent anonymity is not guaranteed."}));
+        }
+    }
     if name=="render-compat-get" {
         #[cfg(windows)]
         {return Ok(render_compat::status(&app));}

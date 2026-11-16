@@ -417,6 +417,58 @@ for (const [id, name] of [
   ['reload','reload'],
   ['minimize','minimize'],['maximize','maximize'],['quit','quit']
 ]) bind(id,name);
+// Tor button: left-click opens a Tor tab; right-click exposes privacy controls
+// in a browser-owned menu near the pointer, never an OS context menu.
+const torButton=byId('tor');
+const torMenu=document.createElement('div');
+torMenu.className='tor-action-menu';
+torMenu.setAttribute('role','menu');
+torMenu.setAttribute('aria-label','Tor tab actions');
+torMenu.hidden=true;
+const torItems=[
+  {name:'New Tor Tab',action:'tor'},
+  {name:'Open Site in Fresh Tor Tab',action:'duplicate',requiresTor:true},
+  {name:'New Identity · Close All Tor Tabs',action:'tor-new-identity'}
+];
+for(const item of torItems){
+  const button=document.createElement('button');
+  button.type='button';
+  button.setAttribute('role','menuitem');
+  button.textContent=item.name;
+  button.dataset.action=item.action;
+  button.addEventListener('click',async()=>{
+    const active=snapshot.tabs.find(t=>t.id===snapshot.activeId);
+    torMenu.hidden=true;torButton.setAttribute('aria-expanded','false');
+    if(item.requiresTor && !active?.tor)return toast('Select a Tor tab first.');
+    torButton.disabled=true;
+    try{
+      const result=await command(item.action,item.action==='duplicate'?active.id:undefined);
+      if(result?.tor)focusNewTabAddress();
+    }finally{torButton.disabled=false;}
+  });
+  torMenu.append(button);
+}
+document.body.append(torMenu);
+torButton.setAttribute('aria-haspopup','menu');
+torButton.setAttribute('aria-expanded','false');
+const hideTorMenu=()=>{torMenu.hidden=true;torButton.setAttribute('aria-expanded','false');};
+torButton.addEventListener('contextmenu',event=>{
+  event.preventDefault();event.stopPropagation();
+  const active=snapshot.tabs.find(t=>t.id===snapshot.activeId);
+  const fresh=torMenu.querySelector('[data-action="duplicate"]');
+  fresh.disabled=!active?.tor;
+  torMenu.hidden=false;torButton.setAttribute('aria-expanded','true');
+  const x=Math.min(Math.max(4,event.clientX),Math.max(4,innerWidth-247));
+  const y=Math.min(Math.max(4,event.clientY),Math.max(4,innerHeight-134));
+  torMenu.style.left=x+'px';torMenu.style.top=y+'px';
+  torMenu.querySelector('button:not(:disabled)')?.focus();
+});
+document.addEventListener('pointerdown',event=>{
+  if(!torMenu.hidden&&!torMenu.contains(event.target)&&event.target!==torButton)hideTorMenu();
+},true);
+document.addEventListener('keydown',event=>{
+  if(event.key==='Escape'&&!torMenu.hidden){event.preventDefault();hideTorMenu();torButton.focus();}
+});
 byId('tor').addEventListener('click',async()=>{
   const button=byId('tor');
   if(button.disabled)return;

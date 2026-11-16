@@ -118,3 +118,16 @@ test('19. Tor document-start script disables potentially identifying WebRTC and 
  assert.match(script,/getUserMedia/);
  assert.match(script,/getDisplayMedia/);
 });
+
+test('20. New Tor identity closes previous Tor views and circuits without touching normal tabs',()=>{
+ assert.match(native,/if name=="tor-new-identity"/);
+ assert.match(native,/browser\.tabs\.retain\(\|tab\|!tab\.tor\)/);
+ assert.match(native,/for id in &ids\{tor_transport::release\(&app,\*id\);\}/);
+ assert.match(native,/prepare_new_tor_tab\(&app,new_id\)\.await/);
+});
+test('21. New identity and fresh-tab actions are available from custom Tor menu',()=>{
+ assert.match(app,/torButton\.addEventListener\('contextmenu'/);
+ assert.match(app,/New Identity · Close All Tor Tabs/);
+ assert.match(app,/Open Site in Fresh Tor Tab/);
+ assert.match(app,/torMenu\.setAttribute\('role','menu'\)/);
+});
