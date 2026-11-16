@@ -284,8 +284,19 @@
         row.dataset.bookmarkKind=spec.folderId?'folder':'link';
         row.classList.add('bookmark-popup-item');
         row.draggable=true;
-        row.addEventListener('dragstart',event=>
-          ctrl()?.beginDragById?.(bookmarkId,row,event));
+        let suppressDragClickUntil=0;
+        row.addEventListener('dragstart',event=>{
+          suppressDragClickUntil=Infinity;
+          ctrl()?.beginDragById?.(bookmarkId,row,event);
+        });
+        row.addEventListener('dragend',()=>{suppressDragClickUntil=Date.now()+400;});
+        row.addEventListener('click',event=>{
+          // A completed drag must never accidentally open the URL or collapse
+          // a folder if WebView2 synthesizes a final mouse click.
+          if(Date.now()<suppressDragClickUntil){
+            event.preventDefault();event.stopImmediatePropagation();
+          }
+        },true);
       }
       if(spec.items){
         const arrow=document.createElement('span');arrow.textContent='›';arrow.className='system-popup-arrow';row.append(arrow);
