@@ -2158,7 +2158,6 @@ fn refresh_layout(app: &tauri::AppHandle) {
 // The page WebView2 may not have painted yet; until a genuinely non-white
 // frame exists, the full-size trusted Chrome curtain is the only visible
 // content area. A failed page shows a dark retry screen, not a white pane.
-#[cfg(windows)]
 struct StartupPresentation(Mutex<Option<(u32,String,bool)>>);
 #[cfg(windows)]
 impl StartupPresentation {
@@ -7740,7 +7739,6 @@ fn main() {
         .manage(Mutex::new(LayoutCache::default()))
         .manage(SessionSaveQueued(AtomicBool::new(false)))
         .manage(SurfaceRestoreQueued(AtomicBool::new(false)))
-        #[cfg(windows)]
         .manage(StartupPresentation(Mutex::new(None)))
         .manage(FindBarState(Mutex::new(false)))
         .manage(LocalMediaSelection::default())
