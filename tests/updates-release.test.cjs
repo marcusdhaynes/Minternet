@@ -114,7 +114,7 @@ test('newer published release remains installable independently of later source 
   const release=await h.updates.checkForUpdate();
   assert.equal(release.version,'0.3.0-build.1200-gaabbccdd');
   assert.equal(h.updates.lastStatus.kind,'verified');
-  assert.match(h.updates.lastStatus.message,/New Minternet release available/);
+  assert.match(h.updates.lastStatus.message,/New verified Minternet update available/);
   assert.equal(h.requests,2);
 });
 
