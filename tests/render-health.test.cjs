@@ -83,7 +83,8 @@ test('active page is checked beyond startup and completed navigations',()=>{
    main.indexOf('fn schedule_page_bounds_reconciliation('));
  assert.match(watchdog,/loop \{/);
  assert.match(watchdog,/reconcile_visible_child_bounds\(&task\)/);
- assert.match(watchdog,/render_health::schedule_blank_probe\(&task, id, url\)/);
+ assert.match(watchdog,/render_health::schedule_blank_probe\(&task,id,url\.clone\(\)\)/);
+ assert.match(watchdog,/render_visual::schedule\(&task,id,url,800\)/);
  assert.match(watchdog,/!tab\.loading && is_real_page_url\(&tab\.url\)/);
 });
 test('real GPU process loss rebinds the compositor without discarding user data',()=>{
