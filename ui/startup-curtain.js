@@ -41,11 +41,12 @@
     if(completed||requested)return;
     const box=curtain.getBoundingClientRect();
     const style=getComputedStyle(curtain);
-    // This proof is local: no untrusted website can decide when the
-    // parent window is shown.
+    // Secondary fallback for the native chrome-ready callback.
+    // A hidden WebView2 window can suspend animation frames indefinitely.
+    // This proof is local: no untrusted website can decide when to show it.
     if(style.display==='none'||style.backgroundColor==='rgba(0, 0, 0, 0)'||
        box.height<120||box.width<300){
-      requestAnimationFrame(present);
+      setTimeout(present,150);
       return;
     }
     requested=true;
@@ -53,9 +54,9 @@
     if(result?.message){
       requested=false;
       if(status)status.textContent='Preparing the browser window…';
-      setTimeout(()=>requestAnimationFrame(present),350);
+      setTimeout(present,350);
     }
   }
-  requestAnimationFrame(()=>requestAnimationFrame(present));
+  setTimeout(present,80);
   failureTimer=setTimeout(failure,12000);
 })();
