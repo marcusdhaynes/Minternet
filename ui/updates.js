@@ -96,6 +96,23 @@
     }
     throw error||new Error('GitHub release verification is unavailable.');
   }
+  // A source commit is NOT an installable update. Compare it only to
+  // explain why the installed latest verified release can lag behind main.
+  // The update button is still offered exclusively for a published release
+  // with a matching Windows EXE and checksum.
+  async function sourcePublicationState(release){
+    const tag=String(release?.tag||'');
+    const match=tag.match(/-g([0-9a-f]{8,40})$/i);
+    if(!match)return {kind:'unknown'};
+    try{
+      const latest=await request('/branches/main');
+      const sha=String(latest.data?.commit?.sha||'').toLowerCase();
+      if(!/^[0-9a-f]{40}$/.test(sha))return {kind:'unknown'};
+      return sha.startsWith(match[1].toLowerCase())
+        ?{kind:'current',sha}
+        :{kind:'pending',sha};
+    }catch{return {kind:'unknown'};}
+  }
   async function checkForUpdate(){
     if(checking)return checking;
     checking=(async()=>{
@@ -109,15 +126,23 @@
         saveCache(found.release);
         const updateAvailable=isNewer(found.release.version,installed);
         const published='v'+found.release.version;
-        // The updater always compares the installed native build against the
-        // newest installable GitHub Release. Unreleased commits on main NEVER
-        // change availability, suppress a release, or gate the install button.
+        // Never claim "up to date" with all source changes while Windows CI
+        // is still building or testing a newer commit on main. Pending source
+        // does not activate the install button or bypass binary checks.
+        const publication=updateAvailable||!window.__TAURI__
+          ?{kind:'current'}:await sourcePublicationState(found.release);
         lastStatus={
-          kind:'verified',
+          kind:publication.kind==='pending'?'pending':
+            publication.kind==='unknown'?'verification-unknown':'verified',
           releaseVersion:found.release.version,
+          sourceSha:publication.sha||null,
           message:updateAvailable
-            ?'New Minternet release available: '+published+'.'
-            :'Up to date — you have the latest published Minternet release ('+published+').'
+            ?'New verified Minternet update available: '+published+'.'
+            :publication.kind==='pending'
+              ?'A newer Minternet source update is pending its verified Windows release. '+published+' remains the latest installable version.'
+              :publication.kind==='unknown'
+                ?'Latest installable release: '+published+'. Unable to verify whether newer source changes are pending.'
+                :'Up to date — you have the latest published and verified Minternet Windows release ('+published+').'
         };
         return updateAvailable?found.release:null;
       }catch(err){
@@ -165,13 +190,17 @@
     if(lastStatus?.releaseVersion)
       versions.append(versionRow('Latest Published Release','v'+lastStatus.releaseVersion));
     if(info)versions.append(versionRow('Available Update','v'+info.version));
+    if(lastStatus?.kind==='pending' && lastStatus.sourceSha)
+      versions.append(versionRow('Latest Source (Pending Release)',lastStatus.sourceSha.slice(0,8)));
     el.append(versions);
     const message=document.createElement('div');message.className='updates-current-status';
     message.setAttribute('role','status');message.setAttribute('aria-live','polite');
     message.textContent=status||'';
     message.dataset.state=checking?'checking':
       lastStatus?.kind==='offline'?'error':
-      lastStatus?.kind==='unpublished'?'unpublished':info?'available':'current';
+      lastStatus?.kind==='unpublished'?'unpublished':
+      lastStatus?.kind==='pending'?'pending':
+      lastStatus?.kind==='verification-unknown'?'unknown':info?'available':'current';
     el.append(message);
     if(info?.notes){
       const notes=document.createElement('details');notes.className='updates-release-notes';
