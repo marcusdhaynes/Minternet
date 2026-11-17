@@ -2168,19 +2168,28 @@ impl StartupPresentation {
 #[cfg(windows)]
 fn present_restored_chrome(app:&tauri::AppHandle)->Result<(),String>{
     let gate=app.state::<StartupPresentation>();
-    let mut value=gate.0.lock().map_err(|e|e.to_string())?;
-    let Some((_,_,shown))=value.as_mut() else{return Ok(());};
-    if *shown{return Ok(());}
-    // JS only requests presentation after two local animation frames and
-    // checking that the opaque curtain covers the viewport.
+    let armed={
+        let mut value=gate.0.lock().map_err(|e|e.to_string())?;
+        match value.as_mut(){
+            Some((_,_,shown)) if !*shown=>{*shown=true;true},
+            _=>false
+        }
+    };
+    if !armed{return Ok(());}
+    // Never hold the gate's lock across Window::show: show can dispatch
+    // nested Windows events on the same thread.
     let window=app.get_window("main").ok_or("Browser window unavailable")?;
     if let Ok(mut cache)=app.state::<Mutex<LayoutCache>>().lock(){
         cache.overlay_open=true;cache.size_and_home=None;
     }
     refresh_layout(app);
     raise_chrome_above_site(app);
-    window.show().map_err(|e|e.to_string())?;
-    *shown=true;
+    if let Err(error)=window.show(){
+        if let Ok(mut state)=gate.0.lock(){
+            if let Some((_,_,shown))=state.as_mut(){*shown=false;}
+        }
+        return Err(error.to_string());
+    }
     Ok(())
 }
 #[cfg(windows)]
