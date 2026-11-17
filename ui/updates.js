@@ -84,8 +84,18 @@
         latest=convertRelease(result.data);
       }catch(err){error=err;}
       try{
-        const result=await request('/releases?per_page=100');
-        list=Array.isArray(result.data)?result.data.map(convertRelease).filter(Boolean):[];
+        // Draft-only pages can hide hundreds of older verified Windows
+        // releases. Keep scanning within a bounded budget until we have
+        // reached the real published results, not just the first 100 drafts.
+        let verifiedPages=0;
+        for(let page=1;page<=10;page++){
+          const result=await request('/releases?per_page=100&page='+page);
+          const entries=Array.isArray(result.data)?result.data:[];
+          const valid=entries.map(convertRelease).filter(Boolean);
+          list.push(...valid);
+          if(valid.length)verifiedPages++;
+          if(entries.length<100||verifiedPages>=2)break;
+        }
       }catch(err){error=err;}
       const releases=[...list];
       if(latest&&!releases.some(item=>item.tag===latest.tag))releases.push(latest);
