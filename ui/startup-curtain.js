@@ -10,6 +10,7 @@
   const retry=document.getElementById('startupCurtainRetry');
   if (!curtain) return;
   root.classList.add('minternet-startup-armed');
+  curtain.setAttribute('aria-hidden','false');
   let completed=false,requested=false;
   let failureTimer=null;
   function failure(){
