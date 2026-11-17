@@ -111,7 +111,7 @@ jobs:
                   .draft==false and .prerelease==false and
                   ([.assets[].name]|index($exe)!=null) and
                   ([.assets[].name]|index("SHA256SUMS.txt")!=null)
-                ' <<<"${stable:-\{\}}" 2>/dev/null || echo false)
+                ' <<<"${stable:-null}" 2>/dev/null || echo false)
                 if [ "$stable_valid" != "true" ]; then complete=false; fi
               fi
             fi
