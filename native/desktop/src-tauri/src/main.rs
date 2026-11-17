@@ -2160,6 +2160,16 @@ fn refresh_layout(app: &tauri::AppHandle) {
 // content area. A failed page shows a dark retry screen, not a white pane.
 struct StartupPresentation(Mutex<Option<(u32,String,bool)>>);
 #[cfg(windows)]
+fn startup_smoke_stage(stage:&'static str){
+    if std::env::args().any(|arg|arg=="--minternet-last-active-smoke"){
+        // CI-only fixed vocabulary; never log website addresses or content.
+        let path=std::env::temp_dir().join(format!(
+            "minternet-startup-stage-{}.txt",std::process::id()));
+        let _=std::fs::write(path,stage);
+    }
+}
+
+#[cfg(windows)]
 impl StartupPresentation {
     fn armed(&self)->bool{
         self.0.lock().is_ok_and(|state|state.is_some())
@@ -2190,6 +2200,7 @@ fn present_restored_chrome(app:&tauri::AppHandle)->Result<(),String>{
         }
         return Err(error.to_string());
     }
+    startup_smoke_stage("window-shown-under-curtain");
     Ok(())
 }
 #[cfg(windows)]
@@ -2218,6 +2229,7 @@ fn finish_restored_chrome(app:&tauri::AppHandle,id:u32,expected_url:&str){
         let _=page.set_focus();
     }
     render_health::record(app,id,"startup-painted");
+    startup_smoke_stage("painted-frame-revealed");
     if std::env::args().any(|arg|arg=="--minternet-last-active-smoke"){
         let marker=std::env::temp_dir().join(format!(
             "minternet-startup-curtain-{}.ok",std::process::id()));
@@ -7841,6 +7853,9 @@ fn main() {
             }else{None};
             #[cfg(windows)]
             let startup_gate=initial_site.is_some();
+            #[cfg(windows)]
+            startup_smoke_stage(if startup_gate{"saved-active-tab-selected"}
+                else{"no-eligible-saved-active-tab"});
             #[cfg(not(windows))]
             let startup_gate=false;
             #[cfg(windows)]
@@ -7929,6 +7944,7 @@ fn main() {
                             // let native code show the window immediately.
                             #[cfg(windows)]
                             if chrome_ready_app.state::<StartupPresentation>().armed(){
+                                startup_smoke_stage("chrome-local-document-loaded");
                                 let app_ready=chrome_ready_app.clone();
                                 let _=view.eval_with_callback(r#"(() => {
                                   const cover=document.getElementById('startupCurtain');
@@ -7939,7 +7955,11 @@ fn main() {
                                       style.backgroundColor==='rgb(11, 16, 32)' &&
                                       box.width>=300 && box.height>=120;
                                 })()"#,move|result|{
-                                    if result.trim()!="true"{return;}
+                                    if result.trim()!="true"{
+                                        startup_smoke_stage("chrome-curtain-layout-failed");
+                                        return;
+                                    }
+                                    startup_smoke_stage("chrome-curtain-layout-verified");
                                     let handle=app_ready.clone();
                                     let _=app_ready.run_on_main_thread(move||{
                                         let _=present_restored_chrome(&handle);
