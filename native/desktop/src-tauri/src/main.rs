@@ -2211,6 +2211,12 @@ fn finish_restored_chrome(app:&tauri::AppHandle,id:u32,expected_url:&str){
     if let Some(chrome)=app.get_webview("chrome"){
         let _=chrome.eval("window.minternetStartup?.finish?.()");
     }
+    // A selected tab is not actually ready for input until its native
+    // WebView2 controller owns focus. This replaces a synthetic mouse click,
+    // which could navigate or submit unintended website controls.
+    if let Some(page)=app.get_webview(&format!("tab-{id}")){
+        let _=page.set_focus();
+    }
     render_health::record(app,id,"startup-painted");
     if std::env::args().any(|arg|arg=="--minternet-last-active-smoke"){
         let marker=std::env::temp_dir().join(format!(
