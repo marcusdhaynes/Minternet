@@ -2197,7 +2197,7 @@ fn finish_restored_chrome(app:&tauri::AppHandle,id:u32,expected_url:&str){
     let gate=app.state::<StartupPresentation>();
     let matched=gate.0.lock().ok().is_some_and(|mut state|{
         if !state.as_ref().is_some_and(|(active,url,shown)|
-            *active==id && url==expected_url && *shown){return false;}
+            *active==id && url.as_str()==expected_url && *shown){return false;}
         *state=None;true
     });
     if !matched{return;}
