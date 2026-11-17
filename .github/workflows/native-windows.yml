@@ -41,6 +41,8 @@ jobs:
       - name: Validate browser UI and bookmark model
         run: |
           node --check ../../ui/native-bridge.js
+          node --check ../../ui/startup-curtain.js
+          node --test ../../tests/startup-curtain.test.cjs
           node --check ../../ui/app.js
           node --check ../../ui/browser-settings.js
           node --check ../../ui/render-compat-ui.js
@@ -167,13 +169,15 @@ jobs:
           [System.IO.File]::WriteAllText($fixture,$session)
           $p = Start-Process -FilePath $exe -ArgumentList '--minternet-last-active-smoke' -PassThru
           $proof = Join-Path $env:TEMP "minternet-last-active-$($p.Id).ok"
+          $curtainProof = Join-Path $env:TEMP "minternet-startup-curtain-$($p.Id).ok"
           try {
             $passed=$false
             for($i=0;$i -lt 50;$i++){
               Start-Sleep -Seconds 1
               $p.Refresh()
               if($p.HasExited){throw 'Last-active restore browser exited before it rendered'}
-              if(Test-Path -LiteralPath $proof){$passed=$true;break}
+              if((Test-Path -LiteralPath $proof) -and
+                 (Test-Path -LiteralPath $curtainProof)){$passed=$true;break}
             }
             if(!$passed){throw 'Last selected HTTPS tab failed to restore and render from persisted session'}
             $contents=Get-Content -LiteralPath $proof -Raw
@@ -184,7 +188,7 @@ jobs:
           } finally {
             $p.Refresh()
             if(!$p.HasExited){Stop-Process -Id $p.Id -Force}
-            Remove-Item $fixture,$proof -Force -ErrorAction SilentlyContinue
+            Remove-Item $fixture,$proof,$curtainProof -Force -ErrorAction SilentlyContinue
           }
       - name: Reproduce white page and verify real DOM recovery without profile reset
         shell: pwsh
@@ -226,7 +230,8 @@ jobs:
               Start-Sleep -Seconds 1
               $p.Refresh()
               if($p.HasExited){throw 'Browser exited before composited white-frame recovery'}
-              if(Test-Path -LiteralPath $proof){$passed=$true;break}
+              if((Test-Path -LiteralPath $proof) -and
+                 (Test-Path -LiteralPath $curtainProof)){$passed=$true;break}
             }
             if(!$passed){
               throw 'A real HTTPS page covered with an all-white compositor frame did not recover automatically'
@@ -783,13 +788,15 @@ jobs:
           [System.IO.File]::WriteAllText($fixture,$data)
           $p = Start-Process -FilePath $exe -ArgumentList '--minternet-last-active-smoke' -PassThru
           $proof = Join-Path $env:TEMP "minternet-last-active-$($p.Id).ok"
+          $curtainProof = Join-Path $env:TEMP "minternet-startup-curtain-$($p.Id).ok"
           try {
             $passed = $false
             for($i=0;$i -lt 55;$i++){
               Start-Sleep -Seconds 1
               $p.Refresh()
               if($p.HasExited){throw 'Updated EXE exited before restoring last active tab'}
-              if(Test-Path -LiteralPath $proof){$passed=$true;break}
+              if((Test-Path -LiteralPath $proof) -and
+                 (Test-Path -LiteralPath $curtainProof)){$passed=$true;break}
             }
             if(!$passed){throw 'Updated EXE did not reopen the last selected saved website'}
             $text=Get-Content -LiteralPath $proof -Raw
@@ -800,7 +807,7 @@ jobs:
           } finally {
             $p.Refresh()
             if(!$p.HasExited){Stop-Process -Id $p.Id -Force}
-            Remove-Item $fixture,$proof -Force -ErrorAction SilentlyContinue
+            Remove-Item $fixture,$proof,$curtainProof -Force -ErrorAction SilentlyContinue
           }
       # Publish only after the full node, Rust and native Windows smoke suites.
       - name: Package verified and versioned portable EXE
