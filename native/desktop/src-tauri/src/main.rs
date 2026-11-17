@@ -7908,6 +7908,7 @@ fn main() {
                     }
                 }
             }
+            let chrome_ready_app=app.handle().clone();
             window.add_child(
                 WebviewBuilder::new("chrome",WebviewUrl::App("index.html".into()))
                     .initialization_script(if startup_gate{
@@ -7920,6 +7921,31 @@ fn main() {
                     .transparent(true)
                     .on_page_load(move |view, event| {
                         if matches!(event.event(), PageLoadEvent::Finished) {
+                            // Do not wait for requestAnimationFrame from an
+                            // invisible Windows WebView2: hidden windows may
+                            // never schedule rAF, deadlocking startup forever.
+                            // The trusted local chrome document is already
+                            // loaded; verify its opaque curtain via JS and
+                            // let native code show the window immediately.
+                            #[cfg(windows)]
+                            if chrome_ready_app.state::<StartupPresentation>().armed(){
+                                let app_ready=chrome_ready_app.clone();
+                                let _=view.eval_with_callback(r#"(() => {
+                                  const cover=document.getElementById('startupCurtain');
+                                  if(!cover||!document.documentElement.classList.contains('minternet-startup-armed'))return false;
+                                  const style=getComputedStyle(cover);
+                                  const box=cover.getBoundingClientRect();
+                                  return style.display!=='none' &&
+                                      style.backgroundColor==='rgb(11, 16, 32)' &&
+                                      box.width>=300 && box.height>=120;
+                                })()"#,move|result|{
+                                    if result.trim()!="true"{return;}
+                                    let handle=app_ready.clone();
+                                    let _=app_ready.run_on_main_thread(move||{
+                                        let _=present_restored_chrome(&handle);
+                                    });
+                                });
+                            }
                             if previous_crash {
                                 let _=view.eval(r#"setTimeout(() =>
                                     window.minternetToast?.('Restoring your last active tab after an interrupted session.'),400)"#);
