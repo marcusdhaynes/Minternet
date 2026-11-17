@@ -51,6 +51,22 @@ jobs:
               # terminate the hourly reconciliation with a 404.
               if published=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/minternet-build-$run_id" 2>/dev/null); then
                 complete=$(jq -r '(.draft==false) and ([.assets[].name] | index("SHA256SUMS.txt") != null) and ([.assets[].name] | length >= 2)' <<<"$published")
+                if [ "$complete" = true ] && [ "$entry" = "native-windows.yml" ]; then
+                  native_exe=$(jq -r '[.assets[].name | select(test("^Minternet-Windows-Portable-v[0-9]+\\.[0-9]+\\.[0-9]+-build\\.[0-9]+-g[0-9a-f]{8}\\.exe$"))] | first // empty' <<<"$published")
+                  if [ -z "$native_exe" ]; then
+                    complete=false
+                  else
+                    version_tag="${native_exe#Minternet-Windows-Portable-}"
+                    version_tag="${version_tag%.exe}"
+                    stable=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$version_tag" 2>/dev/null || true)
+                    stable_ok=$(jq -r --arg tag "$version_tag" --arg exe "$native_exe" '
+                      .tag_name==$tag and .draft==false and .prerelease==false and
+                      ([.assets[].name]|index($exe)!=null) and
+                      ([.assets[].name]|index("SHA256SUMS.txt")!=null)
+                    ' <<<"${stable:-null}" 2>/dev/null || echo false)
+                    if [ "$stable_ok" != true ]; then complete=false; fi
+                  fi
+                fi
                 if [ "$complete" = true ]; then continue; fi
               fi
               available=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100" \
