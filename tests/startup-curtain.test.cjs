@@ -53,14 +53,14 @@ test('only restored real desktop sessions activate the opaque curtain',()=>{
  assert.equal(h.classes.size,0);
  assert.equal(h.actions.length,0);
 });
-test('trusted chrome must paint two frames before asking native window to appear',async()=>{
+test('trusted chrome can request startup display without waiting for invisible-window animation frames',async()=>{
  const h=harness();
  assert.ok(h.classes.has('minternet-startup-armed'));
  assert.equal(h.nodes.startupCurtain.attributes['aria-hidden'],'false');
  assert.equal(h.actions.length,0);
- h.callbacks.shift()();
- assert.equal(h.actions.length,0);
- h.callbacks.shift()();
+ assert.equal(h.callbacks.length,0);
+ assert.ok([...h.timers.values()].some(x=>x.delay===80));
+ [...h.timers.values()].find(x=>x.delay===80).fn();
  await Promise.resolve();
  assert.equal(h.actions.length,1);
  assert.equal(h.actions[0].name,'startup-present');
@@ -88,12 +88,18 @@ test('native startup selects restored tab before creating its hidden main window
  assert.match(main,/\.initialization_script\(if startup_gate/);
  assert.match(main,/window\.show\(\)/);
  assert.match(main,/raise_chrome_above_site\(app\)/);
+ // Chrome's Finished callback verifies the local opaque curtain without
+ // waiting for requestAnimationFrame while the window is hidden.
+ assert.match(main,/let chrome_ready_app=app\.handle\(\)\.clone\(\)/);
+ assert.match(main,/chrome_ready_app\.state::<StartupPresentation>\(\)\.armed\(\)/);
+ assert.match(main,/present_restored_chrome\(&handle\)/);
+ assert.doesNotMatch(ui,/requestAnimationFrame\(/);
 });
 test('only painted and loaded actual WebView2 pages remove the startup curtain',()=>{
  assert.match(health,/if !white\{/);
  assert.match(health,/document\.readyState==='complete'/);
  assert.match(health,/finish_restored_chrome\(&on_main,id,&expected_url\)/);
- assert.match(main,/\*active==id && url==expected_url && \*shown/);
+ assert.match(main,/\*active==id && url\.as_str\(\)==expected_url && \*shown/);
  assert.match(main,/cache\.overlay_open=false/);
  assert.match(main,/startup-painted/);
  assert.doesNotMatch(main,/window\.show\(\).*view\.reload\(\)/);
