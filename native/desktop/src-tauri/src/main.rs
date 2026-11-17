@@ -2161,7 +2161,6 @@ fn refresh_layout(app: &tauri::AppHandle) {
 struct StartupPresentation(Mutex<Option<(u32,String,bool)>>);
 // 0 = first restored navigation, 1 = reload requested, 2 = reload started,
 // 3 = reload finished. Do not uncover an initial one-frame paint before reload.
-#[cfg(windows)]
 struct StartupReloadPhase(std::sync::atomic::AtomicU8);
 #[cfg(windows)]
 fn startup_smoke_stage(stage:&'static str){
@@ -7895,7 +7894,6 @@ fn main() {
         .manage(SessionSaveQueued(AtomicBool::new(false)))
         .manage(SurfaceRestoreQueued(AtomicBool::new(false)))
         .manage(StartupPresentation(Mutex::new(None)))
-        #[cfg(windows)]
         .manage(StartupReloadPhase(std::sync::atomic::AtomicU8::new(0)))
         .manage(FindBarState(Mutex::new(false)))
         .manage(LocalMediaSelection::default())
