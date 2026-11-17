@@ -858,10 +858,13 @@ jobs:
           if-no-files-found: error
           retention-days: 90
           compression-level: 6
-      # Uploading an Actions artifact is not publishing a GitHub Release.
-      # The in-app update checker requires a completed public Release.
+      # A workflow-run archival job has a separate elevated token and
+      # publishes the immutable rollback release and stable updater release.
+      # A policy-limited token in this build job must not discard the EXE or
+      # prevent the post-success archival workflow from receiving the artifact.
       - name: Publish verified portable EXE as a GitHub Release
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        continue-on-error: true
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
