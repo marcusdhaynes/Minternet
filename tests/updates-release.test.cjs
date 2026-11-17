@@ -145,3 +145,52 @@ test('older out-of-order stable publications do not override the newer version',
   const result=await h.updates.checkForUpdate();
   assert.equal(result.version,'0.3.0-build.104-gabcdefab');
 });
+
+test('draft-filled release page cannot hide a newer verified Windows build on next page',async()=>{
+  const drafts=Array.from({length:100},(_,i)=>({
+    tag_name:'minternet-build-'+i,draft:true,prerelease:true,assets:[]
+  }));
+  const previous={tag_name:'v0.3.0-build.1099-g5dd3cee3',
+    assets:[{name:'Minternet-Windows-Portable-v0.3.0-build.1099-g5dd3cee3.exe',
+      browser_download_url:'https://github.com/prev.exe'}]};
+  const current={tag_name:'v0.3.0-build.1201-gaabbccdd',
+    assets:[{name:'Minternet-Windows-Portable-v0.3.0-build.1201-gaabbccdd.exe',
+      browser_download_url:'https://github.com/current.exe'}]};
+  const h=harness(url=>{
+    if(url.endsWith('/releases/latest'))return response(200,previous);
+    if(url.includes('page=1'))return response(200,drafts);
+    if(url.includes('page=2'))return response(200,[current,previous]);
+    throw Error('Unexpected page: '+url);
+  },'0.3.0-build.1099-g5dd3cee3');
+  const found=await h.updates.checkForUpdate();
+  assert.equal(found.version,'0.3.0-build.1201-gaabbccdd');
+  assert.equal(h.updates.lastStatus.kind,'verified');
+  assert.equal(h.requests,3);
+});
+
+test('matching source and published release reports verified current instead of pending',async()=>{
+  const release={tag_name:'v0.3.0-build.1099-g5dd3cee3',
+    assets:[{name:'Minternet-Windows-Portable-v0.3.0-build.1099-g5dd3cee3.exe',
+      browser_download_url:'https://github.com/current.exe'}]};
+  const h=harness(url=>url.includes('/branches/main')
+    ?response(200,{commit:{sha:'5dd3cee35349c48afc2738fe0178f163be77ee1d'}})
+    :response(200,url.includes('/latest')?release:[release]),
+    '0.3.0-build.1099-g5dd3cee3');
+  assert.equal(await h.updates.checkForUpdate(),null);
+  assert.equal(h.updates.lastStatus.kind,'verified');
+  assert.match(h.updates.lastStatus.message,/Up to date/);
+  assert.equal(h.requests,3);
+});
+
+test('source status outages must not incorrectly certify everything is current',async()=>{
+  const release={tag_name:'v0.3.0-build.1099-g5dd3cee3',
+    assets:[{name:'Minternet-Windows-Portable-v0.3.0-build.1099-g5dd3cee3.exe',
+      browser_download_url:'https://github.com/current.exe'}]};
+  const h=harness(url=>url.includes('/branches/main')
+    ?response(403,{message:'rate limit'})
+    :response(200,url.includes('/latest')?release:[release]),
+    '0.3.0-build.1099-g5dd3cee3');
+  assert.equal(await h.updates.checkForUpdate(),null);
+  assert.equal(h.updates.lastStatus.kind,'verification-unknown');
+  assert.doesNotMatch(h.updates.lastStatus.message,/Up to date/);
+});
