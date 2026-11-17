@@ -2159,8 +2159,9 @@ fn refresh_layout(app: &tauri::AppHandle) {
 // frame exists, the full-size trusted Chrome curtain is the only visible
 // content area. A failed page shows a dark retry screen, not a white pane.
 struct StartupPresentation(Mutex<Option<(u32,String,bool)>>);
-// 0 = first restored navigation, 1 = reload requested, 2 = reload started,
-// 3 = reload finished. Do not uncover an initial one-frame paint before reload.
+// 0 = initial navigation, 1 = reload queued, 2 = reload invoked,
+// 3 = reload navigation started, 4 = reload navigation completed.
+// Never treat a pre-reload redirect as proof that the reload finished.
 struct StartupReloadPhase(std::sync::atomic::AtomicU8);
 #[cfg(windows)]
 fn startup_smoke_stage(stage:&'static str){
@@ -2211,7 +2212,7 @@ fn finish_restored_chrome(app:&tauri::AppHandle,id:u32,expected_url:&str){
     // The restored active page must complete its deliberate startup reload
     // before its composited frame may be exposed. The visual check alone can
     // otherwise release a transient first-navigation frame.
-    if app.state::<StartupReloadPhase>().0.load(Ordering::Acquire)!=3{return;}
+    if app.state::<StartupReloadPhase>().0.load(Ordering::Acquire)!=4{return;}
     let gate=app.state::<StartupPresentation>();
     let matched=gate.0.lock().ok().is_some_and(|mut state|{
         if !state.as_ref().is_some_and(|(active,url,shown)|
@@ -2304,11 +2305,11 @@ fn startup_reload_on_page_event(app:&tauri::AppHandle,id:u32,
     if !selected{return;}
     let phase=&app.state::<StartupReloadPhase>().0;
     if started{
-        let _=phase.compare_exchange(1,2,Ordering::AcqRel,Ordering::Acquire);
+        let _=phase.compare_exchange(2,3,Ordering::AcqRel,Ordering::Acquire);
         return;
     }
     if !finished{return;}
-    if phase.compare_exchange(2,3,Ordering::AcqRel,Ordering::Acquire).is_ok(){
+    if phase.compare_exchange(3,4,Ordering::AcqRel,Ordering::Acquire).is_ok(){
         startup_smoke_stage("restored-active-reload-completed");
         return;
     }
@@ -2323,6 +2324,7 @@ fn startup_reload_on_page_event(app:&tauri::AppHandle,id:u32,
                     .is_some_and(|(selected,_,_)|*selected==id));
             if !still_selected{return;}
             let Some(view)=task.get_webview(&format!("tab-{id}"))else{return};
+            task.state::<StartupReloadPhase>().0.store(2,Ordering::Release);
             if view.reload().is_err(){
                 // The watchdog can recover a rejected reload instead of
                 // permanently considering this startup attempt completed.
@@ -2368,7 +2370,7 @@ fn schedule_startup_tab_recovery(app:&tauri::AppHandle){
                         }
                     },
                     1=>{
-                        task.state::<StartupReloadPhase>().0.store(1,Ordering::Release);
+                        task.state::<StartupReloadPhase>().0.store(2,Ordering::Release);
                         if view.reload().is_err(){
                             task.state::<StartupReloadPhase>().0.store(0,Ordering::Release);
                         }
@@ -8567,6 +8569,7 @@ mod restored_startup_invariants{
         assert!(phase.compare_exchange(0,1,Ordering::AcqRel,Ordering::Acquire).is_ok());
         assert!(phase.compare_exchange(1,2,Ordering::AcqRel,Ordering::Acquire).is_ok());
         assert!(phase.compare_exchange(2,3,Ordering::AcqRel,Ordering::Acquire).is_ok());
+        assert!(phase.compare_exchange(3,4,Ordering::AcqRel,Ordering::Acquire).is_ok());
         assert!(phase.compare_exchange(0,1,Ordering::AcqRel,Ordering::Acquire).is_err());
     }
 }
