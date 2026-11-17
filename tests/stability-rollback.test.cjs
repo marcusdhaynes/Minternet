@@ -46,15 +46,21 @@ test('No WebView2 controller destruction or password JS injection occurs directl
   assert.equal((load.match(/fill_saved_credential\(/g)||[]).length,1);
 });
 
-test('Crash recovery preserves tabs and does not automatically load a previously crashing page',()=>{
+test('Crash recovery restores the saved active tab behind the protected startup curtain',()=>{
   const main=read('native/desktop/src-tauri/src/main.rs');
   assert.match(main,/fn start_crash_guard\(/);
   assert.match(main,/fn clear_crash_guard\(/);
   assert.match(main,/install_panic_diagnostics\(app\.handle\(\)\)/);
   assert.match(main,/if previous_crash \{/);
-  assert.match(main,/b\.active_id=0/);
+  const startup=main.slice(main.indexOf('restore_session(app.handle());'),
+    main.indexOf('let builder = WindowBuilder::new(app, "main")'));
+  assert.doesNotMatch(startup,/active_id\s*=\s*0/);
+  assert.match(startup,/let initial_site=if real_launch/);
+  assert.match(startup,/cache\.overlay_open=true/);
+  assert.match(main,/\.visible\(!startup_gate\)/);
+  assert.match(main,/finish_restored_chrome/);
   assert.match(main,/clear_crash_guard\(&handle\)/);
-  assert.match(main,/Saved tabs were recovered from an interrupted session/);
+  assert.match(main,/Restoring your last active tab after an interrupted session/);
   assert.doesNotMatch(main,/Previous session ended unexpectedly/);
   const lifecycle=read('native/desktop/src-tauri/src/session_lifecycle.rs');
   assert.match(lifecycle,/minternet-running\.v2\./);
