@@ -2315,3 +2315,39 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { di
 }
 .bookmark-folder-row[draggable="true"]{cursor:grab;}
 .bookmark-folder-row[draggable="true"]:active{cursor:grabbing;}
+
+/* A browser that has selected but not PAINTED its restored WebView2 must
+   never expose the native child renderer's white initialization surface.
+   This is owned by trusted Chrome, not by an external webpage. */
+.startup-curtain{display:none;}
+html.minternet-startup-armed .startup-curtain{
+  display:flex!important;
+  position:fixed!important;
+  inset:var(--chrome-height) 0 0 0!important;
+  z-index:3000!important;
+  align-items:center;justify-content:center;
+  overflow:hidden;background:rgb(11,16,32)!important;
+  color:#eae6ff!important;
+  border-top:1px solid #4b3d6a!important;
+  pointer-events:auto;
+}
+.startup-curtain-content{
+  width:min(420px,calc(100% - 40px));
+  display:flex;flex-direction:column;align-items:center;text-align:center;
+  gap:12px;padding:26px 18px;
+  color:#d1cbec;font-size:12px;line-height:1.5;
+}
+.startup-curtain-content strong{
+  font-size:16px;letter-spacing:.01em;color:#fff;font-weight:650;
+}
+.startup-curtain-content img{
+  object-fit:contain;filter:drop-shadow(0 2px 13px #a884f74b);
+}
+.startup-curtain-content button{
+  border:1px solid #8a75bc;border-radius:7px;
+  background:#443567;color:white;min-height:30px;
+  padding:6px 16px;cursor:pointer;
+}
+.startup-curtain-content button:hover{background:#5c4883;}
+.startup-curtain-content button:disabled{opacity:.65;cursor:wait;}
+.startup-curtain-content button[hidden]{display:none!important;}
