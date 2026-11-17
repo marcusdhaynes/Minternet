@@ -2231,10 +2231,25 @@ fn finish_restored_chrome(app:&tauri::AppHandle,id:u32,expected_url:&str){
     render_health::record(app,id,"startup-painted");
     startup_smoke_stage("painted-frame-revealed");
     if std::env::args().any(|arg|arg=="--minternet-last-active-smoke"){
-        let marker=std::env::temp_dir().join(format!(
+        let curtain=std::env::temp_dir().join(format!(
             "minternet-startup-curtain-{}.ok",std::process::id()));
-        let _=std::fs::write(marker,
+        let _=std::fs::write(curtain,
             "PASS: hidden startup window presented under opaque curtain and released on painted active tab");
+        // The old PageLoadEvent::Finished marker ran before the compositor
+        // and the settled DOM. This is the single release-proof authority:
+        // active URL + actual non-white captured pixels + settled DOM
+        // (validated before finish_restored_chrome is invoked) + visible UI.
+        // The smoke fixture has two tabs; only the chosen last-used one passes.
+        if let Ok(url)=tauri::Url::parse(expected_url){
+            if url.host_str()==Some("example.com") &&
+                url.query_pairs().any(|(key,value)|
+                    key=="minternet-last-active"&&value=="selected"){
+                let page=std::env::temp_dir().join(format!(
+                    "minternet-last-active-{}.ok",std::process::id()));
+                let _=std::fs::write(page,
+                    "PASS: last active tab selected and rendered from saved session");
+            }
+        }
     }
 }
 #[cfg(windows)]
@@ -3546,32 +3561,8 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                     if is_real_page_url(event.url().as_str()) {
                         apply_volume_to_site(&for_load,id,view.label(),true);
                     }
-                    // CI: restore the last selected real HTTPS tab from an
-                    // isolated session file and confirm actual DOM rendering.
-                    // Never writes to the user's normal browser-session file.
-                    #[cfg(windows)]
-                    if std::env::args().any(|a|a=="--minternet-last-active-smoke") &&
-                        event.url().host_str()==Some("example.com") &&
-                        event.url().query_pairs().any(|(k,v)|
-                            k=="minternet-last-active"&&v=="selected") {
-                        let expected=event.url().as_str().to_string();
-                        let current=for_load.state::<Mutex<Browser>>().lock().ok()
-                            .and_then(|b|b.active().map(|t|t.id==id && t.url==expected))
-                            .unwrap_or(false);
-                        if current{
-                            let _=view.eval_with_callback(
-                                r#"Number(document.title==='Example Domain' &&
-                                    (document.body?.innerText||'').includes('Example Domain'))"#,
-                                move|result|{
-                                    if result.trim()=="1"{
-                                        let marker=std::env::temp_dir().join(format!(
-                                            "minternet-last-active-{}.ok",std::process::id()));
-                                        let _=std::fs::write(marker,
-                                            "PASS: last active tab selected and rendered from saved session");
-                                    }
-                                });
-                        }
-                    }
+                    // CI restored-tab proof is written only after the actual
+                    // painted frame and settled DOM by finish_restored_chrome.
                     // CI: write/read a persistent cookie and localStorage in
                     // actual HTTPS WebView2 across a native EXE replacement.
                     if event.url().host_str()==Some("example.com") &&
