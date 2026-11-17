@@ -143,6 +143,28 @@ fn match_active(app:&tauri::AppHandle,id:u32,url:&str)->Option<String>{
 }
 fn handle_visual_result(app:tauri::AppHandle,id:u32,url:String,white:bool){
     let Some(label)=match_active(&app,id,&url) else{return};
+    if !white{
+        // Native window startup is protected by an opaque Chrome curtain.
+        // An actual painted frame is required before releasing it: a
+        // successful navigation, geometry check or ready DOM is insufficient.
+        let Some(view)=app.get_webview(&label) else{return};
+        let task=app.clone();
+        let expected=url.clone();
+        let _=view.eval_with_callback(r#"Boolean(
+            document.readyState==='complete' && document.body &&
+            (document.body.children.length>0 ||
+             (document.body.innerText||'').trim().length>0)
+        )"#,move|response|{
+            if response.trim()!="true"{return;}
+            let on_main=task.clone();
+            let expected_url=expected.clone();
+            let _=task.run_on_main_thread(move||{
+                if match_active(&on_main,id,&expected_url).is_some(){
+                    super::finish_restored_chrome(&on_main,id,&expected_url);
+                }
+            });
+        });
+    }
     let stage=white_seen(id,&url,white);
     if stage==0{return;}
     let Some(view)=app.get_webview(&label) else{return};
