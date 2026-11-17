@@ -158,8 +158,8 @@ test('draft-filled release page cannot hide a newer verified Windows build on ne
       browser_download_url:'https://github.com/current.exe'}]};
   const h=harness(url=>{
     if(url.endsWith('/releases/latest'))return response(200,previous);
-    if(url.includes('page=1'))return response(200,drafts);
-    if(url.includes('page=2'))return response(200,[current,previous]);
+    if(/[?&]page=1(?:&|$)/.test(url))return response(200,drafts);
+    if(/[?&]page=2(?:&|$)/.test(url))return response(200,[current,previous]);
     throw Error('Unexpected page: '+url);
   },'0.3.0-build.1099-g5dd3cee3');
   const found=await h.updates.checkForUpdate();
