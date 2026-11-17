@@ -86,20 +86,42 @@ fn newest_installable(releases:&[Value])->Option<&Value>{
     )
 }
 fn fetch_newest_published()->Result<Value,String>{
-    // The GitHub "latest" flag can lag newer builds when multiple runners
-    // finish out of order. Compare actual version keys, not publication time.
+    // GitHub's /latest label can lag behind the highest build number.
+    // Worse, hundreds of unfinished legacy draft releases can fill the
+    // first 100-result page. Keep scanning until TWO pages with verified
+    // Windows builds are found (or GitHub has no further pages). Never
+    // claim "up to date" based on an all-draft page.
     let mut candidates=Vec::new();
     let mut errors=Vec::new();
-    for endpoint in [API,RELEASE_LIST_API]{
-        match remote(endpoint).and_then(|response|response.into_json::<Value>()
+    match remote(API).and_then(|response|response.into_json::<Value>()
+        .map_err(|err|format!("Invalid release metadata: {err}"))){
+        Ok(value)=>candidates.push(value),
+        Err(error)=>errors.push(error),
+    }
+    let mut verified_pages=0u8;
+    for page in 1..=10{
+        let endpoint=format!("{RELEASE_LIST_API}&page={page}");
+        match remote(&endpoint).and_then(|response|response.into_json::<Value>()
             .map_err(|err|format!("Invalid release metadata: {err}"))){
-            Ok(Value::Array(items))=>candidates.extend(items),
-            Ok(value)=>candidates.push(value),
-            Err(error)=>errors.push(error),
+            Ok(Value::Array(items))=>{
+                let has_verified=items.iter().any(installable);
+                let last_page=items.len()<100;
+                candidates.extend(items);
+                if has_verified{verified_pages+=1;}
+                if last_page||verified_pages>=2{break;}
+            },
+            Ok(value)=>{
+                candidates.push(value);
+                break;
+            },
+            Err(error)=>{
+                errors.push(error);
+                break;
+            }
         }
     }
     newest_installable(&candidates).cloned().ok_or_else(||
-        if errors.len()==2{"GitHub Releases could not be checked".to_string()}
+        if errors.len()>=2{"GitHub Releases could not be checked".to_string()}
         else{"No verified Windows release with EXE and SHA256SUMS is published".to_string()}
     )
 }
@@ -420,6 +442,13 @@ mod tests{
         assert!(version_key("v0.3.0-build.21-g12345678")>version_key("0.3.0-build.20-gabcdef12"));
         assert!(version_key("v0.4.0")>version_key("0.3.0-build.999"));
         assert!(version_key("bad").is_none());
+    }
+    #[test] fn drafts_are_not_counted_as_installable_windows_releases(){
+        let draft=json!({"tag_name":"minternet-build-123",
+            "draft":true,"prerelease":true,
+            "assets":[{"name":"SHA256SUMS.txt"}]});
+        assert!(!installable(&draft));
+        assert!(newest_installable(&[draft]).is_none());
     }
     #[test] fn selects_highest_stable_windows_build_not_last_published(){
         let make=|n:u32|json!({
