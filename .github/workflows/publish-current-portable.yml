@@ -91,6 +91,30 @@ jobs:
             run_sha=$(jq -r '.head_sha' <<<"$info")
             test "$release_sha" = "$run_sha" || { echo "Release commit mismatch"; exit 1; }
             complete=$(jq -r '(.draft==false) and ([.assets[].name] | index("SHA256SUMS.txt") != null) and ([.assets[].name] | length >= 2)' <<<"$published")
+            # A rollback archive does not count as a successful update if the
+            # versioned *stable Windows release* is still absent. This was
+            # previously skipped forever after archiving succeeded once.
+            name=$(jq -r '.name' <<<"$info")
+            if [ "$complete" = "true" ] &&
+               [ "$name" = "Minternet Windows portable single EXE (under 50 MB)" ]; then
+              # Compute the version tag from the verified rollback binary.
+              # Do not derive an installable tag from untested HEAD.
+              stable_name=$(jq -r '[.assets[].name | select(test("^Minternet-Windows-Portable-v[0-9]+\\.[0-9]+\\.[0-9]+-build\\.[0-9]+-g[0-9a-f]{8}\\.exe$"))] | first // empty' <<<"$published")
+              if [ -z "$stable_name" ]; then
+                complete=false
+              else
+                stable_tag="${stable_name#Minternet-Windows-Portable-}"
+                stable_tag="${stable_tag%.exe}"
+                stable=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$stable_tag" 2>/dev/null || true)
+                stable_valid=$(jq -r --arg tag "$stable_tag" --arg sha "$run_sha" --arg exe "$stable_name" '
+                  .tag_name==$tag and .target_commitish==$sha and
+                  .draft==false and .prerelease==false and
+                  ([.assets[].name]|index($exe)!=null) and
+                  ([.assets[].name]|index("SHA256SUMS.txt")!=null)
+                ' <<<"${stable:-\{\}}" 2>/dev/null || echo false)
+                if [ "$stable_valid" != "true" ]; then complete=false; fi
+              fi
+            fi
             if [ "$complete" = "true" ]; then
               echo "skip=true" >> "$GITHUB_OUTPUT"
               echo "Verified existing release: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
