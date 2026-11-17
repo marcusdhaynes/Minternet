@@ -2154,6 +2154,80 @@ fn refresh_layout(app: &tauri::AppHandle) {
 // the native window, switching tabs, or finishing a large SPA navigation.
 // Reapply the *visible* view bounds and visibility without resetting its URL,
 // cookies, scroll position or application state.
+// A restored tab is selected in Browser before the window is made visible.
+// The page WebView2 may not have painted yet; until a genuinely non-white
+// frame exists, the full-size trusted Chrome curtain is the only visible
+// content area. A failed page shows a dark retry screen, not a white pane.
+#[cfg(windows)]
+struct StartupPresentation(Mutex<Option<(u32,String,bool)>>);
+#[cfg(windows)]
+impl StartupPresentation {
+    fn armed(&self)->bool{
+        self.0.lock().is_ok_and(|state|state.is_some())
+    }
+}
+#[cfg(windows)]
+fn present_restored_chrome(app:&tauri::AppHandle)->Result<(),String>{
+    let gate=app.state::<StartupPresentation>();
+    let mut value=gate.0.lock().map_err(|e|e.to_string())?;
+    let Some((_,_,shown))=value.as_mut() else{return Ok(());};
+    if *shown{return Ok(());}
+    // JS only requests presentation after two local animation frames and
+    // checking that the opaque curtain covers the viewport.
+    let window=app.get_window("main").ok_or("Browser window unavailable")?;
+    if let Ok(mut cache)=app.state::<Mutex<LayoutCache>>().lock(){
+        cache.overlay_open=true;cache.size_and_home=None;
+    }
+    refresh_layout(app);
+    raise_chrome_above_site(app);
+    window.show().map_err(|e|e.to_string())?;
+    *shown=true;
+    Ok(())
+}
+#[cfg(windows)]
+fn finish_restored_chrome(app:&tauri::AppHandle,id:u32,expected_url:&str){
+    let gate=app.state::<StartupPresentation>();
+    let matched=gate.0.lock().ok().is_some_and(|mut state|{
+        if !state.as_ref().is_some_and(|(active,url,shown)|
+            *active==id && url==expected_url && *shown){return false;}
+        *state=None;true
+    });
+    if !matched{return;}
+    // First resize the trusted chrome to its normal bar height. That
+    // reveals the already-painted WebView2 site frame underneath.
+    if let Ok(mut cache)=app.state::<Mutex<LayoutCache>>().lock(){
+        cache.overlay_open=false;cache.size_and_home=None;
+    }
+    refresh_layout(app);
+    display_active(app);
+    if let Some(chrome)=app.get_webview("chrome"){
+        let _=chrome.eval("window.minternetStartup?.finish?.()");
+    }
+    render_health::record(app,id,"startup-painted");
+    if std::env::args().any(|arg|arg=="--minternet-last-active-smoke"){
+        let marker=std::env::temp_dir().join(format!(
+            "minternet-startup-curtain-{}.ok",std::process::id()));
+        let _=std::fs::write(marker,
+            "PASS: hidden startup window presented under opaque curtain and released on painted active tab");
+    }
+}
+#[cfg(windows)]
+fn release_restored_chrome_if_dashboard(app:&tauri::AppHandle){
+    let empty=app.state::<Mutex<Browser>>().lock()
+        .map(|b|b.active().is_none_or(|t|t.url==HOME)).unwrap_or(false);
+    if !empty{return;}
+    let gate=app.state::<StartupPresentation>();
+    let matched=gate.0.lock().ok().and_then(|mut state|state.take()).is_some();
+    if matched{
+        if let Ok(mut cache)=app.state::<Mutex<LayoutCache>>().lock(){
+            cache.overlay_open=false;cache.size_and_home=None;
+        }
+        if let Some(chrome)=app.get_webview("chrome"){
+            let _=chrome.eval("window.minternetStartup?.finish?.()");
+        }
+        refresh_layout(app);
+    }
+}
 struct SurfaceRestoreQueued(AtomicBool);
 fn schedule_surface_restore(app:&tauri::AppHandle){
     if app.state::<SurfaceRestoreQueued>().0.swap(true,Ordering::AcqRel){return;}
@@ -7666,6 +7740,8 @@ fn main() {
         .manage(Mutex::new(LayoutCache::default()))
         .manage(SessionSaveQueued(AtomicBool::new(false)))
         .manage(SurfaceRestoreQueued(AtomicBool::new(false)))
+        #[cfg(windows)]
+        .manage(StartupPresentation(Mutex::new(None)))
         .manage(FindBarState(Mutex::new(false)))
         .manage(LocalMediaSelection::default())
         .manage(LocalMediaPath::default())
