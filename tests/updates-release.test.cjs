@@ -206,8 +206,10 @@ test('Windows workflow state tracks initiating, building, publishing, and failur
   assert.equal(h.updates.classifyPipelineRun(run('completed','failure'),sha).title,'Update Failed');
   assert.equal(h.updates.classifyPipelineRun(run('queued',null),'a'.repeat(40)).title,'Update Pending');
 });
-test('Ready requires verified Windows EXE, checksum and matching successful build',()=>{
+test('Ready requires verified Windows EXE, checksum and matching successful build',async()=>{
   const h=harness(()=>response(200,{}),'0.3.0-build.1099-g5dd3cee3');
+  // The production UI always resolves app-version before examining workflows.
+  await h.updates.checkForUpdate();
   const sha='7b3843077e7b29d9771f8976643ffe0ad953c504';
   const run={run_number:1172,head_sha:sha,status:'completed',conclusion:'success'};
   const tag=h.updates.expectedTagForRun(run);
