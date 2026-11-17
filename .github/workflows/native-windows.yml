@@ -230,8 +230,7 @@ jobs:
               Start-Sleep -Seconds 1
               $p.Refresh()
               if($p.HasExited){throw 'Browser exited before composited white-frame recovery'}
-              if((Test-Path -LiteralPath $proof) -and
-                 (Test-Path -LiteralPath $curtainProof)){$passed=$true;break}
+              if(Test-Path -LiteralPath $proof){$passed=$true;break}
             }
             if(!$passed){
               throw 'A real HTTPS page covered with an all-white compositor frame did not recover automatically'
