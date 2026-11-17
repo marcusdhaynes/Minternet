@@ -8,6 +8,7 @@
   <link rel="icon" type="image/png" href="./minternet-brand.png">
   <link rel="stylesheet" href="./styles.css">
   <script src="./native-bridge.js" defer></script>
+  <script src="./startup-curtain.js" defer></script>
   <script src="./bookmark-model.js" defer></script>
   <script src="./bookmark-import.js" defer></script>
   <script src="./tab-group-model.js" defer></script>
@@ -46,6 +47,15 @@
   <script src="./updates.js" defer></script>
 </head>
 <body>
+  <section id="startupCurtain" class="startup-curtain" role="status" aria-live="polite"
+    aria-label="Restoring Last Tab" aria-hidden="true">
+    <div class="startup-curtain-content">
+      <img src="./minternet-brand.png" width="34" height="34" alt="">
+      <strong>Reopening Last Tab</strong>
+      <span id="startupCurtainStatus">Preparing your previous page without a blank screen…</span>
+      <button id="startupCurtainRetry" type="button" hidden>Retry Page</button>
+    </div>
+  </section>
   <header class="chrome">
     <div class="tab-row">
       <div class="identity" aria-label="Minternet" title="Drag to Move Minternet"><img class="brand-mark" src="./minternet-brand.png" alt=""><span>MINTERNET</span></div>
