@@ -3519,7 +3519,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                             )"#,move|response|{
                                 if response.trim()=="1"{
                                     WHITE_PHASE.store(3,Ordering::Release);
-                                    let _=std::fs::write(marker,
+                                    let _=std::fs::write(&marker,
                                         "PASS: recovered visually white composited page while preserving WebView2 storage");
                                 }
                             });
