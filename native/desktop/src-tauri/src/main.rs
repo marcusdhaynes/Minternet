@@ -2159,6 +2159,10 @@ fn refresh_layout(app: &tauri::AppHandle) {
 // frame exists, the full-size trusted Chrome curtain is the only visible
 // content area. A failed page shows a dark retry screen, not a white pane.
 struct StartupPresentation(Mutex<Option<(u32,String,bool)>>);
+// 0 = first restored navigation, 1 = reload requested, 2 = reload started,
+// 3 = reload finished. Do not uncover an initial one-frame paint before reload.
+#[cfg(windows)]
+struct StartupReloadPhase(std::sync::atomic::AtomicU8);
 #[cfg(windows)]
 fn startup_smoke_stage(stage:&'static str){
     if std::env::args().any(|arg|arg=="--minternet-last-active-smoke"){
@@ -2205,6 +2209,10 @@ fn present_restored_chrome(app:&tauri::AppHandle)->Result<(),String>{
 }
 #[cfg(windows)]
 fn finish_restored_chrome(app:&tauri::AppHandle,id:u32,expected_url:&str){
+    // The restored active page must complete its deliberate startup reload
+    // before its composited frame may be exposed. The visual check alone can
+    // otherwise release a transient first-navigation frame.
+    if app.state::<StartupReloadPhase>().0.load(Ordering::Acquire)!=3{return;}
     let gate=app.state::<StartupPresentation>();
     let matched=gate.0.lock().ok().is_some_and(|mut state|{
         if !state.as_ref().is_some_and(|(active,url,shown)|
@@ -2263,8 +2271,11 @@ fn align_restored_chrome_with_active_tab(app:&tauri::AppHandle){
         if let Some((id,url,_))=pending.as_mut(){
             match active{
                 Some((selected,next,private)) if next!=HOME && !private=>{
-                    // Explicit activation of another restored tab updates the
-                    // gate rather than showing a potentially blank new view.
+                    // Redirects and SPA route changes must update the expected
+                    // URL. Switching to another tab starts a new reload lease.
+                    if *id!=selected{
+                        app.state::<StartupReloadPhase>().0.store(0,Ordering::Release);
+                    }
                     *id=selected;*url=next;
                 },
                 _=>{*pending=None;dismissed=true;}
@@ -2281,6 +2292,100 @@ fn align_restored_chrome_with_active_tab(app:&tauri::AppHandle){
         refresh_layout(app);
     }
 }
+
+// Only the chosen restored normal tab gets the startup reload. Reload its
+// existing profile/controller after the first real navigation completes;
+// never reload background, private, Tor, or secret tabs on launch.
+#[cfg(windows)]
+fn startup_reload_on_page_event(app:&tauri::AppHandle,id:u32,
+                                started:bool,finished:bool){
+    let selected=app.state::<StartupPresentation>().0.lock().ok()
+        .is_some_and(|pending|pending.as_ref()
+            .is_some_and(|(selected,_,_)|*selected==id));
+    if !selected{return;}
+    let phase=&app.state::<StartupReloadPhase>().0;
+    if started{
+        let _=phase.compare_exchange(1,2,Ordering::AcqRel,Ordering::Acquire);
+        return;
+    }
+    if !finished{return;}
+    if phase.compare_exchange(2,3,Ordering::AcqRel,Ordering::Acquire).is_ok(){
+        startup_smoke_stage("restored-active-reload-completed");
+        return;
+    }
+    if phase.compare_exchange(0,1,Ordering::AcqRel,Ordering::Acquire).is_err(){return;}
+    let handle=app.clone();
+    std::thread::spawn(move||{
+        std::thread::sleep(Duration::from_millis(140));
+        let task=handle.clone();
+        let _=handle.run_on_main_thread(move||{
+            let still_selected=task.state::<StartupPresentation>().0.lock().ok()
+                .is_some_and(|pending|pending.as_ref()
+                    .is_some_and(|(selected,_,_)|*selected==id));
+            if !still_selected{return;}
+            let Some(view)=task.get_webview(&format!("tab-{id}"))else{return};
+            if view.reload().is_err(){
+                // The watchdog can recover a rejected reload instead of
+                // permanently considering this startup attempt completed.
+                task.state::<StartupReloadPhase>().0.store(0,Ordering::Release);
+            }else{
+                startup_smoke_stage("restored-active-reload-requested");
+            }
+        });
+    });
+}
+
+// An HTTP error, failed navigation callback or never-completing compositor
+// capture must not stall the startup cover indefinitely. Recovery is bounded:
+// first recheck the real child surface, then reload, then replace the one
+// still-unpainted WebView2 controller. No saved session or profile is erased.
+#[cfg(windows)]
+fn schedule_startup_tab_recovery(app:&tauri::AppHandle){
+    let owner=app.clone();
+    std::thread::spawn(move||{
+        for (step,delay) in [(0u8,5000u64),(1,8000),(2,14000)]{
+            std::thread::sleep(Duration::from_millis(delay));
+            let task=owner.clone();
+            if owner.run_on_main_thread(move||{
+                let pending=task.state::<StartupPresentation>().0.lock().ok()
+                    .and_then(|gate|gate.as_ref().cloned());
+                let Some((id,url,shown))=pending else{return};
+                if !shown{return;}
+                let current=task.state::<Mutex<Browser>>().lock().ok()
+                    .and_then(|browser|browser.active()
+                        .map(|tab|(tab.id,tab.url.clone(),tab.view.clone(),tab.loading)));
+                let Some((selected,address,label,loading))=current else{return};
+                if selected!=id||address!=url{return;}
+                let Some(label)=label else{return};
+                let Some(view)=task.get_webview(&label)else{return};
+                match step{
+                    0=>{
+                        invalidate_layout(&task);
+                        refresh_layout(&task);
+                        native_surface::ensure_visible(&view);
+                        reconcile_visible_child_bounds(&task);
+                        if !loading{
+                            render_visual::schedule(&task,id,address,500);
+                        }
+                    },
+                    1=>{
+                        task.state::<StartupReloadPhase>().0.store(1,Ordering::Release);
+                        if view.reload().is_err(){
+                            task.state::<StartupReloadPhase>().0.store(0,Ordering::Release);
+                        }
+                        render_health::record(&task,id,"startup-reload");
+                    },
+                    _=>{
+                        task.state::<StartupReloadPhase>().0.store(0,Ordering::Release);
+                        render_health::record(&task,id,"startup-unpainted");
+                        recover_stalled_site_if_url(&task,id,&address,"startup-unpainted");
+                    }
+                }
+            }).is_err(){break;}
+        }
+    });
+}
+
 struct SurfaceRestoreQueued(AtomicBool);
 fn schedule_surface_restore(app:&tauri::AppHandle){
     if app.state::<SurfaceRestoreQueued>().0.swap(true,Ordering::AcqRel){return;}
@@ -2803,6 +2908,10 @@ fn update_from_site(app: &tauri::AppHandle, id: u32, url: &str) {
             }
         };
     }
+    // Navigation redirects and SPA routes can alter the active address
+    // without activating another tab. Keep the startup paint gate in sync.
+    #[cfg(windows)]
+    align_restored_chrome_with_active_tab(app);
     if pinned_change{let _=save_pinned(app);}
     notify(app);
 }
@@ -3300,6 +3409,12 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                 }
                 if stale{return;}
                 update_from_site(&for_load, id, event.url().as_str());
+                #[cfg(windows)]
+                if is_real_page_url(event.url().as_str()){
+                    startup_reload_on_page_event(&for_load,id,
+                        matches!(event.event(),PageLoadEvent::Started),
+                        matches!(event.event(),PageLoadEvent::Finished));
+                }
                 if matches!(event.event(),PageLoadEvent::Started){
                     media_devices::reset_tab(&for_load,id);
                 }
@@ -7780,6 +7895,8 @@ fn main() {
         .manage(SessionSaveQueued(AtomicBool::new(false)))
         .manage(SurfaceRestoreQueued(AtomicBool::new(false)))
         .manage(StartupPresentation(Mutex::new(None)))
+        #[cfg(windows)]
+        .manage(StartupReloadPhase(std::sync::atomic::AtomicU8::new(0)))
         .manage(FindBarState(Mutex::new(false)))
         .manage(LocalMediaSelection::default())
         .manage(LocalMediaPath::default())
@@ -8368,6 +8485,8 @@ fn main() {
                 // Restored pinned URLs need their real WebView2 on launch.
                 activated(app.handle()).map_err(std::io::Error::other)?;
             }
+            #[cfg(windows)]
+            if startup_gate{schedule_startup_tab_recovery(app.handle());}
             let handle = app.handle().clone();
             // Coalesce Windows resize storms to at most one native WebView2
             // bounds pass per display frame. Do not block the UI event handler
@@ -8437,4 +8556,19 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("Failed to run Minternet native browser");
+}
+
+// Check startup URL changes without clearing the selected normal tab, and
+// ensure the reload contract never has an unbounded retry loop.
+#[cfg(all(test,windows))]
+mod restored_startup_invariants{
+    use super::*;
+    #[test]
+    fn startup_reload_progress_is_bounded(){
+        let phase=std::sync::atomic::AtomicU8::new(0);
+        assert!(phase.compare_exchange(0,1,Ordering::AcqRel,Ordering::Acquire).is_ok());
+        assert!(phase.compare_exchange(1,2,Ordering::AcqRel,Ordering::Acquire).is_ok());
+        assert!(phase.compare_exchange(2,3,Ordering::AcqRel,Ordering::Acquire).is_ok());
+        assert!(phase.compare_exchange(0,1,Ordering::AcqRel,Ordering::Acquire).is_err());
+    }
 }
