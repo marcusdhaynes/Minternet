@@ -2211,13 +2211,25 @@ fn finish_restored_chrome(app:&tauri::AppHandle,id:u32,expected_url:&str){
     }
 }
 #[cfg(windows)]
-fn release_restored_chrome_if_dashboard(app:&tauri::AppHandle){
-    let empty=app.state::<Mutex<Browser>>().lock()
-        .map(|b|b.active().is_none_or(|t|t.url==HOME)).unwrap_or(false);
-    if !empty{return;}
+fn align_restored_chrome_with_active_tab(app:&tauri::AppHandle){
+    let active=app.state::<Mutex<Browser>>().lock().ok()
+        .and_then(|b|b.active().map(|t|
+            (t.id,t.url.clone(),t.private||t.tor||t.secret_id.is_some())));
     let gate=app.state::<StartupPresentation>();
-    let matched=gate.0.lock().ok().and_then(|mut state|state.take()).is_some();
-    if matched{
+    let mut dismissed=false;
+    if let Ok(mut pending)=gate.0.lock(){
+        if let Some((id,url,_))=pending.as_mut(){
+            match active{
+                Some((selected,next,private)) if next!=HOME && !private=>{
+                    // Explicit activation of another restored tab updates the
+                    // gate rather than showing a potentially blank new view.
+                    *id=selected;*url=next;
+                },
+                _=>{*pending=None;dismissed=true;}
+            }
+        }
+    }
+    if dismissed{
         if let Ok(mut cache)=app.state::<Mutex<LayoutCache>>().lock(){
             cache.overlay_open=false;cache.size_and_home=None;
         }
@@ -2547,7 +2559,7 @@ fn start_geometry_smoke(app:&tauri::AppHandle,id:u32){
 
 fn display_active(app: &tauri::AppHandle) {
     #[cfg(windows)]
-    release_restored_chrome_if_dashboard(app);
+    align_restored_chrome_with_active_tab(app);
     site_fullscreen::cancel_if_tab_changed(app);
     if site_fullscreen::active(app){
         refresh_layout(app);
