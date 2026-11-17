@@ -194,3 +194,34 @@ test('source status outages must not incorrectly certify everything is current',
   assert.equal(h.updates.lastStatus.kind,'verification-unknown');
   assert.doesNotMatch(h.updates.lastStatus.message,/Up to date/);
 });
+
+test('Windows workflow state tracks initiating, building, publishing, and failure',()=>{
+  const h=harness(()=>response(200,{}));
+  const sha='7b3843077e7b29d9771f8976643ffe0ad953c504';
+  const run=(status,conclusion)=>({run_number:1172,head_sha:sha,head_branch:'main',
+    status,conclusion,html_url:'https://github.com/marcusdhaynes/Minternet/actions/runs/44063953605'});
+  assert.equal(h.updates.classifyPipelineRun(run('queued',null),sha).title,'Update Initiating');
+  assert.equal(h.updates.classifyPipelineRun(run('in_progress',null),sha).title,'Update Building');
+  assert.equal(h.updates.classifyPipelineRun(run('completed','success'),sha).title,'Update Publishing');
+  assert.equal(h.updates.classifyPipelineRun(run('completed','failure'),sha).title,'Update Failed');
+  assert.equal(h.updates.classifyPipelineRun(run('queued',null),'a'.repeat(40)).title,'Update Pending');
+});
+test('Ready requires verified Windows EXE, checksum and matching successful build',()=>{
+  const h=harness(()=>response(200,{}),'0.3.0-build.1099-g5dd3cee3');
+  const sha='7b3843077e7b29d9771f8976643ffe0ad953c504';
+  const run={run_number:1172,head_sha:sha,status:'completed',conclusion:'success'};
+  const tag=h.updates.expectedTagForRun(run);
+  assert.equal(tag,'v0.3.0-build.1172-g7b384307');
+  const base='https://github.com/marcusdhaynes/Minternet/releases/download/'+tag+'/';
+  const valid={tag_name:tag,target_commitish:sha,draft:false,prerelease:false,assets:[
+    {name:'Minternet-Windows-Portable-'+tag+'.exe',size:29564928,
+     browser_download_url:base+'Minternet-Windows-Portable-'+tag+'.exe'},
+    {name:'SHA256SUMS.txt',size:128,browser_download_url:base+'SHA256SUMS.txt'}
+  ]};
+  assert.equal(h.updates.verifiedReleaseForRun(run,valid,tag).version,tag.slice(1));
+  assert.equal(h.updates.verifiedReleaseForRun(run,{...valid,draft:true},tag),null);
+  assert.equal(h.updates.verifiedReleaseForRun(run,{...valid,prerelease:true},tag),null);
+  assert.equal(h.updates.verifiedReleaseForRun(run,{...valid,target_commitish:'a'.repeat(40)},tag),null);
+  assert.equal(h.updates.verifiedReleaseForRun(run,{...valid,assets:valid.assets.slice(0,1)},tag),null);
+  assert.equal(h.updates.verifiedReleaseForRun({...run,conclusion:'failure'},valid,tag),null);
+});

@@ -2199,6 +2199,40 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { di
   background:#625087;border-color:#957ec5;color:#fff
 }
 
+
+/* Compact live GitHub Actions build lifecycle inside Settings > Updates. */
+.bookmark-settings .updates-live-pipeline{
+  padding:7px;border:1px solid #45415f;border-radius:5px;background:#19192b;
+  display:flex;flex-direction:column;gap:6px;font-size:10px
+}
+.bookmark-settings .updates-live-head{display:flex;gap:7px;justify-content:space-between;align-items:center}
+.bookmark-settings .updates-live-head strong{font-size:10px;color:#ede6fc;font-weight:600}
+.bookmark-settings .updates-live-phase{color:#bca9ea;font-weight:600;text-align:right}
+.bookmark-settings .updates-live-pipeline[data-state="failed"] .updates-live-phase,
+.bookmark-settings .updates-live-pipeline[data-state="unavailable"] .updates-live-phase{color:#e6a5ab}
+.bookmark-settings .updates-live-pipeline[data-state="ready"] .updates-live-phase{color:#b7e3c6}
+.bookmark-settings .updates-live-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px}
+.bookmark-settings .updates-live-steps span{
+  padding:5px 2px;text-align:center;background:#222138;color:#89869d;border:1px solid #45415f;
+  border-radius:4px;font-size:9px;white-space:nowrap
+}
+.bookmark-settings .updates-live-steps [data-step="complete"]{
+  border-color:#555277;color:#b8b0d4;background:#302a46
+}
+.bookmark-settings .updates-live-steps [data-step="active"]{
+  color:#f4ecff;border-color:#957ec5;background:#574575
+}
+.bookmark-settings .updates-live-steps [data-step="failed"]{
+  color:#f4c5c8;border-color:#b77a81;background:#50313b
+}
+.bookmark-settings .updates-live-detail{font-size:9px;line-height:1.4;color:#b9b3cf}
+.bookmark-settings .updates-live-foot{
+  display:flex;gap:7px;justify-content:space-between;align-items:center;
+  font-size:9px;color:#928eaa
+}
+.bookmark-settings .updates-live-foot a{color:#ccbaee;text-decoration:underline}
+.bookmark-settings .updates-live-refresh{font-size:8px;color:#827e9c}
+
 /* Passkey controls are part of Logins, but never require unlocking the
    password vault (keys are owned and managed by the OS/passkey provider). */
 .vault-passkeys{border:1px solid #48445f;background:#211f32;border-radius:8px;

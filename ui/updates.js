@@ -9,6 +9,10 @@
   const RELEASES='https://github.com/'+REPO+'/releases';
   const CACHE_KEY='minternet.updates.last-verified.v2';
   const REQUEST_TIMEOUT=12000;
+  const LIVE_REFRESH_MS=120000; // GitHub API: near-live, rate-limit conscious.
+  const WINDOWS_RUNS='/actions/workflows/native-windows.yml/runs?branch=main&per_page=5';
+  let pipeline={kind:'unknown',title:'Checking Build Status',detail:'Waiting for GitHub Actions…'};
+  let pipelineCheck=null,readyFromPipeline=null,displayedRelease=null,pollingStarted=false;
   let installed='0.1.0'; // Only the web/demo fallback; native version comes from Rust.
   let lastStatus=null;
   let checking=null;
@@ -123,6 +127,123 @@
         :{kind:'pending',sha};
     }catch{return {kind:'unknown'};}
   }
+
+  function classifyPipelineRun(run,head){
+    if(!run)return {kind:'unknown',title:'Build Status Unavailable',detail:'No Windows build was returned.'};
+    const sha=String(run.head_sha||'').toLowerCase();
+    const source=String(head||'').toLowerCase();
+    const number=Number(run.run_number);
+    const meta=Number.isSafeInteger(number)&&number>0?'Build #'+number+' · '+sha.slice(0,8):'Windows build';
+    const url=String(run.html_url||'');
+    const link=/^https:\/\/github\.com\/marcusdhaynes\/Minternet\/actions\/runs\/[0-9]+$/.test(url)?url:null;
+    const result=(kind,title,detail)=>({kind,title,detail,meta,link});
+    if(/^[0-9a-f]{40}$/.test(source)&&source!==sha)
+      return result('pending','Update Pending','The newest source commit is awaiting its Windows build.');
+    if(['queued','requested','waiting','pending'].includes(run.status))
+      return result('initiating','Update Initiating','GitHub has queued the Windows build.');
+    if(run.status==='in_progress')
+      return result('building','Update Building','Windows compilation and tests are running.');
+    if(run.status==='completed'&&run.conclusion==='success')
+      return result('publishing','Update Publishing','Tests passed; awaiting the published Windows EXE and checksum.');
+    if(run.status==='completed'&&['failure','cancelled','timed_out','action_required'].includes(run.conclusion))
+      return result('failed','Update Failed','The Windows build did not pass. No update will be installed from this run.');
+    return result('unknown','Build Status Unavailable','GitHub returned an unknown build state.');
+  }
+  function expectedTagForRun(run){
+    const base=String(lastStatus?.releaseVersion||installed).match(/^\d+\.\d+\.\d+/)?.[0];
+    const sha=String(run?.head_sha||'');
+    const n=Number(run?.run_number);
+    return base&&/^[0-9a-f]{40}$/i.test(sha)&&Number.isSafeInteger(n)&&n>0
+      ?'v'+base+'-build.'+n+'-g'+sha.slice(0,8).toLowerCase():null;
+  }
+  // Readiness requires the *exact* successful run's public Windows release.
+  // Green Actions checks, drafts, unrelated EXEs and missing checksums do not count.
+  function verifiedReleaseForRun(run,release,tag){
+    if(!run||run.status!=='completed'||run.conclusion!=='success'||
+       !tag||release?.tag_name!==tag||release.target_commitish!==run.head_sha||
+       release.draft||release.prerelease)return null;
+    const assets=Array.isArray(release.assets)?release.assets:[];
+    const prefix='https://github.com/'+REPO+'/releases/download/'+tag+'/';
+    const exe='Minternet-Windows-Portable-'+tag+'.exe';
+    const asset=(name)=>assets.find(a=>a?.name===name&&Number(a.size)>0&&
+      a.browser_download_url===prefix+encodeURIComponent(name));
+    const binary=asset(exe);
+    if(!binary||Number(binary.size)<100000||Number(binary.size)>=50000000||
+       !asset('SHA256SUMS.txt'))return null;
+    return convertRelease(release);
+  }
+  const preferredRelease=info=>readyFromPipeline&&
+    (!info||isNewer(readyFromPipeline.version,info.version))?readyFromPipeline:info;
+  async function refreshPipelineStatus(){
+    if(pipelineCheck)return pipelineCheck;
+    pipelineCheck=(async()=>{
+      if(!window.__TAURI__)return pipeline;
+      try{
+        const result=await request(WINDOWS_RUNS);
+        const runs=Array.isArray(result.data?.workflow_runs)?result.data.workflow_runs:[];
+        const run=runs.find(r=>r?.head_branch==='main');
+        let next=classifyPipelineRun(run,lastStatus?.sourceSha);
+        if(next.kind==='publishing'){
+          const tag=expectedTagForRun(run);
+          if(tag){
+            const response=await request('/releases/tags/'+encodeURIComponent(tag));
+            const published=verifiedReleaseForRun(run,response.data,tag);
+            if(published){
+              next={...next,kind:'ready',title:'Update Ready',
+                detail:'The verified Windows EXE and checksum are published.'};
+              if(isNewer(published.version,installed)){
+                readyFromPipeline=published;
+                saveCache(published);
+                lastStatus={kind:'verified',releaseVersion:published.version,
+                  sourceSha:run.head_sha,
+                  message:'New verified Minternet update available: v'+published.version+'.'};
+              }else{
+                next={...next,kind:'current',title:'Up To Date',
+                  detail:'This published Windows build is already installed.'};
+              }
+            }
+          }
+        }
+        pipeline=next;
+      }catch(error){
+        pipeline={kind:'unavailable',title:'Live Status Unavailable',
+          detail:String(error?.message||'GitHub Actions could not be checked.')};
+      }
+      return pipeline;
+    })().finally(()=>{pipelineCheck=null;});
+    return pipelineCheck;
+  }
+  function renderPipeline(el){
+    if(!window.__TAURI__)return;
+    const panel=document.createElement('div');panel.className='updates-live-pipeline';
+    panel.dataset.state=pipeline.kind;
+    const header=document.createElement('div');header.className='updates-live-head';
+    const heading=document.createElement('strong');heading.textContent='Live Windows Update';
+    const phase=document.createElement('span');phase.textContent=pipeline.title;
+    phase.className='updates-live-phase';header.append(heading,phase);
+    const stages=document.createElement('div');stages.className='updates-live-steps';
+    const at={initiating:0,building:1,publishing:1,failed:1,ready:2,current:2};
+    const index=Object.prototype.hasOwnProperty.call(at,pipeline.kind)?at[pipeline.kind]:-1;
+    ['Initiating','Building','Ready'].forEach((name,i)=>{
+      const chip=document.createElement('span');chip.textContent=name;
+      chip.dataset.step=index<0||i>index?'waiting':i<index?'complete':
+        pipeline.kind==='failed'?'failed':'active';
+      stages.append(chip);
+    });
+    const note=document.createElement('div');note.className='updates-live-detail';
+    note.textContent=pipeline.detail||'';
+    const footer=document.createElement('div');footer.className='updates-live-foot';
+    const meta=document.createElement('span');meta.textContent=pipeline.meta||'';
+    footer.append(meta);
+    if(pipeline.link){
+      const anchor=document.createElement('a');anchor.href=pipeline.link;
+      anchor.target='_blank';anchor.rel='noopener';anchor.textContent='View Build';
+      footer.append(anchor);
+    }
+    const interval=document.createElement('div');interval.className='updates-live-refresh';
+    interval.textContent='Auto-refreshes every 2 minutes while open';
+    panel.append(header,stages,note,footer,interval);el.append(panel);
+  }
   async function checkForUpdate(){
     if(checking)return checking;
     checking=(async()=>{
@@ -203,6 +324,7 @@
     if(lastStatus?.kind==='pending' && lastStatus.sourceSha)
       versions.append(versionRow('Latest Source (Pending Release)',lastStatus.sourceSha.slice(0,8)));
     el.append(versions);
+    renderPipeline(el);
     const message=document.createElement('div');message.className='updates-current-status';
     message.setAttribute('role','status');message.setAttribute('aria-live','polite');
     message.textContent=status||'';
@@ -241,11 +363,27 @@
   async function mountSection(el){
     renderSection(el,null,'Checking GitHub Releases…',true);
     const info=await checkForUpdate();
-    let status;
-    if(lastStatus?.kind==='unpublished')status=lastStatus.message;
-    else if(lastStatus?.kind==='offline')status=lastStatus.message;
-    else status=lastStatus?.message||'Unable to verify update status.';
-    renderSection(el,info,status);
+    await refreshPipelineStatus();
+    displayedRelease=preferredRelease(info);
+    renderSection(el,displayedRelease,lastStatus?.message||'Unable to verify update status.');
+  }
+  async function refreshVisiblePipeline(el){
+    if(!el||document.visibilityState==='hidden')return;
+    if(typeof el.getClientRects==='function'&&el.getClientRects().length===0)return;
+    await refreshPipelineStatus();
+    displayedRelease=preferredRelease(displayedRelease);
+    renderSection(el,displayedRelease,lastStatus?.message||'Unable to verify update status.');
+    if(readyFromPipeline&&!isDismissed(readyFromPipeline.version))mountRibbon(readyFromPipeline);
+  }
+  function startPipelinePolling(el){
+    if(pollingStarted||!window.__TAURI__)return;
+    pollingStarted=true;
+    const disclosure=el.closest?.('details');
+    disclosure?.addEventListener('toggle',()=>{
+      if(disclosure.open)void refreshVisiblePipeline(el);
+    });
+    if(typeof setInterval==='function')
+      setInterval(()=>void refreshVisiblePipeline(el),LIVE_REFRESH_MS);
   }
   function mountRibbon(info){
     if($('museUpdateRibbon')||!info||info.cached)return;
@@ -275,13 +413,15 @@
   }
   window.MuseUpdates={
     get CURRENT_VERSION(){return installed;},isNewer,checkForUpdate,applyUpdate,mountSection,mountRibbon,
+    classifyPipelineRun,expectedTagForRun,verifiedReleaseForRun,refreshPipelineStatus,
+    get livePipeline(){return pipeline;},
     get lastStatus(){return lastStatus;}
   };
   async function init(){
     const el=$('updatesSection');
-    if(el)await mountSection(el);
+    if(el){await mountSection(el);startPipelinePolling(el);}
     else await getInstalledVersion();
-    const info=await checkForUpdate();
+    const info=preferredRelease(await checkForUpdate());
     if(info&&!isDismissed(info.version))mountRibbon(info);
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>void init());
