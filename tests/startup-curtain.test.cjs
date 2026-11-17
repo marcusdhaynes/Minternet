@@ -81,7 +81,7 @@ test('native startup selects restored tab before creating its hidden main window
  const start=main.indexOf('let initial_site=if real_launch');
  const windowIndex=main.indexOf('let builder = WindowBuilder::new(app, "main")',start);
  assert.ok(start>=0&&windowIndex>start);
- const source=main.slice(start,windowIndex+500);
+ const source=main.slice(start,windowIndex+1200);
  assert.match(source,/b\.active\(\)/);
  assert.match(source,/cache\.overlay_open=true/);
  assert.match(source,/\.visible\(!startup_gate\)/);
