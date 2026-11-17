@@ -2546,6 +2546,8 @@ fn start_geometry_smoke(app:&tauri::AppHandle,id:u32){
 }
 
 fn display_active(app: &tauri::AppHandle) {
+    #[cfg(windows)]
+    release_restored_chrome_if_dashboard(app);
     site_fullscreen::cancel_if_tab_changed(app);
     if site_fullscreen::active(app){
         refresh_layout(app);
@@ -4820,6 +4822,14 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         let detail=info.chars().filter(|ch|ch.is_ascii_alphanumeric()||" -_:.()".contains(*ch))
             .take(180).collect::<String>();
         let _=std::fs::write(marker,format!("Tor WebView verification failed: {detail}"));
+        return Ok(json!({"ok":true}));
+    }
+    if name=="startup-present" {
+        if value.get("curtainReady").and_then(Value::as_bool)!=Some(true){
+            return Err("Startup curtain has not finished its local first paint".into());
+        }
+        #[cfg(windows)]
+        present_restored_chrome(&app)?;
         return Ok(json!({"ok":true}));
     }
     if name=="tor-status" {
@@ -7790,9 +7800,31 @@ fn main() {
             } else {
                 restore_session(app.handle());
             }
-            // Do not reset the selected tab after an interrupted process or
-            // updater replacement. The session's last active ordinary site
-            // will be created and navigated below by activated().
+            // Restore and select the actual last active tab BEFORE the first
+            // Windows window is visible. Cover it with trusted native chrome
+            // until its WebView2 surface has produced a usable painted frame.
+            #[cfg(windows)]
+            let initial_site=if real_launch ||
+                std::env::args().any(|a|a=="--minternet-last-active-smoke"){
+                app.state::<Mutex<Browser>>().lock().ok()
+                    .and_then(|b|b.active().filter(|t|
+                        t.url!=HOME && !t.private && !t.tor &&
+                        t.secret_id.is_none())
+                        .map(|t|(t.id,t.url.clone())))
+            }else{None};
+            #[cfg(windows)]
+            let startup_gate=initial_site.is_some();
+            #[cfg(not(windows))]
+            let startup_gate=false;
+            #[cfg(windows)]
+            if let Some((id,url))=initial_site{
+                if let Ok(mut gate)=app.state::<StartupPresentation>().0.lock(){
+                    *gate=Some((id,url,false));
+                }
+                if let Ok(mut cache)=app.state::<Mutex<LayoutCache>>().lock(){
+                    cache.overlay_open=true;cache.size_and_home=None;
+                }
+            }
             let builder = WindowBuilder::new(app, "main")
                 .title("Minternet")
                 // Request dark OS chrome and native menus where supported.
@@ -7802,7 +7834,8 @@ fn main() {
             // Windows portable EXE has no separate OS caption above the app.
             // Keep resizing and the existing in-app window buttons functional.
             #[cfg(target_os="windows")]
-            let builder=builder.decorations(false).resizable(true);
+            let builder=builder.decorations(false).resizable(true)
+                .visible(!startup_gate);
             let window=builder.build()?;
             let (width,height) = dimensions(&window)?;
             // Smoke mode only: trigger a real navigation through the same
@@ -7850,6 +7883,9 @@ fn main() {
             }
             window.add_child(
                 WebviewBuilder::new("chrome",WebviewUrl::App("index.html".into()))
+                    .initialization_script(if startup_gate{
+                        "window.__minternetStartupArmed=true;"
+                    }else{"window.__minternetStartupArmed=false;"})
                     // Tauri's native file-drop handler supersedes HTML5
                     // DataTransfer on Windows. Browser/bookmark drags need
                     // actual text/html, uri-list, and File objects in chrome.
