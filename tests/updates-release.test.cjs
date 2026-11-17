@@ -6,12 +6,12 @@ const path = require('node:path');
 const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname,'../ui/updates.js'),'utf8');
 
-function harness(respond) {
+function harness(respond,installedVersion='0.3.0') {
   const memory=new Map();
   let requests=0;
   const window={
     __TAURI__:{},
-    minternet:{command:async name=>name==='app-version'?{version:'0.3.0'}:{message:'unsupported'}},
+    minternet:{command:async name=>name==='app-version'?{version:installedVersion}:{message:'unsupported'}},
     open:()=>{throw Error('update may not auto-open during a check');}
   };
   const context={
@@ -55,20 +55,51 @@ test('release without Windows EXE is not offered as Windows update',async()=>{
   assert.equal(h.updates.lastStatus.kind,'unpublished');
 });
 
-test('the newest published release determines update availability without querying unreleased commits',async()=>{
+test('published Windows releases alone are installable, but newer source is reported pending',async()=>{
   const h=harness(url=>{
-    if(url.includes('/compare/')||url.includes('/branches/main'))
-      throw Error('Unreleased source commits must not affect release checks');
+    if(url.includes('/branches/main'))
+      return response(200,{commit:{sha:'aabbccdd'+'1'.repeat(32)}});
     return response(200,{
-      tag_name:'v0.3.0',
-      assets:[{name:'Minternet-Windows-Portable-v0.3.0.exe',
+      tag_name:'v0.3.0-build.1099-g5dd3cee3',
+      assets:[{name:'Minternet-Windows-Portable-v0.3.0-build.1099-g5dd3cee3.exe',
         browser_download_url:'https://github.com/example.exe'}]
     });
   });
-  assert.equal(await h.updates.checkForUpdate(),null);
+  const found=await h.updates.checkForUpdate();
+  assert.ok(found);
   assert.equal(h.updates.lastStatus.kind,'verified');
-  assert.match(h.updates.lastStatus.message,/latest published Minternet release/);
   assert.equal(h.requests,2);
+});
+
+test('installed newest verified release labels newer main source pending, not installable',async()=>{
+  const h=harness(url=>{
+    if(url.includes('/branches/main'))
+      return response(200,{commit:{sha:'aabbccdd'+'1'.repeat(32)}});
+    const release={tag_name:'v0.3.0',
+      assets:[{name:'Minternet-Windows-Portable-v0.3.0.exe',
+        browser_download_url:'https://github.com/example.exe'}]};
+    return response(200,url.includes('/latest')?release:[release]);
+  });
+  assert.equal(await h.updates.checkForUpdate(),null);
+  assert.equal(h.updates.lastStatus.kind,'verification-unknown');
+  assert.match(h.updates.lastStatus.message,/Latest installable release/);
+  assert.equal(h.requests,2);
+});
+
+test('matching installed published build and differing source SHA is pending, never installable',async()=>{
+  const windowVersion='0.3.0-build.1099-g5dd3cee3';
+  const h=harness(url=>{
+    if(url.includes('/branches/main'))
+      return response(200,{commit:{sha:'48f82b2dd35020e5c4443fb8d3ba764e0a0e59e5'}});
+    const release={tag_name:'v0.3.0-build.1099-g5dd3cee3',
+      assets:[{name:'Minternet-Windows-Portable-v0.3.0-build.1099-g5dd3cee3.exe',
+      browser_download_url:'https://github.com/example.exe'}]};
+    return response(200,url.includes('/latest')?release:[release]);
+  },windowVersion);
+  assert.equal(await h.updates.checkForUpdate(),null);
+  assert.equal(h.updates.lastStatus.kind,'pending');
+  assert.match(h.updates.lastStatus.message,/pending its verified Windows release/);
+  assert.equal(h.requests,3);
 });
 
 test('newer published release remains installable independently of later source changes',async()=>{
