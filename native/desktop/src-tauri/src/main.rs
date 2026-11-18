@@ -2179,9 +2179,10 @@ fn white_smoke_stage(stage:&'static str){
         "visual-recovery-requested","visual-reload-requested",
         "replacement-page-loaded","replacement-proof-failed",
         "recovered-nonwhite-frame","proof-waiting-for-paint",
-        "proof-missing-page","proof-mask-present",
+        "proof-missing-page","proof-not-ready","proof-wrong-host",
+        "proof-no-content","proof-mask-present",
         "proof-cookie-missing","proof-storage-missing",
-        "proof-no-view","proof-eval-failed"
+        "proof-no-view","proof-eval-failed","reconstruct-unusable-page"
     ];
     if !ALLOWED.contains(&stage){return;}
     let path=std::env::temp_dir().join(format!(
@@ -3701,12 +3702,14 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                             white_smoke_stage("replacement-page-loaded");
                             let app=for_load.clone();
                             let label=view.label().to_string();
+                            let expected_url=event.url().as_str().to_string();
                             std::thread::spawn(move||{
-                                for delay in [3500u64,2200,2200]{
+                                for (attempt,delay) in [3500u64,2200,2200].into_iter().enumerate(){
                                     std::thread::sleep(Duration::from_millis(delay));
                                     if WHITE_PHASE.load(Ordering::Acquire)!=2{return;}
                                     let task=app.clone();
                                     let current=label.clone();
+                                    let expected_url=expected_url.clone();
                                     let _=app.run_on_main_thread(move||{
                                         if WHITE_PHASE.load(Ordering::Acquire)!=2{return;}
                                         if !render_visual::smoke_repainted(){
@@ -3718,21 +3721,26 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                                         };
                                         let marker=std::env::temp_dir().join(format!(
                                             "minternet-visual-white-{}.ok",std::process::id()));
-                                        // A fixed bitmask only; never expose or
-                                        // persist the browser's page or storage.
+                                        // Fixed boolean proofs only; never
+                                        // expose page text or browser storage.
+                                        // Distinguish a repaint from real
+                                        // page recovery and preserve the
+                                        // original HTTPS origin and profile.
+                                        let recovery_task=task.clone();
                                         let outcome=view.eval_with_callback(r#"(() => {
                                           try {
-                                            const page=document.readyState==='complete' &&
-                                              location.hostname==='example.com' &&
-                                              (document.body?.innerText||'').includes('Example Domain');
+                                            const ready=document.readyState==='complete';
+                                            const correctHost=location.hostname==='example.com';
+                                            const content=(document.body?.innerText||'').includes('Example Domain');
                                             const unmasked=!document.getElementById('minternet-ci-white-mask');
                                             const cookie=document.cookie.includes('minternet_visual_ci=retained');
                                             const storage=localStorage.getItem('minternet_visual_ci')==='retained';
-                                            return Number(page)+2*Number(unmasked)+4*Number(cookie)+8*Number(storage);
+                                            return Number(ready)+2*Number(correctHost)+4*Number(content)+
+                                              8*Number(unmasked)+16*Number(cookie)+32*Number(storage);
                                           }catch{return 0}
                                         })()"#,move|response|{
                                             let flags=response.trim().parse::<u8>().unwrap_or(0);
-                                            if flags==15{
+                                            if flags==63{
                                                 if WHITE_PHASE.compare_exchange(2,3,
                                                     Ordering::AcqRel,Ordering::Acquire).is_ok(){
                                                     let _=std::fs::write(&marker,
@@ -3740,10 +3748,33 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                                                 }
                                             }else{
                                                 white_smoke_stage("replacement-proof-failed");
-                                                if flags&1==0{white_smoke_stage("proof-missing-page");}
-                                                if flags&2==0{white_smoke_stage("proof-mask-present");}
-                                                if flags&4==0{white_smoke_stage("proof-cookie-missing");}
-                                                if flags&8==0{white_smoke_stage("proof-storage-missing");}
+                                                if flags&1==0{white_smoke_stage("proof-not-ready");}
+                                                if flags&2==0{white_smoke_stage("proof-wrong-host");}
+                                                if flags&4==0{white_smoke_stage("proof-no-content");}
+                                                if flags&8==0{white_smoke_stage("proof-mask-present");}
+                                                if flags&16==0{white_smoke_stage("proof-cookie-missing");}
+                                                if flags&32==0{white_smoke_stage("proof-storage-missing");}
+                                                // If the first reload paints an unusable page
+                                                // despite intact storage and a cleared white
+                                                // mask, actually exercise the bounded second
+                                                // recovery stage rather than treating that
+                                                // empty paint as a success. Always defer
+                                                // teardown outside ExecuteScript callbacks.
+                                                if attempt==2 && flags&7!=7 &&
+                                                    flags&56==56{
+                                                    let task=recovery_task.clone();
+                                                    let expected=expected_url.clone();
+                                                    std::thread::spawn(move||{
+                                                        std::thread::sleep(Duration::from_millis(160));
+                                                        let closer=task.clone();
+                                                        let _=task.run_on_main_thread(move||{
+                                                            if WHITE_PHASE.load(Ordering::Acquire)==2{
+                                                                white_smoke_stage("reconstruct-unusable-page");
+                                                                recover_stalled_site_if_url(&closer,id,&expected,"visual-white");
+                                                            }
+                                                        });
+                                                    });
+                                                }
                                             }
                                         });
                                         if outcome.is_err(){white_smoke_stage("proof-eval-failed");}

@@ -98,7 +98,9 @@ test('visual recovery proof requires actual repaint and retained browser storage
  assert.match(main,/render_visual::smoke_repainted\(\)/);
  assert.match(main,/const cookie=document\.cookie\.includes\('minternet_visual_ci=retained'\)/);
  assert.match(main,/const storage=localStorage\.getItem\('minternet_visual_ci'\)==='retained'/);
- assert.match(main,/if flags==15/);
+ assert.match(main,/if flags==63/);
+ assert.match(main,/reconstruct-unusable-page/);
+ assert.match(main,/recover_stalled_site_if_url\(&closer,id,&expected,"visual-white"\)/);
  assert.match(main,/proof-cookie-missing/);
  assert.match(main,/proof-storage-missing/);
 });
