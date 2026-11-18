@@ -2,7 +2,7 @@
 //! CapturePreview stays strictly in memory: no screenshot is saved, logged,
 //! exposed to the toolbar, or sent over the network. Only a boolean survives.
 #![cfg(windows)]
-use std::{collections::HashMap,io::{Cursor,Write},
+use std::{collections::HashMap,io::Cursor,
     sync::{Mutex,OnceLock,atomic::{AtomicBool,AtomicU64,Ordering}},time::{Duration,Instant}};
 use tauri::Manager;
 use windows::Win32::{
@@ -21,27 +21,6 @@ pub fn smoke_confirmed()->bool{
     VISUAL_SMOKE_CONFIRMED.load(Ordering::Acquire)
 }
 static WHITE:OnceLock<Mutex<HashMap<u32,(String,Instant,u8)>>>=OnceLock::new();
-
-// Only the dedicated Windows visual-smoke run writes these fixed stage labels.
-// No URL, cookies, image pixels, screenshot, DOM content, or storage is logged.
-pub fn smoke_stage(stage:&'static str){
-    if !std::env::args().any(|a|a=="--minternet-white-surface-smoke"){return;}
-    const ALLOWED:&[&str]=&[
-        "mask-installed","mask-install-failed","mask-not-ready",
-        "preview-scheduled","preview-inactive","preview-pending",
-        "preview-no-view","preview-no-core","preview-no-stream",
-        "preview-capture-error","preview-callback-error","preview-no-png",
-        "preview-png-received","preview-white","preview-not-white",
-        "compositor-rebound","safe-restart-declined","safe-restart-accepted",
-        "visual-recovery-requested","replacement-page-loaded","replacement-proof-failed"
-    ];
-    if !ALLOWED.contains(&stage){return;}
-    let path=std::env::temp_dir().join(format!(
-        "minternet-white-trace-{}.txt",std::process::id()));
-    if let Ok(mut output)=std::fs::OpenOptions::new().create(true).append(true).open(path){
-        let _=writeln!(output,"{stage}");
-    }
-}
 
 fn pending()->&'static Mutex<HashMap<u32,(Instant,u64)>>{
     BUSY.get_or_init(||Mutex::new(HashMap::new()))
@@ -174,8 +153,8 @@ fn match_active(app:&tauri::AppHandle,id:u32,url:&str)->Option<String>{
 }
 fn handle_visual_result(app:tauri::AppHandle,id:u32,url:String,white:bool){
     let Some(label)=match_active(&app,id,&url) else{return};
-    smoke_stage(if white{"preview-white"}else{"preview-not-white"});
-    super::startup_smoke_stage(if white{"visual-preview-white"}
+    super::white_smoke_stage(if white{"preview-white"}else{"preview-not-white"});
+    super::startup_super::white_smoke_stage(if white{"visual-preview-white"}
         else{"visual-preview-painted"});
     if !white{
         // Native window startup is protected by an opaque Chrome curtain.
@@ -190,10 +169,10 @@ fn handle_visual_result(app:tauri::AppHandle,id:u32,url:String,white:bool){
              (document.body.innerText||'').trim().length>0)
         )"#,move|response|{
             if response.trim()!="true"{
-                super::startup_smoke_stage("painted-frame-dom-not-ready");
+                super::startup_super::white_smoke_stage("painted-frame-dom-not-ready");
                 return;
             }
-            super::startup_smoke_stage("painted-frame-dom-ready");
+            super::startup_super::white_smoke_stage("painted-frame-dom-ready");
             let on_main=task.clone();
             let expected_url=expected.clone();
             let _=task.run_on_main_thread(move||{
@@ -210,7 +189,7 @@ fn handle_visual_result(app:tauri::AppHandle,id:u32,url:String,white:bool){
         // Non-destructive DirectComposition repaint FIRST. This preserves the
         // user's DOM, drafts, scroll position, audio, profile and cookies.
         super::native_surface::force_compositor_rebind(&view);
-        smoke_stage("compositor-rebound");
+        super::white_smoke_stage("compositor-rebound");
         super::render_health::record(&app,id,"visual-surface-rebound");
         schedule(&app,id,url,1800);
     }else if stage>=2{
@@ -220,10 +199,10 @@ fn handle_visual_result(app:tauri::AppHandle,id:u32,url:String,white:bool){
         let expected=url.clone();
         let _=view.eval_with_callback(SAFE_TO_RESTART,move|reply|{
             if reply.trim()!="1"{
-                smoke_stage("safe-restart-declined");
+                super::white_smoke_stage("safe-restart-declined");
                 return;
             }
-            smoke_stage("safe-restart-accepted");
+            super::white_smoke_stage("safe-restart-accepted");
             let after=task.clone();
             let expected_url=expected.clone();
             let _=task.run_on_main_thread(move||{
@@ -233,7 +212,7 @@ fn handle_visual_result(app:tauri::AppHandle,id:u32,url:String,white:bool){
                         VISUAL_SMOKE_CONFIRMED.store(true,Ordering::Release);
                     }
                     // The existing bounded recovery registry avoids looping.
-                    smoke_stage("visual-recovery-requested");
+                    super::white_smoke_stage("visual-recovery-requested");
                     super::recover_stalled_site_if_url(&after,id,
                         &expected_url,"visual-white");
                 }
@@ -243,31 +222,31 @@ fn handle_visual_result(app:tauri::AppHandle,id:u32,url:String,white:bool){
 }
 pub fn schedule(app:&tauri::AppHandle,id:u32,url:String,delay_ms:u64){
     if !super::is_real_page_url(&url){return;}
-    smoke_stage("preview-scheduled");
+    super::white_smoke_stage("preview-scheduled");
     let task=app.clone();
     std::thread::spawn(move||{
         std::thread::sleep(Duration::from_millis(delay_ms));
         let worker=task.clone();
         let _=task.run_on_main_thread(move||{
             let Some(label)=match_active(&worker,id,&url) else{
-                smoke_stage("preview-inactive");return;
+                super::white_smoke_stage("preview-inactive");return;
             };
             let Some(token)=begin_capture(id) else{
-                smoke_stage("preview-pending");return;
+                super::white_smoke_stage("preview-pending");return;
             };
             let Some(view)=worker.get_webview(&label) else{
-                smoke_stage("preview-no-view");
+                super::white_smoke_stage("preview-no-view");
                 clear_pending(id,token);return;
             };
             let expected=url.clone();
             let app=worker.clone();
             let result=view.with_webview(move|native|{
                 let Ok(core)=(unsafe{native.controller().CoreWebView2()})else{
-                    smoke_stage("preview-no-core");
+                    super::white_smoke_stage("preview-no-core");
                     clear_pending(id,token);return
                 };
                 let Ok(stream)=(unsafe{CreateStreamOnHGlobal(HGLOBAL::default(),true)})else{
-                    smoke_stage("preview-no-stream");
+                    super::white_smoke_stage("preview-no-stream");
                     clear_pending(id,token);return
                 };
                 let callback_stream=stream.clone();
@@ -275,14 +254,14 @@ pub fn schedule(app:&tauri::AppHandle,id:u32,url:String,delay_ms:u64){
                     let pixels=if status.is_ok(){
                         read_preview(&callback_stream)
                     }else{
-                        smoke_stage("preview-callback-error");
+                        super::white_smoke_stage("preview-callback-error");
                         None
                     };
                     // An expired callback from a previously destroyed
                     // controller must never act on a newer tab generation.
                     if !clear_pending(id,token){return Ok(());}
                     if let Some(pixels)=pixels{
-                        smoke_stage("preview-png-received");
+                        super::white_smoke_stage("preview-png-received");
                         let completed=app.clone();
                         let uri=expected.clone();
                         std::thread::spawn(move||{
@@ -292,19 +271,19 @@ pub fn schedule(app:&tauri::AppHandle,id:u32,url:String,delay_ms:u64){
                                 handle_visual_result(on_main,id,uri,white));
                         });
                     }else{
-                        smoke_stage("preview-no-png");
+                        super::white_smoke_stage("preview-no-png");
                     }
                     Ok(())
                 }));
                 if unsafe{core.CapturePreview(
                     COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG,
                     &stream,&callback)}.is_err(){
-                    smoke_stage("preview-capture-error");
+                    super::white_smoke_stage("preview-capture-error");
                     clear_pending(id,token);
                 }
             });
             if result.is_err(){
-                smoke_stage("preview-capture-error");
+                super::white_smoke_stage("preview-capture-error");
                 clear_pending(id,token);
             }
         });

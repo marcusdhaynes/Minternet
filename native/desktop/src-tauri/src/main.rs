@@ -2164,6 +2164,29 @@ struct StartupPresentation(Mutex<Option<(u32,String,bool)>>);
 // Never treat a pre-reload redirect as proof that the reload finished.
 struct StartupReloadPhase(std::sync::atomic::AtomicU8);
 #[cfg(windows)]
+// Only the dedicated Windows visual-smoke run writes these fixed stage labels.
+// No URL, cookies, image pixels, screenshot, DOM content, or storage is logged.
+fn white_smoke_stage(stage:&'static str){
+    if !std::env::args().any(|a|a=="--minternet-white-surface-smoke"){return;}
+    const ALLOWED:&[&str]=&[
+        "mask-installed","mask-install-failed","mask-not-ready",
+        "preview-scheduled","preview-inactive","preview-pending",
+        "preview-no-view","preview-no-core","preview-no-stream",
+        "preview-capture-error","preview-callback-error","preview-no-png",
+        "preview-png-received","preview-white","preview-not-white",
+        "compositor-rebound","safe-restart-declined","safe-restart-accepted",
+        "visual-recovery-requested","replacement-page-loaded","replacement-proof-failed"
+    ];
+    if !ALLOWED.contains(&stage){return;}
+    let path=std::env::temp_dir().join(format!(
+        "minternet-white-trace-{}.txt",std::process::id()));
+    if let Ok(mut output)=std::fs::OpenOptions::new().create(true).append(true).open(path){
+        let _=writeln!(output,"{stage}");
+    }
+}
+
+
+#[cfg(windows)]
 fn startup_smoke_stage(stage:&'static str){
     if std::env::args().any(|arg|arg=="--minternet-last-active-smoke"){
         // CI-only fixed vocabulary; never log website addresses or content.
@@ -3650,16 +3673,16 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                                         return 1;
                                     })()"#,move|response|{
                                         if response.trim()=="1"{
-                                            render_visual::smoke_stage("mask-installed");
+                                            white_smoke_stage("mask-installed");
                                             WHITE_PHASE.store(2,Ordering::Release);
                                         }else{
-                                            render_visual::smoke_stage("mask-install-failed");
+                                            white_smoke_stage("mask-install-failed");
                                         }
                                     });
                                 });
                             });
                         }else if phase==2 && render_visual::smoke_confirmed(){
-                            render_visual::smoke_stage("replacement-page-loaded");
+                            white_smoke_stage("replacement-page-loaded");
                             let marker=std::env::temp_dir().join(format!(
                                 "minternet-visual-white-{}.ok",std::process::id()));
                             let _=view.eval_with_callback(r#"Number(
@@ -3675,7 +3698,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                                     let _=std::fs::write(&marker,
                                         "PASS: recovered visually white composited page while preserving WebView2 storage");
                                 }else{
-                                    render_visual::smoke_stage("replacement-proof-failed");
+                                    white_smoke_stage("replacement-proof-failed");
                                 }
                             });
                         }
