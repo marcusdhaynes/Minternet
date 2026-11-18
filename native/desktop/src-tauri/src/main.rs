@@ -2176,7 +2176,8 @@ fn white_smoke_stage(stage:&'static str){
         "preview-capture-error","preview-callback-error","preview-no-png",
         "preview-png-received","preview-white","preview-not-white",
         "compositor-rebound","safe-restart-declined","safe-restart-accepted",
-        "visual-recovery-requested","replacement-page-loaded","replacement-proof-failed"
+        "visual-recovery-requested","visual-reload-requested",
+        "replacement-page-loaded","replacement-proof-failed"
     ];
     if !ALLOWED.contains(&stage){return;}
     let path=std::env::temp_dir().join(format!(
@@ -2845,15 +2846,18 @@ fn recover_stalled_site_if_url(app:&tauri::AppHandle,id:u32,
             render_health::record(app,id,"recovery-suppressed");
             return;
         };
-        // Empty DOM does not imply a dead WebView2 browser process. Reload
-        // the existing controller once instead of destroying the browser
-        // profile's active renderer. This keeps the cookie jar and storage
-        // attached; failed/crashed renderers still use full reconstruction.
-        if reason=="blank-document" && action==render_health::Recovery::Reload{
+        // A white compositor or blank DOM can still have a healthy process.
+        // Reload the same WebView2 controller once before reconstructing it:
+        // this retains the cookie jar, site profile, and existing tab ID.
+        // A second confirmed failure for the same URL triggers reconstruction.
+        if matches!(reason,"blank-document"|"visual-white") &&
+           action==render_health::Recovery::Reload{
             if let Some(label)=current.1.as_ref(){
                 if let Some(view)=app.get_webview(label){
                     if view.reload().is_ok(){
                         render_health::record(app,id,"reloaded");
+                        #[cfg(windows)]
+                        if reason=="visual-white"{white_smoke_stage("visual-reload-requested");}
                         return;
                     }
                 }

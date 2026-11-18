@@ -65,8 +65,9 @@ pub enum Recovery { Reload, Recreate }
 struct Attempt {url:String,when:Instant,stage:u8}
 static ATTEMPTS:OnceLock<Mutex<HashMap<u32,Attempt>>>=OnceLock::new();
 
-// First confirmed blank document: reload the live controller. If the same
-// settled blank page returns, reconstruct its controller once. Then stop.
+// A settled blank document or visually white composited page first reloads
+// the existing WebView2 controller. If the same URL still fails, reconstruct
+// the controller once. Fatal renderer exits skip reload. Never loop forever.
 // Fatal renderer exits skip reload. This avoids an infinite browser flash
 // loop while preserving the persistent WebView2 profile and cookie jar.
 pub fn claim(id:u32,url:&str,reason:&str)->Option<Recovery>{
@@ -80,7 +81,7 @@ pub fn claim(id:u32,url:&str,reason:&str)->Option<Recovery>{
         *entry=Attempt{url:url.to_string(),when:Instant::now(),stage:0};
     }
     if entry.stage>=2{return None;}
-    if reason=="blank-document" && entry.stage==0{
+    if matches!(reason,"blank-document"|"visual-white") && entry.stage==0{
         entry.stage=1;
         Some(Recovery::Reload)
     }else{
@@ -267,6 +268,12 @@ mod tests{
         assert_eq!(claim(id,"https://one.example/","blank-document"),None);
         assert_eq!(claim(id,"https://two.example/","renderer-exited"),Some(Recovery::Recreate));
         assert_eq!(claim(id,"https://two.example/","renderer-exited"),None);
+    }
+    #[test]fn white_compositor_reloads_before_reconstructing(){
+        let id=std::process::id().wrapping_add(100_000);
+        assert_eq!(claim(id,"https://visual.example/","visual-white"),Some(Recovery::Reload));
+        assert_eq!(claim(id,"https://visual.example/","visual-white"),Some(Recovery::Recreate));
+        assert_eq!(claim(id,"https://visual.example/","visual-white"),None);
     }
     #[test]fn gpu_failure_is_not_misclassified_as_document_crash(){
         // GPU exits need a compositor rebind, not a destructive reload.
