@@ -69,7 +69,8 @@ test('healthy blank DOM reloads its existing WebView2 controller once before ful
   const health=read('native/desktop/src-tauri/src/render_health.rs');
   const recovery=main.slice(main.indexOf('fn recover_stalled_site_if_url('),
      main.indexOf('fn is_real_page_url('));
-  assert.match(recovery,/if reason=="blank-document"/);
+  assert.match(recovery,/matches!\(reason,"blank-document"\|"visual-white"\)/);
+  assert.match(health,/matches!\(reason,"blank-document"\|"visual-white"\)/);
   assert.match(recovery,/if view.reload\(\).is_ok\(\)/);
   assert.ok(recovery.indexOf('view.reload().is_ok()') < recovery.indexOf('let _=view.close()'));
   assert.match(recovery,/render_health::claim\(id,&current\.0,reason\)/);
