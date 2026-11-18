@@ -17,8 +17,15 @@ const MAX_CAPTURE_BYTES:usize=12*1024*1024;
 static BUSY:OnceLock<Mutex<HashMap<u32,(Instant,u64)>>>=OnceLock::new();
 static CAPTURE_SEQ:AtomicU64=AtomicU64::new(1);
 static VISUAL_SMOKE_CONFIRMED:AtomicBool=AtomicBool::new(false);
+static VISUAL_SMOKE_REPAINTED:AtomicBool=AtomicBool::new(false);
 pub fn smoke_confirmed()->bool{
     VISUAL_SMOKE_CONFIRMED.load(Ordering::Acquire)
+}
+// White detection itself is not recovery: require a later, genuinely
+// non-white WebView2 CapturePreview result from the active page.
+pub fn smoke_repainted()->bool{
+    VISUAL_SMOKE_CONFIRMED.load(Ordering::Acquire) &&
+        VISUAL_SMOKE_REPAINTED.load(Ordering::Acquire)
 }
 static WHITE:OnceLock<Mutex<HashMap<u32,(String,Instant,u8)>>>=OnceLock::new();
 
@@ -154,6 +161,10 @@ fn match_active(app:&tauri::AppHandle,id:u32,url:&str)->Option<String>{
 fn handle_visual_result(app:tauri::AppHandle,id:u32,url:String,white:bool){
     let Some(label)=match_active(&app,id,&url) else{return};
     super::white_smoke_stage(if white{"preview-white"}else{"preview-not-white"});
+    if !white&&VISUAL_SMOKE_CONFIRMED.load(Ordering::Acquire){
+        VISUAL_SMOKE_REPAINTED.store(true,Ordering::Release);
+        super::white_smoke_stage("recovered-nonwhite-frame");
+    }
     super::startup_smoke_stage(if white{"visual-preview-white"}
         else{"visual-preview-painted"});
     if !white{

@@ -86,3 +86,19 @@ test('visual recovery diagnostics use valid parent module entrypoints',()=>{
  assert.match(visual,/super::startup_smoke_stage\("painted-frame-dom-ready"\)/);
  assert.match(visual,/super::white_smoke_stage\("preview-scheduled"\)/);
 });
+
+test('Windows only builds newest main commit and retains Rust compilation cache on late test failure',()=>{
+ assert.match(win,/group: minternet-windows-\$\{\{ github\.ref \}\}/);
+ assert.match(win,/cancel-in-progress: true/);
+ assert.match(win,/cache-on-failure: true/);
+});
+test('visual recovery proof requires actual repaint and retained browser storage',()=>{
+ assert.match(visual,/pub fn smoke_repainted\(\)->bool/);
+ assert.match(visual,/VISUAL_SMOKE_REPAINTED\.store\(true/);
+ assert.match(main,/render_visual::smoke_repainted\(\)/);
+ assert.match(main,/const cookie=document\.cookie\.includes\('minternet_visual_ci=retained'\)/);
+ assert.match(main,/const storage=localStorage\.getItem\('minternet_visual_ci'\)==='retained'/);
+ assert.match(main,/if flags==15/);
+ assert.match(main,/proof-cookie-missing/);
+ assert.match(main,/proof-storage-missing/);
+});

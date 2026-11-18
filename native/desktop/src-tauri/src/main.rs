@@ -2177,7 +2177,11 @@ fn white_smoke_stage(stage:&'static str){
         "preview-png-received","preview-white","preview-not-white",
         "compositor-rebound","safe-restart-declined","safe-restart-accepted",
         "visual-recovery-requested","visual-reload-requested",
-        "replacement-page-loaded","replacement-proof-failed"
+        "replacement-page-loaded","replacement-proof-failed",
+        "recovered-nonwhite-frame","proof-waiting-for-paint",
+        "proof-missing-page","proof-mask-present",
+        "proof-cookie-missing","proof-storage-missing",
+        "proof-no-view","proof-eval-failed"
     ];
     if !ALLOWED.contains(&stage){return;}
     let path=std::env::temp_dir().join(format!(
@@ -3687,23 +3691,63 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                                 });
                             });
                         }else if phase==2 && render_visual::smoke_confirmed(){
+                            // PageLoadEvent::Finished is not a painted frame.
+                            // Previously the smoke proof ran immediately after
+                            // navigation, failed on unsettled title/content,
+                            // and blocked *every* otherwise healthy EXE release.
+                            // Wait for a real non-white CapturePreview and
+                            // recheck the real HTTPS document and retained
+                            // cookie/localStorage with a finite retry budget.
                             white_smoke_stage("replacement-page-loaded");
-                            let marker=std::env::temp_dir().join(format!(
-                                "minternet-visual-white-{}.ok",std::process::id()));
-                            let _=view.eval_with_callback(r#"Number(
-                                document.readyState==='complete' &&
-                                document.title==='Example Domain' &&
-                                (document.body?.innerText||'').includes('Example Domain') &&
-                                !document.getElementById('minternet-ci-white-mask') &&
-                                document.cookie.includes('minternet_visual_ci=retained') &&
-                                localStorage.getItem('minternet_visual_ci')==='retained'
-                            )"#,move|response|{
-                                if response.trim()=="1"{
-                                    WHITE_PHASE.store(3,Ordering::Release);
-                                    let _=std::fs::write(&marker,
-                                        "PASS: recovered visually white composited page while preserving WebView2 storage");
-                                }else{
-                                    white_smoke_stage("replacement-proof-failed");
+                            let app=for_load.clone();
+                            let label=view.label().to_string();
+                            std::thread::spawn(move||{
+                                for delay in [3500u64,2200,2200]{
+                                    std::thread::sleep(Duration::from_millis(delay));
+                                    if WHITE_PHASE.load(Ordering::Acquire)!=2{return;}
+                                    let task=app.clone();
+                                    let current=label.clone();
+                                    let _=app.run_on_main_thread(move||{
+                                        if WHITE_PHASE.load(Ordering::Acquire)!=2{return;}
+                                        if !render_visual::smoke_repainted(){
+                                            white_smoke_stage("proof-waiting-for-paint");
+                                            return;
+                                        }
+                                        let Some(view)=task.get_webview(&current)else{
+                                            white_smoke_stage("proof-no-view");return;
+                                        };
+                                        let marker=std::env::temp_dir().join(format!(
+                                            "minternet-visual-white-{}.ok",std::process::id()));
+                                        // A fixed bitmask only; never expose or
+                                        // persist the browser's page or storage.
+                                        let outcome=view.eval_with_callback(r#"(() => {
+                                          try {
+                                            const page=document.readyState==='complete' &&
+                                              location.hostname==='example.com' &&
+                                              (document.body?.innerText||'').includes('Example Domain');
+                                            const unmasked=!document.getElementById('minternet-ci-white-mask');
+                                            const cookie=document.cookie.includes('minternet_visual_ci=retained');
+                                            const storage=localStorage.getItem('minternet_visual_ci')==='retained';
+                                            return Number(page)+2*Number(unmasked)+4*Number(cookie)+8*Number(storage);
+                                          }catch{return 0}
+                                        })()"#,move|response|{
+                                            let flags=response.trim().parse::<u8>().unwrap_or(0);
+                                            if flags==15{
+                                                if WHITE_PHASE.compare_exchange(2,3,
+                                                    Ordering::AcqRel,Ordering::Acquire).is_ok(){
+                                                    let _=std::fs::write(&marker,
+                                                        "PASS: recovered visually white composited page while preserving WebView2 storage");
+                                                }
+                                            }else{
+                                                white_smoke_stage("replacement-proof-failed");
+                                                if flags&1==0{white_smoke_stage("proof-missing-page");}
+                                                if flags&2==0{white_smoke_stage("proof-mask-present");}
+                                                if flags&4==0{white_smoke_stage("proof-cookie-missing");}
+                                                if flags&8==0{white_smoke_stage("proof-storage-missing");}
+                                            }
+                                        });
+                                        if outcome.is_err(){white_smoke_stage("proof-eval-failed");}
+                                    });
                                 }
                             });
                         }

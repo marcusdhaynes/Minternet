@@ -7,11 +7,12 @@ on:
 permissions:
   contents: write
   issues: write
-# Give each pushed commit its own Windows build. A newer push must
-# not cancel the preceding build before a release EXE can be published.
+# Only the newest main-branch Windows build should consume runner time.
+# Superseded commits are canceled; never keep obsolete builds competing with
+# the version that the user's updater will actually install.
 concurrency:
-  group: minternet-windows-${{ github.sha }}
-  cancel-in-progress: false
+  group: minternet-windows-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   portable:
     if: github.ref == 'refs/heads/main'
@@ -36,6 +37,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: native/desktop/src-tauri -> target
+          # Save compiled Rust dependencies even when a later UI smoke check
+          # fails. Recompiling dependencies on every failed iteration caused
+          # many minutes of avoidable delay.
+          cache-on-failure: true
       - name: Install Tauri CLI
         run: npm install --no-fund --no-audit
       - name: Validate browser UI and bookmark model
