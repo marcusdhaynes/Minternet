@@ -1099,7 +1099,9 @@
     const node = id ? model.find(data, id) : null;
     draft = { kind, id, parentId };
     $('bookmarkEditorTitle').textContent = id ? 'Edit ' + (kind === 'folder' ? 'Folder' : 'Bookmark') : 'New ' + (kind === 'folder' ? 'Folder' : 'Bookmark');
-    $('bookmarkName').value = node?.name ||
+    // Only suggest a page title for a new link. An existing blank name is
+    // intentional and must remain blank when the bookmark is reopened.
+    $('bookmarkName').value = node ? node.name :
       (kind==='link'
         ?(currentTitle&&currentTitle!=='New Tab'
            ?currentTitle
@@ -1162,8 +1164,9 @@
     event.preventDefault();
     if (!draft) return;
     const parent = $('bookmarkParent').value || model.BOOKMARK_BAR_ID;
-    const name = $('bookmarkName').value.trim() ||
-      (draft.kind==='link'?(window.MinternetSiteNames?.label($('bookmarkUrl').value)||''):'');
+    // A cleared Name field is an explicit icon-only bookmark choice.
+    // Never replace it with the page title, hostname or site label.
+    const name = $('bookmarkName').value.trim();
     const url = draft.kind === 'link' ? model.url($('bookmarkUrl').value) : null;
     if (draft.kind === 'link' && !url) return toast('Enter a valid HTTPS website address.');
     if (draft.id) {
