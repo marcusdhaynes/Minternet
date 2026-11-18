@@ -2167,6 +2167,7 @@ struct StartupReloadPhase(std::sync::atomic::AtomicU8);
 // Only the dedicated Windows visual-smoke run writes these fixed stage labels.
 // No URL, cookies, image pixels, screenshot, DOM content, or storage is logged.
 fn white_smoke_stage(stage:&'static str){
+    use std::io::Write as _;
     if !std::env::args().any(|a|a=="--minternet-white-surface-smoke"){return;}
     const ALLOWED:&[&str]=&[
         "mask-installed","mask-install-failed","mask-not-ready",
