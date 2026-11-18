@@ -104,3 +104,12 @@ test('visual recovery proof requires actual repaint and retained browser storage
  assert.match(main,/proof-cookie-missing/);
  assert.match(main,/proof-storage-missing/);
 });
+
+test('white-surface regression compares original HTTPS page content instead of brittle innerText',()=>{
+  assert.match(main,/minternet_visual_ci_baseline/);
+  assert.match(main,/fingerprint\(content\)/);
+  assert.match(main,/fingerprint\(contentText\)===originalFingerprint/);
+  assert.match(main,/document\.body\.textContent/);
+  assert.doesNotMatch(main.slice(main.indexOf('const originalFingerprint='),main.indexOf('const unmasked=')),
+    /innerText/);
+});

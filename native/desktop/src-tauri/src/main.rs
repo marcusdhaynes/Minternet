@@ -3674,6 +3674,24 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                                     let Some(site)=task.get_webview(&label) else{return};
                                     let _=site.eval_with_callback(r#"(() => {
                                         if(document.readyState!=='complete'||!document.body)return 0;
+                                        // Test the real page that was present before
+                                        // the white fault, not an assumed wording of
+                                        // a remote site's CSS-dependent innerText.
+                                        // Store only an in-origin content fingerprint;
+                                        // do not send or log page text.
+                                        const content=(document.body.textContent||'')
+                                          .replace(/\s+/g,' ').trim();
+                                        if(content.length<25 ||
+                                          !(document.title.includes('Example Domain') ||
+                                            content.includes('Example Domain')))return 0;
+                                        const fingerprint=value=>{
+                                          let h=2166136261;
+                                          for(let i=0;i<value.length;i++){
+                                            h=Math.imul(h^value.charCodeAt(i),16777619);
+                                          }
+                                          return (h>>>0).toString(16);
+                                        };
+                                        localStorage.setItem('minternet_visual_ci_baseline',fingerprint(content));
                                         document.cookie='minternet_visual_ci=retained; Max-Age=3600; Path=/; SameSite=Lax; Secure';
                                         localStorage.setItem('minternet_visual_ci','retained');
                                         let mask=document.createElement('div');
@@ -3731,7 +3749,18 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                                           try {
                                             const ready=document.readyState==='complete';
                                             const correctHost=location.hostname==='example.com';
-                                            const content=(document.body?.innerText||'').includes('Example Domain');
+                                            const contentText=(document.body?.textContent||'')
+                                              .replace(/\s+/g,' ').trim();
+                                            const fingerprint=value=>{
+                                              let h=2166136261;
+                                              for(let i=0;i<value.length;i++){
+                                                h=Math.imul(h^value.charCodeAt(i),16777619);
+                                              }
+                                              return (h>>>0).toString(16);
+                                            };
+                                            const originalFingerprint=localStorage.getItem('minternet_visual_ci_baseline');
+                                            const content=!!originalFingerprint && contentText.length>=25 &&
+                                              fingerprint(contentText)===originalFingerprint;
                                             const unmasked=!document.getElementById('minternet-ci-white-mask');
                                             const cookie=document.cookie.includes('minternet_visual_ci=retained');
                                             const storage=localStorage.getItem('minternet_visual_ci')==='retained';
