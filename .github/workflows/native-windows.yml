@@ -228,6 +228,7 @@ jobs:
           $exe = "$env:RUNNER_TEMP\minternet-portable\Minternet-Portable-x64.exe"
           $p = Start-Process -FilePath $exe -ArgumentList '--minternet-white-surface-smoke' -PassThru
           $proof = Join-Path $env:TEMP "minternet-visual-white-$($p.Id).ok"
+          $trace = Join-Path $env:TEMP "minternet-white-trace-$($p.Id).txt"
           try {
             $passed = $false
             for($i=0;$i -lt 55;$i++){
@@ -237,7 +238,8 @@ jobs:
               if(Test-Path -LiteralPath $proof){$passed=$true;break}
             }
             if(!$passed){
-              throw 'A real HTTPS page covered with an all-white compositor frame did not recover automatically'
+              $stages = if(Test-Path -LiteralPath $trace){(Get-Content -LiteralPath $trace) -join ','}else{'no visual probe stages recorded'}
+              throw "A real HTTPS page covered with an all-white compositor frame did not recover automatically. Recovery stages: $stages"
             }
             $contents=Get-Content -LiteralPath $proof -Raw
             if($contents -notmatch 'recovered visually white composited page while preserving WebView2 storage'){
@@ -247,7 +249,7 @@ jobs:
           } finally {
             $p.Refresh()
             if(!$p.HasExited){Stop-Process -Id $p.Id -Force}
-            Remove-Item $proof -Force -ErrorAction SilentlyContinue
+            Remove-Item $proof,$trace -Force -ErrorAction SilentlyContinue
           }
       - name: Reproduce and repair off-center WebView2 startup after maximization
         shell: pwsh

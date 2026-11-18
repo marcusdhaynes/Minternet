@@ -3650,12 +3650,16 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                                         return 1;
                                     })()"#,move|response|{
                                         if response.trim()=="1"{
+                                            render_visual::smoke_stage("mask-installed");
                                             WHITE_PHASE.store(2,Ordering::Release);
+                                        }else{
+                                            render_visual::smoke_stage("mask-install-failed");
                                         }
                                     });
                                 });
                             });
                         }else if phase==2 && render_visual::smoke_confirmed(){
+                            render_visual::smoke_stage("replacement-page-loaded");
                             let marker=std::env::temp_dir().join(format!(
                                 "minternet-visual-white-{}.ok",std::process::id()));
                             let _=view.eval_with_callback(r#"Number(
@@ -3670,6 +3674,8 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                                     WHITE_PHASE.store(3,Ordering::Release);
                                     let _=std::fs::write(&marker,
                                         "PASS: recovered visually white composited page while preserving WebView2 storage");
+                                }else{
+                                    render_visual::smoke_stage("replacement-proof-failed");
                                 }
                             });
                         }
