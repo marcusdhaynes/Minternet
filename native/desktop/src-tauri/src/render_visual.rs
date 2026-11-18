@@ -154,7 +154,7 @@ fn match_active(app:&tauri::AppHandle,id:u32,url:&str)->Option<String>{
 fn handle_visual_result(app:tauri::AppHandle,id:u32,url:String,white:bool){
     let Some(label)=match_active(&app,id,&url) else{return};
     super::white_smoke_stage(if white{"preview-white"}else{"preview-not-white"});
-    super::startup_super::white_smoke_stage(if white{"visual-preview-white"}
+    super::startup_smoke_stage(if white{"visual-preview-white"}
         else{"visual-preview-painted"});
     if !white{
         // Native window startup is protected by an opaque Chrome curtain.
@@ -169,10 +169,10 @@ fn handle_visual_result(app:tauri::AppHandle,id:u32,url:String,white:bool){
              (document.body.innerText||'').trim().length>0)
         )"#,move|response|{
             if response.trim()!="true"{
-                super::startup_super::white_smoke_stage("painted-frame-dom-not-ready");
+                super::startup_smoke_stage("painted-frame-dom-not-ready");
                 return;
             }
-            super::startup_super::white_smoke_stage("painted-frame-dom-ready");
+            super::startup_smoke_stage("painted-frame-dom-ready");
             let on_main=task.clone();
             let expected_url=expected.clone();
             let _=task.run_on_main_thread(move||{

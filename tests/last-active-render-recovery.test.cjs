@@ -80,3 +80,9 @@ test('Windows release is gated by actual native executable and Rust tests',()=>{
  assert.match(win,/--minternet-geometry-smoke/);
  assert.match(win,/Publish verified portable EXE as a GitHub Release/);
 });
+
+test('visual recovery diagnostics use valid parent module entrypoints',()=>{
+ assert.doesNotMatch(visual,/startup_super/);
+ assert.match(visual,/super::startup_smoke_stage\("painted-frame-dom-ready"\)/);
+ assert.match(visual,/super::white_smoke_stage\("preview-scheduled"\)/);
+});
