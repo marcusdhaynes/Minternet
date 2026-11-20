@@ -79,6 +79,16 @@ pub fn run()->Result<(),String>{
         if !(200..500).contains(&status){
             return Err(format!("Onion service did not respond with a normal HTTP status ({status})"));
         }
+        // Prove that an interrupted listener does not permanently strand
+        // future Tor navigation; only the authenticated Arti transport returns.
+        super::tor_transport::interrupt_listener_for_smoke(SMOKE_ID)?;
+        if super::tor_transport::proxy_url(SMOKE_ID).is_ok(){
+            return Err("Interrupted Tor listener unexpectedly remained available".into());
+        }
+        super::tor_transport::prepare(SMOKE_ID).await?;
+        let recovered=super::tor_transport::proxy_url(SMOKE_ID)?;
+        socks_deny_local(recovered.port().ok_or("Recovered Tor SOCKS port missing")?).await?;
+        println!("PASS: Tor SOCKS listener restored after injected failure.");
         println!("PASS: Embedded Arti verified by Tor Project and HTTPS v3 onion service.");
         println!("PASS: Embedded SOCKS rejects direct IP requests; remote DNS required.");
         println!("LIMIT: This does not check WebView2 browser leaks or fingerprinting.");
