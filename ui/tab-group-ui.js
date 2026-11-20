@@ -124,17 +124,15 @@
       void api.command('unpin',tabId).then(result=>{
         if(result?.message){window.minternetToast?.(result.message);return;}
         model.assign(state,tabId,groupId);
-        const group=model.get(state,groupId);
-        if(group){group.visible=true;group.collapsed=false;}
+        // Assigning a dragged pinned tab must not open a collapsed group.
+        // The group's existing collapsed/visible state is a user choice.
         persist();
       });
       return true;
     }
     if(!model.assign(state,tabId,groupId))return false;
-    if(groupId){
-      const g=model.get(state,groupId);
-      if(g){g.visible=true;g.collapsed=false;}
-    }
+    // Dragging onto a group chip or next to one of its tabs only changes
+    // membership. Never expand or unhide the target group as a side effect.
     persist();
     return true;
   }
@@ -333,9 +331,9 @@
       if(!model.insertAfter(state,tab.id,tab.openerId))continue;
       const parentGroup=model.findTab(state,tab.openerId);
       if(parentGroup && !tab.pinned){
+        // A background tab inherits its source group without changing
+        // the group's collapsed/hidden state.
         model.assign(state,tab.id,parentGroup.id);
-        parentGroup.visible=true;
-        parentGroup.collapsed=false;
       }
     }
     model.prune(state,data.tabs.map(t=>t.id));

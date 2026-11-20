@@ -103,3 +103,20 @@ test('native resize keeps existing pages alive and coalesces redundant WebView u
  assert.match(native,/tauri::WindowEvent::Focused\(true\)/);
  assert.match(native,/invalidate_layout\(&handle\);\s*refresh_layout\(&handle\);/);
 });
+
+test('dropping a tab into a collapsed group preserves the user-selected collapse state',()=>{
+ const ui=require('node:fs').readFileSync(require('node:path').join(__dirname,'../ui/tab-group-ui.js'),'utf8');
+ const assignBlock=ui.slice(ui.indexOf('function assign(tabId,groupId)'),ui.indexOf('function ungroup(tabId)'));
+ assert.match(assignBlock,/model\.assign\(state,tabId,groupId\)/);
+ assert.doesNotMatch(assignBlock,/\.collapsed\s*=\s*false|\.visible\s*=\s*true/);
+ assert.match(ui,/function dropIntoGroup\(event,gid\)/);
+ assert.match(ui,/return assign\(id,gid\);/);
+ assert.match(ui,/return assign\(id,targetGroup\?\.id\|\|null\);/);
+ const opener=ui.slice(ui.indexOf('// Ctrl-click background pages'),ui.indexOf('model.prune(state,data.tabs.map'));
+ assert.doesNotMatch(opener,/\.collapsed\s*=\s*false/);
+ const s=m.blank(),g=m.create(s,{name:'Collapsed'});
+ m.update(s,g.id,{visible:true,collapsed:true});
+ m.assign(s,4,g.id);m.assign(s,5,g.id);
+ assert.equal(m.get(s,g.id).collapsed,true);
+ assert.equal(m.isVisibleTab(s,5),false);
+});
