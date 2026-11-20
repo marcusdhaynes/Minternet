@@ -57,6 +57,19 @@ fn reply(stream:&mut TcpStream,status:&str,content_type:&str,body:&[u8],extra:&s
 fn store_poster(app:&tauri::AppHandle, changes:&mut Value)->Result<(),String>{
     let Some(object)=changes.as_object_mut() else{return Err("Invalid media changes".into())};
     let Some(value)=object.get("poster").and_then(Value::as_str) else{return Ok(())};
+    // The catalog returns an origin-gated, per-process URL. Convert it back
+    // into its permanent file identifier before ANY other metadata update,
+    // otherwise marking a video Watched would store an expired token URL.
+    if let Some(route)=value.strip_prefix("http://127.0.0.1:18761/poster/"){
+        let filename=route.split('?').next().unwrap_or("");
+        if !valid_poster_file(filename){return Err("Invalid stored poster".into())}
+        object.insert("poster".into(),json!(format!("native-poster:{filename}")));
+        return Ok(());
+    }
+    if let Some(filename)=value.strip_prefix("native-poster:"){
+        if !valid_poster_file(filename){return Err("Invalid stored poster".into())}
+        return Ok(());
+    }
     if !value.starts_with("data:image/"){return Ok(())}
     let (mime,encoded)=value.split_once(",").ok_or("Malformed poster image")?;
     let extension=match mime{
