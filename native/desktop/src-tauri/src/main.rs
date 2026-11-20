@@ -9,6 +9,7 @@ mod secret_bookmarks;
 mod media_devices;
 mod site_fullscreen;
 mod site_video_resume;
+mod media_library;
 #[cfg(windows)]
 mod native_surface;
 mod site_context_menu;
@@ -5355,6 +5356,25 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         schedule_surface_restore(&app);
         return Ok(json!({"ok":true}));
     }
+    if matches!(name.as_str(),"media-library-get"|"media-library-add-folder"|"media-library-remove-folder"|"media-library-rescan"){
+        return media_library::action(&app,&name,&value);
+    }
+    if name=="media-library-choose-folder" {
+        let (send,recv)=std::sync::mpsc::channel();
+        let handle=app.clone();
+        app.dialog().file().pick_folder(move |folder| {
+            let result=folder.map(|f|f.to_string());
+            let _=send.send(result);
+        });
+        // The native folder selector returns a path, never browser-provided input.
+        let chosen=tauri::async_runtime::spawn_blocking(move || recv.recv()).await
+            .map_err(|e|e.to_string())?.map_err(|e|e.to_string())?;
+        if let Some(path)=chosen {
+            let result=media_library::action(&handle,"media-library-add-folder",&json!({"path":path}))?;
+            return Ok(result);
+        }
+        return Ok(json!({"ok":false,"cancelled":true}));
+    }
     if matches!(name.as_str(),"site-media-get"|"site-media-set"|"site-media-revoke"){
         let (id,url,private)={
             let browser=app.state::<Mutex<Browser>>();
@@ -8203,6 +8223,7 @@ fn main() {
         .manage(FindBarState(Mutex::new(false)))
         .manage(LocalMediaSelection::default())
         .manage(LocalMediaPath::default())
+        .manage(Mutex::new(media_library::MediaLibrary::default()))
         .invoke_handler(tauri::generate_handler![browser_action, browser_snapshot])
         .setup(|app| {
             // Before any WebView2 controller is initialized, select the
@@ -8221,6 +8242,11 @@ fn main() {
                 let _=std::fs::remove_file(folder.join("privacy-shield.v1.json"));
             }
             media_devices::load(app.handle());
+            if let Ok(mut library)=app.state::<Mutex<media_library::MediaLibrary>>().lock(){
+                *library=media_library::MediaLibrary::load(app.handle());
+                library.rescan_all();
+                let _=library.save(app.handle());
+            }
             let preferences=load_preferences(app.handle());
             if let Ok(mut saved)=app.state::<BrowserPreferenceState>().0.lock(){
                 *saved=preferences.clone();
