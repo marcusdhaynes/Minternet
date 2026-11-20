@@ -64,8 +64,8 @@ final class BrowserState: ObservableObject {
             guard let self, let tab, let view else { return }
             let group = DispatchGroup()
             for cookie in cookies {
-                guard cookie.isHTTPOnly || cookie.isSecure || cookie.expiresDate == nil ||
-                        cookie.domain.count > 0 else { continue }
+                // Transfer every cookie with its original domain, path,
+                // Secure, HttpOnly and SameSite attributes intact.
                 group.enter()
                 privateStore.setCookie(cookie) { group.leave() }
             }
