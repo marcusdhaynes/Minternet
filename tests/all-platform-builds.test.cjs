@@ -20,12 +20,12 @@ test('every main push triggers Web, Windows, macOS, Linux, Android, and iOS work
     assert.doesNotMatch(trigger,/^\s+paths:/m,name+' is silently skipping unrelated commits');
   }
 });
-test('Windows builds cancel obsolete main runs, cache compilation and prevent release regression',()=>{
+test('Windows finishes active builds, coalesces pending commits and prevents release regression',()=>{
   const src=read('.github/workflows/native-windows.yml');
-  // Only newest main SHA gets runner time. Superseded commits remain in the
-  // GitHub Actions history but cannot compete for an installable update.
+  // A running compile must complete so rapid pushes cannot starve releases.
+  // Only the most recent pending commit competes for the next build.
   assert.match(src,/group: minternet-windows-\$\{\{ github\.ref \}\}/);
-  assert.match(src,/cancel-in-progress: true/);
+  assert.match(src,/cancel-in-progress: false/);
   assert.match(src,/cache-on-failure: true/);
   assert.match(src,/\$latestFlag.*'--latest=false'/);
   assert.match(src,/releases\/tags\/\$tag/);
