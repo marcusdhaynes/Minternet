@@ -55,3 +55,14 @@ test('Private tabs stay isolated; history, Tor and secret tabs stay protected',(
  assert.doesNotMatch(rust.slice(rust.indexOf('fn defer_private_first_navigation('),
    rust.indexOf('fn navigate_tab(')),/save_recent_downloads|save_pinned|record_page_history|localStorage|console\.log/);
 });
+
+test('iOS imports regular login cookies before the first private request',()=>{
+ const ios=read('native/ios/Sources/MinternetApp.swift');
+ assert.match(ios,/configuration\.websiteDataStore = isPrivate \? \.nonPersistent\(\) : \.default\(\)/);
+ assert.match(ios,/UserDefaults\.standard\.object\(forKey: "privateLoginSharing"\) as\? Bool \?\? true/);
+ assert.match(ios,/WKWebsiteDataStore\.default\(\)\.httpCookieStore\.getAllCookies/);
+ assert.match(ios,/privateStore\.setCookie\(cookie\) \{ group\.leave\(\) \}/);
+ assert.match(ios,/group\.notify\(queue: \.main\)/);
+ assert.match(ios,/view\.load\(URLRequest\(url: destination\)\)/);
+ assert.match(ios,/Toggle\("Retain Active Logins in Private Tabs", isOn: \$state\.privateLoginSharing\)/);
+});
