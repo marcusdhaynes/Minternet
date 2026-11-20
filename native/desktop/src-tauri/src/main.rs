@@ -100,8 +100,9 @@ struct BrowserPreferenceState(Mutex<BrowserPreferences>);
 // settings file, a log, cloud sync or browser-chrome IPC.
 #[derive(Default)]
 struct PrivateLoginCopies {
-    pending:std::collections::HashSet<u32>,
+    pending:std::collections::HashMap<u32,u64>,
     seeded:std::collections::HashSet<u32>,
+    next_generation:u64,
 }
 struct PrivateLoginCopyState(Mutex<PrivateLoginCopies>);
 
@@ -4768,6 +4769,12 @@ fn private_login_sharing_enabled(app:&tauri::AppHandle)->bool{
     app.state::<BrowserPreferenceState>().0.lock()
         .map(|prefs|prefs.private_login_sharing).unwrap_or(false)
 }
+fn forget_private_login_copy(app:&tauri::AppHandle,id:u32){
+    if let Ok(mut copies)=app.state::<PrivateLoginCopyState>().0.lock(){
+        copies.seeded.remove(&id);
+        copies.pending.remove(&id);
+    }
+}
 fn defer_private_first_navigation(app:&tauri::AppHandle,id:u32,
     target:&tauri::Url,existing:Option<tauri::Webview>)->Result<bool,String>{
     if !matches!(target.scheme(),"https"|"http")||
@@ -4789,7 +4796,7 @@ fn defer_private_first_navigation(app:&tauri::AppHandle,id:u32,
         let state=app.state::<PrivateLoginCopyState>();
         let saved=state.0.lock().map_err(|e|e.to_string())?;
         if saved.seeded.contains(&id){return Ok(false);}
-        if saved.pending.contains(&id){return Ok(true);}
+        if saved.pending.contains_key(&id){return Ok(true);}
     }
     // The trusted chrome uses the persistent default browser profile.
     // Querying it also works after the user has closed all normal tabs.
@@ -4807,12 +4814,16 @@ fn defer_private_first_navigation(app:&tauri::AppHandle,id:u32,
             .ok_or("Could not create isolated Private Tab")?
     };
     let expected_label=private_view.label().to_string();
-    {
+    let generation={
         let state=app.state::<PrivateLoginCopyState>();
         let mut saved=state.0.lock().map_err(|e|e.to_string())?;
         if saved.seeded.contains(&id){return Ok(false);}
-        if !saved.pending.insert(id){return Ok(true);}
-    }
+        if saved.pending.contains_key(&id){return Ok(true);}
+        saved.next_generation=saved.next_generation.wrapping_add(1).max(1);
+        let generation=saved.next_generation;
+        saved.pending.insert(id,generation);
+        generation
+    };
     let owner=app.clone();
     std::thread::spawn(move||{
         let mut seen=std::collections::HashSet::new();
