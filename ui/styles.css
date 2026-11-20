@@ -2412,3 +2412,47 @@ html.minternet-startup-armed .startup-curtain{
 .startup-curtain-content button:hover{background:#5c4883;}
 .startup-curtain-content button:disabled{opacity:.65;cursor:wait;}
 .startup-curtain-content button[hidden]{display:none!important;}
+
+
+/* Extension settings: one scalable accordion for every installed add-on. */
+.bookmark-settings .extension-settings-collection{display:grid;gap:6px}
+.bookmark-settings .extension-settings-intro,
+.bookmark-settings .extension-settings-note{
+  color:#b0aec7;font-size:10px;line-height:1.5;margin:5px 2px 8px;
+}
+.bookmark-settings .extension-settings-entry{
+  border:1px solid #4a4b70;border-radius:9px;background:#171b30;overflow:hidden;
+}
+.bookmark-settings .extension-settings-entry>summary{
+  list-style:none;display:flex;align-items:center;gap:8px;
+  padding:11px 12px;cursor:pointer;font-size:11px;font-weight:650;color:#eee9ff;
+}
+.bookmark-settings .extension-settings-entry>summary::-webkit-details-marker{display:none}
+.bookmark-settings .extension-settings-entry>summary::after{
+  content:'⌄';margin-left:auto;color:#bdb2d9;transform:rotate(-90deg);transition:transform .16s ease;
+}
+.bookmark-settings .extension-settings-entry[open]>summary::after{transform:none}
+.bookmark-settings .extension-settings-entry>summary:hover{background:#292845}
+.bookmark-settings .extension-settings-entry-body{
+  padding:9px;display:grid;gap:8px;border-top:1px solid #ffffff16;
+}
+.bookmark-settings .extension-settings-subgroup{background:#111729;border-color:#404460}
+.bookmark-settings .extension-settings-subgroup>summary{font-size:10.5px;padding:9px}
+.bookmark-settings .extension-settings-subgroup>.extension-settings-entry-body{gap:9px;padding:10px}
+.bookmark-settings .extension-settings-meta{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:9px;color:#aeabc5}
+.bookmark-settings .extension-settings-meta [data-state="enabled"]{color:#b2ebc5}
+.bookmark-settings .extension-settings-meta [data-state="disabled"]{color:#dfbaba}
+.bookmark-settings .extension-settings-subtitle{font-size:11px;color:#f6eeff;font-weight:700}
+.bookmark-settings .extension-settings-metric{
+  padding:12px 10px;border:1px solid #514c70;border-radius:8px;
+  background:linear-gradient(135deg,#23233e,#181d32);font-size:10px;
+  line-height:1.6;color:#e7d9ff;overflow-wrap:anywhere;
+}
+.bookmark-settings .extension-settings-actions{display:flex;gap:7px;flex-wrap:wrap}
+.bookmark-settings .extension-settings-button{
+  flex:1 1 115px;min-height:32px;padding:8px 10px;cursor:pointer;
+  border:1px solid #665881;border-radius:7px;background:#312b4a;
+  color:#f2e9ff;font-size:10px;font-weight:650;
+}
+.bookmark-settings .extension-settings-button:hover{background:#473860;border-color:#947ac1}
+.bookmark-settings .extension-settings-button:focus-visible{outline:2px solid #c6acff;outline-offset:2px}
