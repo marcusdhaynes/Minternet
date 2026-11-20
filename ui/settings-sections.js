@@ -247,7 +247,7 @@
         holder.details.dataset.extensionKey=group;
         holder.details.open=previousOpen.has(group);
         for(const ext of entries){
-          const label=ext.nativeMediaServer?'Media Library':ext.name;
+          const label=ext.nativeMediaServer?'Media Library':(ext.settingsSection||ext.name);
           const inner=extensionDetails(label,'extension-settings-subgroup',holder.body);
           inner.details.dataset.extensionKey=group+'/'+ext.id;
           inner.details.open=previousOpen.has(group+'/'+ext.id);
@@ -269,15 +269,47 @@
               'Marmaladeum controls libraries, folders, movies, and TV shows. This extension retains the folders and catalog on your computer, independently of browser folder permissions.');
             const metric=document.createElement('div');
             metric.className='extension-settings-metric';
-            metric.textContent=ext.enabled?'Checking local media catalog…':'Enable this extension and restart Minternet to connect.';
+            metric.textContent=ext.enabled?'Checking the saved media catalog…':'Enable this extension and restart Minternet to connect.';
             inner.body.append(metric);
+            const summary=document.createElement('div');
+            summary.className='extension-settings-library-list';
+            inner.body.append(summary);
             if(ext.enabled){
               window.minternet.command('media-library-get').then(catalog=>{
                 if(catalog?.message)throw Error(catalog.message);
                 const videos=catalog?.items?.length||0;
                 const folders=catalog?.folders?.length||0;
-                metric.textContent=videos+' indexed videos · '+folders+' registered folders';
-              }).catch(e=>{metric.textContent='Native media service unavailable: '+String(e?.message||e);});
+                const libraries=catalog?.collections||[];
+                metric.replaceChildren();
+                for(const [label,count] of [['Libraries',libraries.length],
+                  ['Videos',videos],['Folders',folders]]){
+                  const cell=document.createElement('div');
+                  const number=document.createElement('strong');
+                  number.textContent=String(count);
+                  const caption=document.createElement('small');
+                  caption.textContent=label;
+                  cell.append(number,caption);metric.append(cell);
+                }
+                summary.replaceChildren();
+                const head=document.createElement('strong');
+                head.textContent='Saved Libraries';summary.append(head);
+                if(!libraries.length){
+                  extensionNote(summary,'No libraries yet. Open Marmaladeum to create one and choose a media folder.');
+                }else{
+                  for(const lib of libraries.slice(0,20)){
+                    const row=document.createElement('div');row.className='extension-settings-library-row';
+                    const title=document.createElement('span');title.textContent=lib.name;
+                    const folderIds=new Set(lib.folderIds||[]);
+                    const count=(catalog.items||[]).filter(item=>folderIds.has(item.folderId)).length;
+                    const label=document.createElement('small');
+                    label.textContent=count+' videos · '+folderIds.size+' folders';
+                    row.append(title,label);summary.append(row);
+                  }
+                }
+              }).catch(e=>{
+                metric.textContent='Native media service unavailable: '+String(e?.message||e);
+                summary.replaceChildren();
+              });
             }
             const actions=document.createElement('div');
             actions.className='extension-settings-actions';
