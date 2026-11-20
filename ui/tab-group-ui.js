@@ -664,7 +664,8 @@
     else if(hit?.closest('#tabs')){
       const rect=tabStrip.getBoundingClientRect();
       const source=latest.tabs.find(t=>t.id===finished.id);
-      if(source&&!source.pinned&&event.clientX<=rect.left+24){
+      if(source&&!source.pinned&&supertabMembers(finished.id).length===1&&
+         event.clientX<=rect.left+24){
         event.preventDefault();event.stopPropagation();
         void pin(finished.id,true);
       }else dropOutsideGroup(event);
