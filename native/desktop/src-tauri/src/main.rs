@@ -4177,7 +4177,7 @@ fn schedule_wgu_login_autofill(app:&tauri::AppHandle){
                     let state=worker.state::<Mutex<Browser>>();
                     let Ok(browser)=state.lock()else{return};
                     let Some(tab)=browser.active()else{return};
-                    if tab.private||tab.secret_id.is_some()||tab.loading||
+                    if tab.private||tab.tor||tab.secret_id.is_some()||
                        password_vault::origin(&tab.url).is_err(){return;}
                     tab.id
                 };
@@ -4198,7 +4198,8 @@ fn fill_saved_credential_from(app:&tauri::AppHandle,id:u32,manual:bool,
         let browser=app.state::<Mutex<Browser>>();
         let b=browser.lock().map_err(|e|e.to_string())?;
         let tab=b.tabs.iter().find(|t|t.id==id).ok_or("Tab not found")?;
-        (tab.view.clone(),tab.url.clone(),tab.private||tab.secret_id.is_some())
+        (tab.view.clone(),tab.url.clone(),
+            tab.private||tab.tor||tab.secret_id.is_some())
     };
     if private || !vault_section_allowed(app,"logins"){return Ok(false);}
     let Some(label)=label else {return Ok(false)};
@@ -4206,7 +4207,11 @@ fn fill_saved_credential_from(app:&tauri::AppHandle,id:u32,manual:bool,
     let actual=view.url().map_err(|e|e.to_string())?;
     let actual_origin=password_vault::origin(actual.as_str())?;
     let tab_origin=password_vault::origin(&address)?;
-    if actual_origin!=tab_origin{return Ok(false);}
+    if actual_origin!=tab_origin &&
+       !(password_vault::trusted_wgu_origin(&actual_origin)&&
+         password_vault::trusted_wgu_origin(&tab_origin)){
+        return Ok(false);
+    }
     let credential={
         let state=app.state::<Mutex<password_vault::Vault>>();
         let vault=state.lock().map_err(|e|e.to_string())?;
@@ -6485,7 +6490,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
     let required_section=if name.starts_with("vault-card-"){"payments"}
         else if name.starts_with("vault-identity-"){"identities"}
         else if matches!(name.as_str(),"vault-list"|"vault-put"|"vault-edit"|"vault-remove"|
-            "vault-fill"|"vault-associate-login"|"vault-capture-login"){"logins"}
+            "vault-fill"|"vault-wgu-default"|"vault-associate-login"|"vault-capture-login"){"logins"}
         else{""};
     if !required_section.is_empty() && !vault_section_allowed(&app,required_section){
         return Err(format!("Unlock {} to use this section",required_section));
@@ -7168,6 +7173,29 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             // automatically when the encrypted vault is unlocked.
             let id=app.state::<Mutex<Browser>>().lock().map_err(|e|e.to_string())?.active_id;
             return Ok(json!({"ok":true,"filled":fill_saved_credential(&app,id,false,None)?}));
+        }
+        "vault-wgu-default" => {
+            let address=value.get("origin").and_then(Value::as_str)
+                .ok_or("Select a saved WGU website")?;
+            let origin=password_vault::origin(address)?;
+            if !password_vault::trusted_wgu_origin(&origin){
+                return Err("Only verified HTTPS *.wgu.edu addresses can share a WGU login".into());
+            }
+            let username=value.get("username").and_then(Value::as_str)
+                .ok_or("Select a saved WGU username")?;
+            {
+                let state=app.state::<Mutex<password_vault::Vault>>();
+                let mut vault=state.lock().map_err(|e|e.to_string())?;
+                if !vault.prefer_site(&origin,username){
+                    return Err("Choose a saved WGU login with Autofill Automatically enabled".into());
+                }
+                vault.save(&password_vault::file(&app)?)?;
+            }
+            let _=app.emit_to("chrome","minternet:vault-changed",());
+            let id=app.state::<Mutex<Browser>>().lock()
+                .map_err(|e|e.to_string())?.active_id;
+            let _=fill_saved_credential(&app,id,false,None);
+            return Ok(json!({"ok":true}));
         }
         "vault-fill" => {
             let username=value.as_str()

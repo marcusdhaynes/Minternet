@@ -87,6 +87,11 @@
       unit.value=preference.unit;
       amount.disabled=unit.value==='never';
       const save=()=>{
+        // Avoid a surprise instant lock when changing Never -> finite,
+        // because its unused amount was zero. Explicitly typing zero still
+        // requests immediate lock.
+        if(preference.unit==='never'&&unit.value!=='never'&&Number(amount.value)===0)
+          amount.value='1';
         preference=normalize(amount.value,unit.value);
         amount.value=String(preference.amount);unit.value=preference.unit;
         amount.disabled=preference.unit==='never';

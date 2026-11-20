@@ -114,6 +114,23 @@
         if(answer?.filled){close();}
         else report('Cannot fill this page. Check the saved login and sign-in form.');
       });
+      if(isWguOrigin(entry.origin)){
+        const wguDefault=document.createElement('button');
+        wguDefault.type='button';wguDefault.className='vault-wgu-default';
+        wguDefault.textContent=entry.preferred?'WGU Default ✓':'Use For WGU';
+        wguDefault.title='Autofill this saved login on verified WGU websites';
+        wguDefault.disabled=entry.autofill===false;
+        wguDefault.addEventListener('click',async()=>{
+          const result=await invoke('vault-wgu-default',{
+            origin:entry.origin,username:entry.username
+          });
+          if(result?.ok){
+            await list();
+            report('Selected WGU login will autofill on verified WGU sign-in pages while Logins is unlocked.');
+          }
+        });
+        row.append(caption,fill,wguDefault);
+      }else row.append(caption,fill);
       const edit=document.createElement('button');edit.type='button';
       edit.textContent='Edit';edit.className='vault-edit';
       edit.title='Edit this saved login';
@@ -125,7 +142,7 @@
         const result=await invoke('vault-remove',{origin:entry.origin,username:entry.username});
         if(result?.ok)await list();
       });
-      row.append(caption,fill,edit,del);host.append(row);
+      row.append(edit,del);host.append(row);
     }
     if(!visible)host.textContent='No matching logins';
   }

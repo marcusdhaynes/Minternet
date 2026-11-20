@@ -248,3 +248,18 @@ test('no repeated WGU password prompt when optional Windows auto unlock is enabl
   assert.match(script,/token\(el\)\.includes\('email'\)/);
   assert.match(script,/location\.hash/);
 });
+
+test('manual WGU default is native-verified and overrides stale enabled subdomain credentials',()=>{
+  const main=fs.readFileSync(path.join(__dirname,'../native/desktop/src-tauri/src/main.rs'),'utf8');
+  const ui=fs.readFileSync(path.join(__dirname,'../ui/password-ui.js'),'utf8');
+  const vault=file('password_vault.rs');
+  assert.match(main,/"vault-wgu-default" => \{/);
+  assert.match(main,/password_vault::trusted_wgu_origin\(&origin\)/);
+  assert.match(main,/vault\.prefer_site\(&origin,username\)/);
+  assert.match(main,/if actual_origin!=tab_origin &&/);
+  assert.match(main,/password_vault::trusted_wgu_origin\(&actual_origin\)/);
+  assert.match(ui,/isWguOrigin\(entry\.origin\)/);
+  assert.match(ui,/Use For WGU/);
+  assert.match(vault,/entry\.preferred && entry\.autofill/);
+  assert.match(vault,/e\.origin==destination&&!e\.autofill/);
+});

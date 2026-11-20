@@ -170,8 +170,21 @@ impl Vault {
             }
             return self.matching(source,true,username);
         }
-        // An explicitly disabled site must not acquire the credential from
-        // a sibling WGU site via fallback.
+        // A destination's explicit opt-out always takes precedence. A
+        // preferred WGU credential must never override that safety setting.
+        if self.entries.iter().any(|e|e.origin==destination&&!e.autofill){
+            return None;
+        }
+        if trusted_wgu_origin(destination){
+            // The user selects one WGU-wide default in the Logins manager.
+            // It overrides an old, enabled exact-site credential on other
+            // WGU subdomains without ever matching phishing lookalikes.
+            let preferred=self.entries.iter().filter(|entry|
+                entry.preferred && entry.autofill &&
+                trusted_wgu_origin(&entry.origin)).collect::<Vec<_>>();
+            if preferred.len()==1{return Some((*preferred[0]).clone());}
+            if preferred.len()>1{return None;}
+        }
         if self.entries.iter().any(|e|e.origin==destination){
             return self.matching(destination,false,None);
         }
@@ -666,9 +679,11 @@ mod tests {
         assert_eq!(vault.matching_site("https://other.wgu.edu",false,None,None)
             .unwrap().password,"first-secret");
         assert_eq!(vault.matching_site("https://access.wgu.edu",false,None,None)
-            .unwrap().password,"second-secret");
+            .unwrap().password,"first-secret");
         vault.put("https://other.wgu.edu".into(),"student".into(),"disabled".into(),false).unwrap();
         assert!(vault.matching_site("https://other.wgu.edu",false,None,None).is_none());
+        assert_eq!(vault.matching_site("https://access.wgu.edu",false,None,None)
+            .unwrap().password,"first-secret");
         // A user-selected record can fill another verified WGU origin.
         assert_eq!(vault.matching_site("https://other.wgu.edu",true,
             Some("student"),Some("https://my.wgu.edu")).unwrap().password,"first-secret");
