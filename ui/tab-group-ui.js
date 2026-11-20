@@ -116,23 +116,36 @@
     if(!group)return false;
     return updateGroup(id,{collapsed:!group.collapsed,visible:true});
   }
+  function supertabMembers(tabId){
+    const ids=window.MinternetSuperTab?.ordered(latest.splitIds,latest.splitLeft)||[];
+    const live=ids.filter(id=>latest.tabs.some(tab=>tab.id===id));
+    // A supertab is one movable/groupable item, not separate split panes.
+    return live.length>1&&live.includes(tabId)?live:[tabId];
+  }
   function assign(tabId,groupId) {
-    const tab=latest.tabs.find(t=>t.id===tabId);
-    if(tab?.pinned&&groupId) {
-      // Native state confirmation must arrive BEFORE the group assignment,
-      // otherwise a re-render sees pinned=true and detaches it immediately.
-      void api.command('unpin',tabId).then(result=>{
-        if(result?.message){window.minternetToast?.(result.message);return;}
-        model.assign(state,tabId,groupId);
-        // Assigning a dragged pinned tab must not open a collapsed group.
-        // The group's existing collapsed/visible state is a user choice.
-        persist();
-      });
+    const ids=supertabMembers(tabId);
+    if(!ids.every(id=>latest.tabs.some(tab=>tab.id===id)))return false;
+    if(groupId!=null&&!model.get(state,groupId))return false;
+    const pinned=groupId==null?[]:latest.tabs.filter(tab=>ids.includes(tab.id)&&tab.pinned);
+    if(pinned.length){
+      // All native unpins must complete before applying the group atomically.
+      void (async()=>{
+        for(const tab of pinned){
+          try{
+            const response=await api.command('unpin',tab.id);
+            if(response?.ok!==true||response?.message){
+              window.minternetToast?.(response?.message||'Could not unpin a split pane.');
+              return;
+            }
+          }catch{window.minternetToast?.('Could not unpin a split pane.');return;}
+        }
+        if(model.assignMany(state,ids,groupId))persist();
+      })();
       return true;
     }
-    if(!model.assign(state,tabId,groupId))return false;
-    // Dragging onto a group chip or next to one of its tabs only changes
-    // membership. Never expand or unhide the target group as a side effect.
+    if(!model.assignMany(state,ids,groupId))return false;
+    // Group a supertab without expanding/altering the group or replacing its
+    // live pages. A single undo checkpoint captures the complete membership.
     persist();
     return true;
   }
@@ -184,9 +197,10 @@
     if(id===null)return false;
     event.preventDefault();
     event.stopPropagation();
-    const members=model.tabsIn(state,gid,latest.tabs).filter(tab=>tab.id!==id);
+    const ids=supertabMembers(id);
+    const members=model.tabsIn(state,gid,latest.tabs).filter(tab=>!ids.includes(tab.id));
     const last=members[members.length-1];
-    if(last)model.moveRelative(state,id,last.id,true);
+    if(last)model.moveBlockRelative(state,ids,last.id,true);
     clearDropState();
     return assign(id,gid);
   }
@@ -201,7 +215,14 @@
       element.getBoundingClientRect().width/2;
     const targetGroup=model.findTab(state,targetId);
     const source=latest.tabs.find(t=>t.id===id);
-    model.moveRelative(state,id,targetId,after);
+    const moving=supertabMembers(id);
+    const destination=supertabMembers(targetId);
+    if(target.pinned&&moving.length>1){
+      window.minternetToast?.('A SuperTab cannot be pinned as a single tab.');
+      return false;
+    }
+    const anchor=after?destination[destination.length-1]:destination[0];
+    model.moveBlockRelative(state,moving,anchor,after);
     clearDropState();
     // Drag into pinned region pins; drag out into normal region unpins.
     if(target.pinned) {
@@ -347,6 +368,11 @@
     const splitSet=new Set(splitIds);
     const splitTabs=splitIds.map(id=>data.tabs.find(tab=>tab.id===id)).filter(Boolean);
     if(splitTabs.length<2)splitSet.clear();
+    // Only a supertab whose panes all share one group is shown inside it.
+    // Do not display copies of split panes elsewhere in the tab strip.
+    const firstGroup=splitTabs.length>1?model.findTab(state,splitTabs[0].id):null;
+    const splitGroup=firstGroup&&splitTabs.every(tab=>
+      model.findTab(state,tab.id)?.id===firstGroup.id)?firstGroup:null;
     const signature=JSON.stringify([
       data.activeId,data.splitIds||[],Boolean(data.splitLeft),
       data.tabs.map(t=>[t.id,t.title,t.url,t.private,t.pinned,t.loading,t.suspended,t.audioPlaying,t.audioMuted,t.secretTab,t.secretPending,t.syncId,
@@ -360,38 +386,65 @@
     // Save the current slot order so group membership survives native restarts.
     try {const stored=JSON.parse(model.serialize(state));Object.assign(stored,savedTabSlots(data.tabs));const updated=JSON.stringify(stored);if(updated!==lastStoredGroupJson){localStorage.setItem(KEY,updated);lastStoredGroupJson=updated;}}catch{}
     const items=[];
+    let superNode=null;
+    const takeSuper=()=>{
+      if(!superNode){
+        superNode=window.MinternetSuperTab.build(splitTabs,data.activeId,
+          window.minternetRenderSplitIcon,
+          id=>window.minternet?.command('activate',id),
+          (id,point)=>window.minternetMenus?.tab(id,point));
+        attachTabMenu(superNode,splitTabs[0].id);
+      }
+      superNode.classList.remove('group-member');
+      superNode.style.removeProperty('--group-accent');
+      return superNode;
+    };
     // Chrome/Firefox-style pinned tabs precede groups and show no close X.
     for(const tab of model.sortedTabs(state,data.tabs).filter(t=>t.pinned&&!splitSet.has(t.id))){
       if(model.findTab(state,tab.id))model.assign(state,tab.id,null);
       items.push(takeTab(tab,tab.id===data.activeId));
     }
-    if(splitTabs.length>1){
-      items.push(window.MinternetSuperTab.build(splitTabs,data.activeId,
-        window.minternetRenderSplitIcon,
-        id=>window.minternet?.command('activate',id),
-        (id,point)=>window.minternetMenus?.tab(id,point)));
-    }
     for(const g of state.groups){
       if(!g.visible)continue;
-      const members=model.tabsIn(state,g.id,data.tabs)
-        .filter(t=>!t.pinned&&!splitSet.has(t.id));
-      items.push(takeChip(g,members));
+      const allMembers=model.tabsIn(state,g.id,data.tabs).filter(t=>!t.pinned);
+      const members=allMembers.filter(t=>!splitSet.has(t.id));
+      const containsSuper=splitGroup?.id===g.id;
+      // A split supertab counts as one visible group item, regardless of its
+      // two, three or four underlying panes.
+      const visualMembers=containsSuper?[...members,splitTabs[0]]:members;
+      items.push(takeChip(g,visualMembers));
       if(!g.collapsed){
-        for(const tab of members){
+        let placedSuper=false;
+        for(const tab of allMembers){
+          if(splitSet.has(tab.id)){
+            if(containsSuper&&!placedSuper){
+              const node=takeSuper();
+              node.classList.add('group-member');
+              node.style.setProperty('--group-accent',groupColor(g));
+              items.push(node);
+              placedSuper=true;
+            }
+            continue;
+          }
           const item=takeTab(tab,tab.id===data.activeId);
           item.classList.add('group-member');
           item.style.setProperty('--group-accent',groupColor(g));
           items.push(item);
         }
-        // A visible end-cap continues the group's tinted background beyond
-        // its final tab. It is decorative only and never affects tab actions.
-        if(members.length){
-          items.push(takeEndCap(g));
-        }
+        // Decorative end-cap follows the full group, including a supertab.
+        if(visualMembers.length)items.push(takeEndCap(g));
       }
     }
+    let placedUngroupedSuper=false;
     for(const tab of model.sortedTabs(state,data.tabs)){
-      if(tab.pinned||splitSet.has(tab.id)||model.findTab(state,tab.id))continue;
+      if(splitSet.has(tab.id)){
+        if(!splitGroup&&!placedUngroupedSuper){
+          items.push(takeSuper());
+          placedUngroupedSuper=true;
+        }
+        continue;
+      }
+      if(tab.pinned||model.findTab(state,tab.id))continue;
       items.push(takeTab(tab,tab.id===data.activeId));
     }
     // Minimal keyed reconciliation: do not detach and recreate every tab
@@ -574,7 +627,8 @@
       ghost.style.left=Math.round(event.clientX+11)+'px';ghost.style.top=Math.round(event.clientY+9)+'px';
       const top=document.querySelector('.chrome').getBoundingClientRect().bottom;
       const viewport=dropViewport();
-      const overPage=event.clientY>top+6&&event.clientY<=viewport.height &&
+      const overPage=supertabMembers(gesture.id).length===1&&
+        event.clientY>top+6&&event.clientY<=viewport.height &&
         event.clientX>=0&&event.clientX<=viewport.width;
       ghost.classList.toggle('split-drag-preview',overPage);
       if(overPage)updateSplitPreview(event.clientX,event.clientY,top);
@@ -595,7 +649,8 @@
     const groupId=chip?.dataset.groupId;
     const top=document.querySelector('.chrome').getBoundingClientRect().bottom;
     const viewport=dropViewport();
-    if(event.clientY>top+6&&event.clientY<=viewport.height &&
+    if(supertabMembers(finished.id).length===1&&
+       event.clientY>top+6&&event.clientY<=viewport.height &&
        event.clientX>=0&&event.clientX<=viewport.width){
       const x=Math.max(0,Math.min(1,event.clientX/Math.max(viewport.width,1)));
       const y=Math.max(0,Math.min(1,(event.clientY-top)/Math.max(viewport.height-top,1)));
