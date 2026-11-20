@@ -11,8 +11,10 @@ const probeSource=file('login_form_context.js');
 function fakePage({origin='https://access.wgu.edu',route='/pingfed/idp/SSO.saml2',
   username='',password='',accountName='pf.anon',extra=[]}={}){
   class Form {
-    constructor(){this.id='signinForm';this.className='';}
+    constructor(){this.id='signinForm';this.className='';this.submissions=0;this.isConnected=true;}
     getAttribute(name){return name==='action'?route:null;}
+    querySelector(){return null;}
+    requestSubmit(){this.submissions++;}
   }
   const form=new Form(),events=[];
   class Input {
@@ -63,20 +65,29 @@ function fakePage({origin='https://access.wgu.edu',route='/pingfed/idp/SSO.saml2
   doc.defaultView=view;
   for(const input of inputs)input.ownerDocument=doc;
   let scheduled=0,notifyChanges=()=>{},clock=0;
+  const timers=new Map(),store=new Map();
+  view.sessionStorage={
+    getItem(key){return store.get(key)??null;},
+    setItem(key,value){store.set(key,String(value));}
+  };
   const globals={
     window:view,document:doc,
-    location:{protocol:'https:',origin,pathname:route},
+    location:{protocol:'https:',origin,pathname:route,
+      href:origin+route,hostname:new URL(origin).hostname},
+    URL,sessionStorage:view.sessionStorage,
     HTMLInputElement:Input,HTMLFormElement:Form,Event:view.Event,
     MutationObserver:class {
       constructor(callback){notifyChanges=callback;}
       observe(){}
       disconnect(){}
     },
-    setTimeout(){scheduled++;return scheduled;},clearTimeout(){},
+    setTimeout(fn,ms){const id=++scheduled;timers.set(id,{fn,ms});return id;},
+    clearTimeout(id){timers.delete(id);},
     Date:{now(){clock+=120;return clock;}},Set,WeakSet,Math
   };
-  function fill(credentialOrigin='https://access.wgu.edu'){
-    const payload={origin:credentialOrigin,username:'student-name',password:'secret-login'};
+  function fill(credentialOrigin='https://access.wgu.edu',options={}){
+    const payload={origin:credentialOrigin,username:'student-name',
+      password:'secret-login',autoSubmit:options.autoSubmit===true};
     vm.runInNewContext(fillSource.replace('__MINTERNET_LOGIN_PAYLOAD__',JSON.stringify(payload)),
       globals,{filename:'login_autofill.js'});
     return {user,pw,inputs,events};
@@ -93,7 +104,14 @@ function fakePage({origin='https://access.wgu.edu',route='/pingfed/idp/SSO.saml2
     notifyChanges();
     return {user:nextUser,pw:nextPassword};
   }
-  return {user,pw,inputs,events,fill,inspect,doc,replaceLoginFields};
+  function runSubmitTimers(){
+    for(const [id,entry] of [...timers]){
+      if(entry.ms>500)continue;
+      timers.delete(id);entry.fn();
+    }
+  }
+  return {user,pw,inputs,events,fill,inspect,doc,form,replaceLoginFields,
+    runSubmitTimers,getStatus:()=>view.__minternetLoginStatus};
 }
 
 test('WGU/PingFederate sign-on fills unique text username and password even without helpful field names',()=>{
@@ -273,4 +291,40 @@ test('Windows release verifies actual WebView2 login autofill, not only eval sub
   assert.match(native,/eval_with_callback/);
   assert.match(workflow,/Verify actual WebView2 login autofill from a throwaway encrypted native vault/);
   assert.match(workflow,/minternet-autofill-\$\(\$p.Id\)\.ok/);
+});
+
+test('WGU PingFederate sign-on automatically submits once after filling both fields',()=>{
+  const page=fakePage({route:'/pingfed/as/authorization.oauth2'});
+  page.fill('https://access.wgu.edu',{autoSubmit:true});
+  assert.equal(page.user.value,'student-name');
+  assert.equal(page.pw.value,'secret-login');
+  assert.equal(page.form.submissions,0);
+  assert.equal(page.getStatus().usernameFilled,true);
+  assert.equal(page.getStatus().passwordFilled,true);
+  page.runSubmitTimers();
+  assert.equal(page.form.submissions,1);
+  page.fill('https://access.wgu.edu',{autoSubmit:true});
+  page.runSubmitTimers();
+  assert.equal(page.form.submissions,1,'native retry must not resubmit');
+});
+test('no automatic submission on non-WGU origins, non-login WGU routes, or without explicit flag',()=>{
+  for(const [origin,route,enabled] of [
+    ['https://example.com','/pingfed/as/authorization.oauth2',true],
+    ['https://access.wgu.edu','/student/profile',true],
+    ['https://access.wgu.edu','/pingfed/as/authorization.oauth2',false],
+    ['https://access.wgu.edu.evil.example','/pingfed/as/authorization.oauth2',true]
+  ]){
+    const page=fakePage({origin,route});
+    page.fill(origin,{autoSubmit:enabled});page.runSubmitTimers();
+    assert.equal(page.form.submissions,0,origin+route);
+  }
+});
+test('password reset and incomplete forms never auto-submit stored WGU credentials',()=>{
+  const reset=fakePage({route:'/pingfed/forgot-password'});
+  reset.fill('https://access.wgu.edu',{autoSubmit:true});
+  reset.runSubmitTimers();
+  assert.equal(reset.form.submissions,0);
+  const touched=fakePage({route:'/pingfed/as/authorization.oauth2',username:'someone-else'});
+  touched.fill('https://access.wgu.edu',{autoSubmit:true});touched.runSubmitTimers();
+  assert.equal(touched.form.submissions,0);
 });

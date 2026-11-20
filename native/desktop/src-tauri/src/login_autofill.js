@@ -6,6 +6,16 @@
       const credential=__MINTERNET_LOGIN_PAYLOAD__;
       if(location.protocol!=='https:'||location.origin!==credential.origin||
          window!==window.top)return;
+      const isWgu=/^https:\/\/(?:[a-z0-9-]+\.)*wgu\.edu$/i.test(location.origin);
+      // Automatic submission is deliberately limited to the real WGU sign-on
+      // path. Other sites are autofill-only, and every MFA step stays with WGU.
+      const wguSignOn=isWgu&&
+        /^\/(?:pingfed|signin|signon|login|sso|auth)(?:\/|$)/i.test(location.pathname);
+      const submitEnabled=credential.autoSubmit===true&&wguSignOn;
+      const status={usernameFilled:false,passwordFilled:false,submitted:false,waiting:true};
+      window.__minternetLoginStatus=status;
+      const submittedForms=window.__minternetWguSubmittedForms||new WeakSet();
+      window.__minternetWguSubmittedForms=submittedForms;
       // WGU and other SPA sign-in pages sometimes clear an existing input.
       // Recover from website resets, but never undo a real user's edits.
       const marked=window.__minternetFilledLoginInputs||new WeakSet();
@@ -114,7 +124,47 @@
         return form instanceof HTMLFormElement &&
           register.test([form.getAttribute('action')||'',form.id,form.className].join(' '));
       };
-      let done=false,observer=null,delayed=0;
+      let done=false,observer=null,delayed=0,submissionTimer=0;
+      function queueSignOn(form,account,password){
+        if(!submitEnabled||!form||!account||!password||
+           submittedForms.has(form)||userTouched.has(account)||
+           userTouched.has(password)||!marked.has(account)||
+           !marked.has(password))return;
+        // Never automatically send credentials to a cross-origin form action,
+        // even if a WGU page or extension created one.
+        try{
+          const action=new URL(form.getAttribute('action')||location.href,location.href);
+          if(action.protocol!=='https:'||action.origin!==credential.origin)return;
+        }catch{return;}
+        const fieldsInForm=fields().filter(input=>input.form===form);
+        if(fieldsInForm.some(input=>input!==account&&input!==password&&
+            (invalidAccount(input)||token(input).includes('one-time-code'))))return;
+        let previous;
+        try{previous=JSON.parse(sessionStorage.getItem('minternet.wgu.signon.last.v1')||'null');}catch{}
+        if(previous?.path===location.pathname &&
+           Date.now()-Number(previous.at||0)<8000)return;
+        submittedForms.add(form); // No repeated submissions on native retries.
+        submissionTimer=setTimeout(()=>{
+          submissionTimer=0;
+          if(done||!form.isConnected&&form.isConnected!==undefined||
+             account.value!==credential.username||
+             password.value!==credential.password||userTouched.has(account)||
+             userTouched.has(password))return;
+          try{
+            sessionStorage.setItem('minternet.wgu.signon.last.v1',JSON.stringify({
+              path:location.pathname,at:Date.now()
+            }));
+          }catch{}
+          status.submitted=true;
+          // Request a real user-equivalent submit event; do not bypass WGU
+          // handlers/validation or attempt to complete MFA challenges.
+          const submit=form.querySelector?.(
+            'button[type="submit"],input[type="submit"],button:not([type])');
+          if(submit&&!submit.disabled&&typeof submit.click==='function')
+            submit.click();
+          else form.requestSubmit?.();
+        },180);
+      }
       const watchOptions={childList:true,subtree:true,attributes:true,
         attributeFilter:['type','autocomplete','style','class']};
       const stop=()=>{
@@ -127,6 +177,7 @@
         window.removeEventListener('popstate',attempt);
         window.removeEventListener('hashchange',attempt);
         if(delayed)clearTimeout(delayed);
+        if(submissionTimer)clearTimeout(submissionTimer);
         // Avoid retaining the password in a long-lived page closure.
         credential.password='';
         if(window.__minternetLoginJob?.stop===stop)
@@ -159,6 +210,13 @@
           // and other SPAs can replace an already-filled input with a new
           // blank node without issuing a navigation event.
           put(password,credential.password);
+          status.usernameFilled=Boolean(account&&
+            account.value===credential.username);
+          status.passwordFilled=password.value===credential.password;
+          status.waiting=!(status.usernameFilled&&status.passwordFilled);
+          if(status.usernameFilled&&status.passwordFilled){
+            queueSignOn(password.form,account,password);
+          }
           return false;
         }
         // Username-first providers (Google, Microsoft and many SPAs) show
