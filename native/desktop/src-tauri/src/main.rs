@@ -69,6 +69,10 @@ struct BrowserPreferences {
     tab_limit:usize,
     #[serde(default="default_miniplayer_fade_seconds")]
     miniplayer_fade_seconds:u16,
+    // Import existing normal-profile sign-in cookies into fresh, isolated
+    // Private Tabs. No private cookies or browsing data flow back to normal.
+    #[serde(default="default_private_login_sharing")]
+    private_login_sharing:bool,
     #[serde(default)]
     download_folder:Option<String>,
     #[serde(default)]
@@ -78,6 +82,7 @@ struct BrowserPreferences {
 }
 fn default_new_tab_mode()->String{"dashboard".into()}
 fn default_miniplayer_fade_seconds()->u16{5}
+fn default_private_login_sharing()->bool{true}
 fn default_download_mode()->String{"automatic".into()}
 fn valid_download_mode(mode:&str)->bool{matches!(mode,"automatic"|"ask")}
 fn valid_new_tab_mode(value:&str)->bool{matches!(value,"dashboard"|"website")}
@@ -85,6 +90,7 @@ impl Default for BrowserPreferences{
     fn default()->Self{
         Self{homepage:DEFAULT_HOMEPAGE.into(),new_tab_mode:default_new_tab_mode(),tab_limit:0,
             miniplayer_fade_seconds:default_miniplayer_fade_seconds(),
+            private_login_sharing:default_private_login_sharing(),
             download_folder:None,previous_download_folders:Vec::new(),download_mode:default_download_mode()}
     }
 }
@@ -112,6 +118,7 @@ mod tab_limit_tests {
     fn unlimited_and_positive_limits(){
         assert_eq!(BrowserPreferences::default().tab_limit,0);
         assert_eq!(BrowserPreferences::default().miniplayer_fade_seconds,5);
+        assert!(BrowserPreferences::default().private_login_sharing);
         assert!(has_tab_capacity(35,1,0));
         assert!(has_tab_capacity(999,1000,0));
         assert!(has_tab_capacity(34,1,35));
@@ -131,6 +138,7 @@ mod tab_limit_tests {
         let prefs:BrowserPreferences=serde_json::from_str(old).unwrap();
         assert_eq!(prefs.tab_limit,0);
         assert_eq!(prefs.miniplayer_fade_seconds,5);
+        assert!(prefs.private_login_sharing);
     }
 }
 fn preferences_file(app:&tauri::AppHandle)->Result<PathBuf,String>{
@@ -6685,6 +6693,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             let new_tab_mode=prefs.new_tab_mode.clone();
             let tab_limit=prefs.tab_limit;
             let fade_seconds=prefs.miniplayer_fade_seconds;
+            let private_login_sharing=prefs.private_login_sharing;
             let system=prefs.download_folder.is_none();
             let download_mode=prefs.download_mode.clone();
             drop(prefs);
@@ -6694,10 +6703,23 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 "newTabMode":new_tab_mode,
                 "tabLimit":tab_limit,
                 "miniplayerFadeSeconds":fade_seconds,
+                "privateLoginSharing":private_login_sharing,
                 "downloadFolder":destination.to_string_lossy(),
                 "usingSystemDownloads":system,
                 "downloadMode":download_mode
             }));
+        }
+        "private-login-sharing-set" => {
+            let enabled=value.as_bool().ok_or("Expected a true/false Private Tab setting")?;
+            let state=app.state::<BrowserPreferenceState>();
+            let mut prefs=state.0.lock().map_err(|e|e.to_string())?;
+            let mut updated=prefs.clone();
+            updated.private_login_sharing=enabled;
+            persist_preferences(&app,&updated)?;
+            *prefs=updated;
+            // Existing Private Tabs retain their current in-memory sessions;
+            // the toggle controls newly opened Private Tabs only.
+            return Ok(json!({"ok":true,"privateLoginSharing":enabled}));
         }
         "miniplayer-fade-set" => {
             let requested=value.as_u64()
