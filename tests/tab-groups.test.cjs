@@ -107,7 +107,7 @@ test('native resize keeps existing pages alive and coalesces redundant WebView u
 test('dropping a tab into a collapsed group preserves the user-selected collapse state',()=>{
  const ui=require('node:fs').readFileSync(require('node:path').join(__dirname,'../ui/tab-group-ui.js'),'utf8');
  const assignBlock=ui.slice(ui.indexOf('function assign(tabId,groupId)'),ui.indexOf('function ungroup(tabId)'));
- assert.match(assignBlock,/model\.assign\(state,tabId,groupId\)/);
+ assert.match(assignBlock,/model\.assignMany\(state,ids,groupId\)/);
  assert.doesNotMatch(assignBlock,/\.collapsed\s*=\s*false|\.visible\s*=\s*true/);
  assert.match(ui,/function dropIntoGroup\(event,gid\)/);
  assert.match(ui,/return assign\(id,gid\);/);
