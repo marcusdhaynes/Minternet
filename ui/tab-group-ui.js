@@ -591,9 +591,13 @@
     if(!gesture||event.pointerId!==gesture.pointerId)return;
     if(!gesture.active){
       const distance=Math.hypot(event.clientX-gesture.x,event.clientY-gesture.y);
-      // Prevent accidental reorder while moving to open a tab's context menu.
-      // A deliberate >20px drag still begins immediately.
-      if(distance<12||(distance<20&&performance.now()-gesture.started<125))return;
+      // Supertabs are narrow icon clusters: require only a small, deliberate
+      // movement to start dragging from any pane. Regular tabs retain their
+      // longer resistance to protect normal clicking/context menus.
+      const supertab=supertabMembers(gesture.id).length>1;
+      const minimum=supertab?6:12, deliberate=supertab?10:20;
+      const grace=supertab?90:125;
+      if(distance<minimum||(distance<deliberate&&performance.now()-gesture.started<grace))return;
       gesture.active=true;
       draggingTabId=gesture.id;
       createGhost(gesture.id);
