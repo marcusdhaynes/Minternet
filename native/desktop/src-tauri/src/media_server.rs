@@ -1,12 +1,35 @@
 //! Minternet local-only media server. Binds loopback, token-gated, never exposes paths.
 //! Intended exclusively for the explicitly supported Marmaladeum origins.
-use std::{io::{Read,Write},net::{TcpListener,TcpStream},sync::OnceLock,thread,time::Duration,path::Path};
+use std::{io::{Read,Write},net::{TcpListener,TcpStream},sync::{OnceLock,Mutex},
+    collections::HashMap,thread,time::Duration,path::Path};
 use serde_json::{json,Value};
 use rand::{rngs::OsRng,RngCore};
 use tauri::Manager;
 
 const PORT:u16=18761;
 static SECRET:OnceLock<String>=OnceLock::new();
+// Pickers complete asynchronously on the native UI side. A per-request status
+// replaces guessing whether a library count increment happened between fetches.
+static PICKERS:OnceLock<Mutex<HashMap<String,Value>>>=OnceLock::new();
+fn pickers()->&'static Mutex<HashMap<String,Value>>{
+    PICKERS.get_or_init(||Mutex::new(HashMap::new()))
+}
+fn valid_request_id(id:&str)->bool{
+    (8..=80).contains(&id.len())&&id.bytes().all(|c|c.is_ascii_alphanumeric()||c==b'-')
+}
+pub fn begin_picker(id:&str){
+    if !valid_request_id(id){return;}
+    if let Ok(mut statuses)=pickers().lock(){
+        if statuses.len()>=100{statuses.clear();}
+        statuses.insert(id.into(),json!({"state":"pending"}));
+    }
+}
+pub fn finish_picker(id:&str,state:&str,message:&str){
+    if !valid_request_id(id){return;}
+    if let Ok(mut statuses)=pickers().lock(){
+        statuses.insert(id.into(),json!({"state":state,"message":message}));
+    }
+}
 fn token()->&'static str {
     SECRET.get_or_init(||{
         let mut bytes=[0u8;32]; OsRng.fill_bytes(&mut bytes);
@@ -83,6 +106,21 @@ fn handle(mut stream:TcpStream,app:&tauri::AppHandle){
     let (path,query)=target.split_once('?').unwrap_or((target,""));
     if !query.split('&').any(|p|p.strip_prefix("key=")==Some(token())){
         reply(&mut stream,"403 Forbidden","text/plain",b"Forbidden","",origin);return;
+    }
+    if path=="/picker"&&method=="GET"{
+        let id=query.split('&').find_map(|p|p.strip_prefix("requestId=")).unwrap_or("");
+        let value=if valid_request_id(id) {
+            pickers().lock().ok().and_then(|mut map|{
+                let result=map.get(id).cloned();
+                if result.as_ref().and_then(|v|v.get("state")).and_then(Value::as_str)
+                    .is_some_and(|state|state!="pending"){map.remove(id);}
+                result
+            })
+        }else{None};
+        let result=value.unwrap_or_else(||json!({"state":"unknown"}));
+        let bytes=result.to_string();
+        reply(&mut stream,"200 OK","application/json",bytes.as_bytes(),"",origin);
+        return;
     }
     let state=app.state::<std::sync::Mutex<super::media_library::MediaLibrary>>();
     let Ok(mut lib)=state.lock() else{return};
@@ -281,21 +319,26 @@ pub fn bridge_script()->String {
           await manage('updateItem',{libraryId,itemId,changes});return true;
         },
         addFolder:({libraryId,name,kind}={})=>{
-          // The popup must be synchronous within the actual Add Folder click.
-          // The native handler creates a named library only after user picks a folder.
-          const beforeRequest=getCatalog();
-          const query=new URLSearchParams({libraryId:libraryId||'',name:name||'',kind:kind||'movie'});
+          const requestId=(crypto.randomUUID?.()||Math.random().toString(36).slice(2)+Date.now());
+          const query=new URLSearchParams({
+            libraryId:libraryId||'',name:name||'',kind:kind||'movie',requestId
+          });
+          // Request Minternet's native directory picker before any await.
           window.open('https://minternet-media.invalid/__add?'+query,'_blank');
           return (async()=>{
-            const before=await beforeRequest;
-            const count=(before.libraries||[]).reduce((n,l)=>n+(l.folders||[]).length,0);
-            for(let attempt=0;attempt<300;attempt++){
-              await new Promise(resolve=>setTimeout(resolve,400));
-              const current=await getCatalog();
-              const newCount=(current.libraries||[]).reduce((n,l)=>n+(l.folders||[]).length,0);
-              if(newCount>count)return current;
+            let unknown=0;
+            for(let attempt=0;attempt<450;attempt++){
+              await new Promise(resolve=>setTimeout(resolve,300));
+              const response=await fetch(base+'/picker?key='+key+'&requestId='+requestId,{cache:'no-store'});
+              if(!response.ok)throw Error('Could not verify native folder picker');
+              const result=await response.json();
+              if(result.state==='success')return getCatalog();
+              if(result.state==='cancelled')throw Error('Folder selection cancelled. No files were changed.');
+              if(result.state==='error')throw Error(result.message||'Native folder import failed');
+              if(result.state==='unknown'&&++unknown>=12)
+                throw Error('Minternet did not open the native folder picker. Update/restart the browser and try again.');
             }
-            throw Error('Folder not added. Selection may have been cancelled.');
+            throw Error('Folder selection did not finish. Check Minternet and retry.');
           })();
         }
       });
