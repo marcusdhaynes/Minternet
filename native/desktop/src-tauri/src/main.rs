@@ -4781,7 +4781,7 @@ fn defer_private_first_navigation(app:&tauri::AppHandle,id:u32,
         // ones), but never read from a Tor, Secret or Private Tab.
         let labels=browser.tabs.iter().filter(|tab|
             !tab.private&&!tab.tor&&tab.secret_id.is_none())
-            .filter_map(|tab|tab.view.clone()).collect::<Vec<_>>();
+            .filter_map(|tab|tab.view.clone()).take(1).collect::<Vec<_>>();
         (eligible,labels)
     };
     if !is_private{return Ok(false);}
@@ -7885,9 +7885,11 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                     .find(|t|t.id==*id && t.view.is_none() && t.url!=HOME)
                     .map(|t|(t.id,t.url.clone(),t.private))).collect::<Vec<_>>()
             };
-            for (id,url,private) in missing {
+            for (id,url,_private) in missing {
                 let address=tauri::Url::parse(&url).map_err(|e|e.to_string())?;
-                create_webview(&app,id,WebviewUrl::External(address),private)?;
+                // Even split-pane restoration must finish a Private Tab's
+                // cookie import before its first remote request.
+                navigate_tab(&app,id,Some(address),false)?;
             }
             {
                 let state=app.state::<Mutex<Browser>>();
