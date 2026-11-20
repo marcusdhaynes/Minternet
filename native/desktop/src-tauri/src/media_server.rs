@@ -42,7 +42,7 @@ fn allowed(origin:&str)->bool {
     origin=="https://marcusdhaynes.github.io"
 }
 fn cors(origin:&str)->String {
-    if allowed(origin){format!("Access-Control-Allow-Origin: {origin}\r\nVary: Origin\r\nAccess-Control-Allow-Private-Network: true\r\n")}
+    if allowed(origin){format!("Access-Control-Allow-Origin: {origin}\r\nVary: Origin\r\nAccess-Control-Allow-Private-Network: true\r\nAccess-Control-Expose-Headers: Content-Range, Content-Length, Accept-Ranges\r\n")}
     else {String::new()}
 }
 fn reply(stream:&mut TcpStream,status:&str,content_type:&str,body:&[u8],extra:&str,origin:&str) {
