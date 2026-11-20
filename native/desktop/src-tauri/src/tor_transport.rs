@@ -15,6 +15,9 @@ struct TabProxy {
     shutdown: tokio::sync::watch::Sender<bool>,
 }
 static CLIENT: tokio::sync::OnceCell<Arc<Client>> = tokio::sync::OnceCell::const_new();
+// Serializes reconnection so competing Tor navigation commands cannot replace
+// a just-created SOCKS port and strand the already-configured WebView2.
+static PREPARE_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new();
 static PROXIES: OnceLock<Mutex<HashMap<u32,TabProxy>>> = OnceLock::new();
 static SESSION_TAG: OnceLock<String> = OnceLock::new();
 
@@ -83,7 +86,9 @@ pub fn status()->serde_json::Value{
     }).unwrap_or((false,0));
     serde_json::json!({"embedded":true,"bootstrapped":ready,
         "bootstrapProgressPercent":progress.min(100),
-        "activeTabs":count,"browserHardening":"partial",
+        "activeTabs":count,
+        "connectionState":if ready && count>0 {"connected"} else if ready {"ready"} else if CLIENT.get().is_some() {"disconnected"} else {"not-started"},
+        "browserHardening":"partial",
         "warning":"Arti readiness is not proof of browser anonymity, DNS leak resistance or Tor Browser fingerprint protection."})
 }
 
@@ -94,16 +99,28 @@ pub async fn prepare(id:u32)->Result<(),String>{
     return Err("Native Tor tabs are not enabled on this platform".into());
     #[cfg(any(windows,target_os="linux"))]
     {
-        {
-            let state=proxies().lock().map_err(|e|e.to_string())?;
-            if state.get(&id).is_some_and(|p|!p.task.is_finished()){return Ok(());}
-        }
+        let _prepare_guard=PREPARE_GATE.lock().await;
         let client=CLIENT.get_or_try_init(||async{
             tokio::time::timeout(Duration::from_secs(150),
                 TorClient::create_bootstrapped(TorClientConfig::default()))
                 .await.map_err(|_|"Tor bootstrap timed out (no direct browsing fallback)".to_string())?
                 .map_err(|e|format!("Tor bootstrap failed: {e}"))
         }).await?;
+        // A Tor client can lose network readiness after its first bootstrap.
+        // Recover the same authenticated Arti client before reusing/creating
+        // a SOCKS listener. Never fall back to the OS network.
+        if !client.bootstrap_status().ready_for_traffic(){
+            tokio::time::timeout(Duration::from_secs(150),client.bootstrap())
+                .await.map_err(|_|"Tor reconnection timed out; no direct connection allowed".to_string())?
+                .map_err(|e|format!("Tor reconnection failed: {e}"))?;
+            if !client.bootstrap_status().ready_for_traffic(){
+                return Err("Tor network is still not ready; browsing remains blocked".into());
+            }
+        }
+        {
+            let state=proxies().lock().map_err(|e|e.to_string())?;
+            if state.get(&id).is_some_and(|p|!p.task.is_finished()){return Ok(());}
+        }
         let isolated=client.isolated_client();
         // The OS chooses an unused ephemeral port. A unique SOCKS listener
         // plus Arti isolated_client prevents cross-tab circuit reuse.
@@ -120,7 +137,12 @@ pub async fn prepare(id:u32)->Result<(),String>{
                         if changed.is_err() || *listening.borrow(){break;}
                     }
                     incoming=listener.accept()=>{
-                        let Ok((socket,peer))=incoming else{break;};
+                        let Ok((socket,peer))=incoming else{
+                            // A temporary accept error must not silently kill
+                            // the proxy listener and orphan the Tor tab.
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                            continue;
+                        };
                         if !peer.ip().is_loopback(){continue;}
                         let client=isolated.clone();
                         let mut session_shutdown=listening.clone();
