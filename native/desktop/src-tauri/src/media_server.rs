@@ -353,6 +353,9 @@ mod tests {
     fn only_approved_media_origins_receive_cors() {
         assert!(allowed("https://marmaladeum.com"));
         assert!(allowed("https://marcusdhaynes.github.io"));
+        assert!(cors("https://marmaladeum.com").contains(
+            "Access-Control-Expose-Headers: Content-Range, Content-Length, Accept-Ranges"));
+        assert!(cors("https://marmaladeum.com").contains("Access-Control-Allow-Private-Network: true"));
         assert!(!allowed("https://example.com"));
         assert!(!allowed("http://marmaladeum.com"));
     }
