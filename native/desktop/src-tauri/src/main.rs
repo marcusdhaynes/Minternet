@@ -3344,27 +3344,34 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                         .map(|(_,v)|v.to_string()).unwrap_or_default();
                     let kind=url.query_pairs().find(|(k,_)|k=="kind")
                         .map(|(_,v)|v.to_string()).unwrap_or_else(||"movie".into());
+                    let request_id=url.query_pairs().find(|(k,_)|k=="requestId")
+                        .map(|(_,v)|v.to_string()).unwrap_or_default();
+                    media_server::begin_picker(&request_id);
                     let app=for_popup.clone();
                     std::thread::spawn(move||{
                         let picked=app.dialog().file()
                             .set_title("Choose Marmaladeum Media Folder")
                             .blocking_pick_folder();
-                        if let Some(folder)=picked {
-                            if let Ok(path)=folder.into_path(){
-                                let state=app.state::<Mutex<media_library::MediaLibrary>>();
-                                if let Ok(mut library)=state.lock(){
-                                    let target=if library_id.is_empty(){
-                                        library.create_or_update_collection(None,&proposed_name,&kind)
-                                    }else if library.collections.iter().any(|l|l.id==library_id){
-                                        Ok(library_id)
-                                    }else{Err("Selected media library not found".into())};
-                                    if let Ok(id)=target {
-                                        if library.add_folder_to(&path.to_string_lossy(),&id).is_ok(){
-                                            let _=library.save(&app);
-                                        }
-                                    }
-                                }
-                            }
+                        let Some(folder)=picked else{
+                            media_server::finish_picker(&request_id,"cancelled","No folder chosen");
+                            return;
+                        };
+                        let result=(||->Result<(),String>{
+                            let path=folder.into_path().map_err(|e|e.to_string())?;
+                            let state=app.state::<Mutex<media_library::MediaLibrary>>();
+                            let mut library=state.lock().map_err(|e|e.to_string())?;
+                            let target=if library_id.is_empty(){
+                                library.create_or_update_collection(None,&proposed_name,&kind)?
+                            }else if library.collections.iter().any(|l|l.id==library_id){
+                                library_id
+                            }else{return Err("Selected media library was not found".into())};
+                            library.add_folder_to(&path.to_string_lossy(),&target)?;
+                            library.save(&app)?;
+                            Ok(())
+                        })();
+                        match result{
+                            Ok(())=>media_server::finish_picker(&request_id,"success","Folder indexed"),
+                            Err(error)=>media_server::finish_picker(&request_id,"error",&error),
                         }
                     });
                 }
