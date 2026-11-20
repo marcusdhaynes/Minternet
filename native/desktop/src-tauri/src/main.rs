@@ -3321,7 +3321,8 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
             }
         })
         .on_new_window(move |url, _features| {
-            if url.as_str()=="https://minternet-media.invalid/__add" {
+            if url.scheme()=="https" && url.host_str()==Some("minternet-media.invalid")
+                && url.path()=="/__add" {
                 // Sites can only request media folders from a pre-approved origin.
                 // The native picker never accepts web-provided filesystem paths.
                 let allowed=for_popup.state::<Mutex<Browser>>().lock().ok()
@@ -3337,17 +3338,32 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                         )
                     });
                 if allowed && extensions::media_server_enabled(&for_popup) {
+                    let library_id=url.query_pairs().find(|(k,_)|k=="libraryId")
+                        .map(|(_,v)|v.to_string()).unwrap_or_default();
+                    let proposed_name=url.query_pairs().find(|(k,_)|k=="name")
+                        .map(|(_,v)|v.to_string()).unwrap_or_default();
+                    let kind=url.query_pairs().find(|(k,_)|k=="kind")
+                        .map(|(_,v)|v.to_string()).unwrap_or_else(||"movie".into());
                     let app=for_popup.clone();
                     std::thread::spawn(move||{
                         let picked=app.dialog().file()
-                            .set_title("Add Folder to Minternet Media Server")
+                            .set_title("Choose Marmaladeum Media Folder")
                             .blocking_pick_folder();
-                        if let Some(folder)=picked{
+                        if let Some(folder)=picked {
                             if let Ok(path)=folder.into_path(){
-                                let _=media_library::action(
-                                    &app,"media-library-add-folder",
-                                    &json!({"path":path.to_string_lossy()})
-                                );
+                                let state=app.state::<Mutex<media_library::MediaLibrary>>();
+                                if let Ok(mut library)=state.lock(){
+                                    let target=if library_id.is_empty(){
+                                        library.create_or_update_collection(None,&proposed_name,&kind)
+                                    }else if library.collections.iter().any(|l|l.id==library_id){
+                                        Ok(library_id)
+                                    }else{Err("Selected media library not found".into())};
+                                    if let Ok(id)=target {
+                                        if library.add_folder_to(&path.to_string_lossy(),&id).is_ok(){
+                                            let _=library.save(&app);
+                                        }
+                                    }
+                                }
                             }
                         }
                     });
@@ -5483,11 +5499,11 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         schedule_surface_restore(&app);
         return Ok(json!({"ok":true}));
     }
-    if matches!(name.as_str(),"media-library-get"|"media-library-add-folder"|"media-library-remove-folder"|"media-library-rescan"|"media-library-choose-folder")
+    if matches!(name.as_str(),"media-library-get"|"media-library-add-folder"|"media-library-remove-folder"|"media-library-rescan"|"media-library-library-save"|"media-library-library-delete"|"media-library-item-update"|"media-library-choose-folder")
         && !extensions::media_server_enabled(&app){
         return Err("Install and enable Marmaladeum Media Server.mext in Minternet Extensions, then restart.".into());
     }
-    if matches!(name.as_str(),"media-library-get"|"media-library-add-folder"|"media-library-remove-folder"|"media-library-rescan"){
+    if matches!(name.as_str(),"media-library-get"|"media-library-add-folder"|"media-library-remove-folder"|"media-library-rescan"|"media-library-library-save"|"media-library-library-delete"|"media-library-item-update"){
         return media_library::action(&app,&name,&value);
     }
     if name=="media-library-choose-folder" {
