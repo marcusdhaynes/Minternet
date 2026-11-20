@@ -4126,6 +4126,10 @@ fn schedule_wgu_login_autofill(app:&tauri::AppHandle){
 }
 
 fn fill_saved_credential(app:&tauri::AppHandle,id:u32,manual:bool,username:Option<&str>)->Result<bool,String>{
+    fill_saved_credential_from(app,id,manual,username,None)
+}
+fn fill_saved_credential_from(app:&tauri::AppHandle,id:u32,manual:bool,
+    username:Option<&str>,source_origin:Option<&str>)->Result<bool,String>{
     let (label,address,private)={
         let browser=app.state::<Mutex<Browser>>();
         let b=browser.lock().map_err(|e|e.to_string())?;
@@ -4142,15 +4146,9 @@ fn fill_saved_credential(app:&tauri::AppHandle,id:u32,manual:bool,username:Optio
     let credential={
         let state=app.state::<Mutex<password_vault::Vault>>();
         let vault=state.lock().map_err(|e|e.to_string())?;
-        // WGU portal and its PingFederate sign-on service are the SAME
-        // institution on two explicitly allowlisted HTTPS origins. Prefer a
-        // directly saved SSO credential; when absent, fill the unique portal
-        // credential automatically. No popup or one-time pairing required.
-        vault.matching(&actual_origin,manual,username).or_else(||{
-            if !manual && actual_origin=="https://access.wgu.edu" {
-                vault.matching("https://my.wgu.edu",false,None)
-            }else{None}
-        })
+        // The active WebView's true HTTPS origin is checked before choosing
+        // an exact-site credential or an unambiguous trusted WGU login.
+        vault.matching_site(&actual_origin,manual,username,source_origin)
     };
     let Some(mut entry)=credential else {return Ok(false)};
     let data=serde_json::json!({"origin":actual_origin,"username":entry.username,"password":entry.password});
@@ -6306,7 +6304,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
     // native section. This is enforced here, not merely by hiding UI buttons.
     let required_section=if name.starts_with("vault-card-"){"payments"}
         else if name.starts_with("vault-identity-"){"identities"}
-        else if matches!(name.as_str(),"vault-list"|"vault-put"|"vault-remove"|
+        else if matches!(name.as_str(),"vault-list"|"vault-put"|"vault-edit"|"vault-remove"|
             "vault-fill"|"vault-associate-login"|"vault-capture-login"){"logins"}
         else{""};
     if !required_section.is_empty() && !vault_section_allowed(&app,required_section){
@@ -6893,13 +6891,36 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             let username=value.get("username").and_then(Value::as_str).ok_or("Missing username")?;
             let password=value.get("password").and_then(Value::as_str).ok_or("Missing password")?;
             let autofill=value.get("autofill").and_then(Value::as_bool).unwrap_or(true);
-            let state=app.state::<Mutex<password_vault::Vault>>();
-            let mut vault=state.lock().map_err(|e|e.to_string())?;
-            vault.put(origin,username.to_string(),password.to_string(),autofill)?;
-            vault.save(&password_vault::file(&app)?)?;
+            {
+                let state=app.state::<Mutex<password_vault::Vault>>();
+                let mut vault=state.lock().map_err(|e|e.to_string())?;
+                vault.put(origin,username.to_string(),password.to_string(),autofill)?;
+                vault.save(&password_vault::file(&app)?)?;
+            } // Release the vault mutex before any autofill attempt.
             let _=app.emit_to("chrome","minternet:vault-changed",());
             let active=app.state::<Mutex<Browser>>().lock()
                 .map_err(|e|e.to_string())?.active_id;
+            let _=fill_saved_credential(&app,active,false,None);
+            return Ok(json!({"ok":true}));
+        }
+        "vault-edit" => {
+            let old_url=value.get("oldOrigin").and_then(Value::as_str).ok_or("Missing original website")?;
+            let old_origin=password_vault::origin(old_url)?;
+            let old_username=value.get("oldUsername").and_then(Value::as_str).ok_or("Missing original username")?;
+            let url=value.get("origin").and_then(Value::as_str).ok_or("Missing website")?;
+            let origin=password_vault::origin(url)?;
+            let username=value.get("username").and_then(Value::as_str).ok_or("Missing username")?;
+            let password=value.get("password").and_then(Value::as_str)
+                .filter(|value|!value.is_empty()).map(str::to_owned);
+            let autofill=value.get("autofill").and_then(Value::as_bool).unwrap_or(true);
+            {
+                let state=app.state::<Mutex<password_vault::Vault>>();
+                let mut vault=state.lock().map_err(|e|e.to_string())?;
+                vault.edit_login(&old_origin,old_username,origin,username.to_string(),password,autofill)?;
+                vault.save(&password_vault::file(&app)?)?;
+            }
+            let _=app.emit_to("chrome","minternet:vault-changed",());
+            let active=app.state::<Mutex<Browser>>().lock().map_err(|e|e.to_string())?.active_id;
             let _=fill_saved_credential(&app,active,false,None);
             return Ok(json!({"ok":true}));
         }
@@ -6954,19 +6975,24 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             return Ok(json!({"ok":true,"filled":fill_saved_credential(&app,id,false,None)?}));
         }
         "vault-fill" => {
-            let username=value.as_str().ok_or("Choose a saved username")?;
+            let username=value.as_str()
+                .or_else(||value.get("username").and_then(Value::as_str))
+                .ok_or("Choose a saved username")?;
+            let selected=value.get("origin").and_then(Value::as_str)
+                .map(password_vault::origin).transpose()?;
             let id=app.state::<Mutex<Browser>>().lock().map_err(|e|e.to_string())?.active_id;
-            let filled=fill_saved_credential(&app,id,true,Some(username))?;
+            let filled=fill_saved_credential_from(&app,id,true,Some(username),selected.as_deref())?;
             if filled{
-                let origin={
+                let destination={
                     let state=app.state::<Mutex<Browser>>();
                     let browser=state.lock().map_err(|e|e.to_string())?;
                     let tab=browser.active().ok_or("No active tab")?;
                     password_vault::origin(&tab.url)?
                 };
+                let origin=selected.as_deref().unwrap_or(&destination);
                 let state=app.state::<Mutex<password_vault::Vault>>();
                 let mut vault=state.lock().map_err(|e|e.to_string())?;
-                if vault.prefer(&origin,username){
+                if vault.prefer_site(origin,username){
                     vault.save(&password_vault::file(&app)?)?;
                 }
             }
