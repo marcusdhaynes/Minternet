@@ -38,7 +38,17 @@ fn handle(mut stream:TcpStream,app:&tauri::AppHandle){
     let _=stream.set_write_timeout(Some(Duration::from_secs(25)));
     let mut buf=[0u8;16384];
     let Ok(size)=stream.read(&mut buf) else{return};
-    let request=String::from_utf8_lossy(&buf[..size]);
+    if size==0{return;}
+    let mut request_bytes=buf[..size].to_vec();
+    let mut header_end=request_bytes.windows(4).position(|w|w==b"\r\n\r\n");
+    while header_end.is_none()&&request_bytes.len()<16384 {
+        let Ok(n)=stream.read(&mut buf) else{return};
+        if n==0{return;}
+        request_bytes.extend_from_slice(&buf[..n]);
+        header_end=request_bytes.windows(4).position(|w|w==b"\r\n\r\n");
+    }
+    let Some(end)=header_end else{return};
+    let request=String::from_utf8_lossy(&request_bytes[..end]);
     let mut lines=request.split("\r\n");
     let Some(first)=lines.next() else{return};
     let mut pieces=first.split_whitespace();
@@ -46,19 +56,23 @@ fn handle(mut stream:TcpStream,app:&tauri::AppHandle){
     let target=pieces.next().unwrap_or("");
     let mut origin="";
     let mut range="";
+    let mut content_length=0usize;
     for line in lines {
         if line.is_empty(){break;}
         if let Some(v)=line.strip_prefix("Origin: "){origin=v.trim();}
         if let Some(v)=line.strip_prefix("Range: "){range=v.trim();}
+        if let Some(v)=line.strip_prefix("Content-Length: "){
+            content_length=v.trim().parse().unwrap_or(usize::MAX);
+        }
     }
     if method=="OPTIONS" {
         if allowed(origin){
             reply(&mut stream,"204 No Content","text/plain",&[],
-                "Access-Control-Allow-Methods: GET, OPTIONS\r\nAccess-Control-Allow-Headers: Range\r\nAccess-Control-Max-Age: 600\r\n",origin);
+                "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Range, Content-Type\r\nAccess-Control-Max-Age: 600\r\n",origin);
         }else{reply(&mut stream,"403 Forbidden","text/plain",b"Forbidden","",origin);}
         return;
     }
-    if method!="GET" || (!origin.is_empty()&&!allowed(origin)){
+    if !matches!(method,"GET"|"POST") || !allowed(origin){
         reply(&mut stream,"403 Forbidden","text/plain",b"Forbidden","",origin);return;
     }
     let (path,query)=target.split_once('?').unwrap_or((target,""));
@@ -67,6 +81,72 @@ fn handle(mut stream:TcpStream,app:&tauri::AppHandle){
     }
     let state=app.state::<std::sync::Mutex<super::media_library::MediaLibrary>>();
     let Ok(mut lib)=state.lock() else{return};
+    // All mutations require an explicit CORS-approved POST plus an unguessable
+    // in-process token. Page JavaScript can never pass arbitrary file paths.
+    if method=="POST" && path=="/manage" {
+        if content_length==0||content_length>48*1024 {
+            reply(&mut stream,"413 Payload Too Large","text/plain",b"Invalid request","",origin);return;
+        }
+        let mut body=request_bytes[end+4..].to_vec();
+        while body.len()<content_length {
+            let need=(content_length-body.len()).min(buf.len());
+            let Ok(n)=stream.read(&mut buf[..need]) else{return};
+            if n==0{return;}
+            body.extend_from_slice(&buf[..n]);
+        }
+        let Ok(payload)=serde_json::from_slice::<Value>(&body[..content_length]) else{
+            reply(&mut stream,"400 Bad Request","text/plain",b"Malformed JSON","",origin);return;
+        };
+        let action=payload.get("action").and_then(Value::as_str).unwrap_or("");
+        let result:Result<Value,String>=(||{
+            match action {
+                "saveLibrary"=>{
+                    let id=payload.get("id").and_then(Value::as_str);
+                    let name=payload.get("name").and_then(Value::as_str).ok_or("Library name required")?;
+                    let kind=payload.get("kind").and_then(Value::as_str).unwrap_or("movie");
+                    let id=lib.create_or_update_collection(id,name,kind)?;
+                    Ok(json!({"id":id}))
+                },
+                "deleteLibrary"=>{
+                    let id=payload.get("id").and_then(Value::as_str).ok_or("Library ID required")?;
+                    lib.remove_collection(id)?;
+                    Ok(json!({"deleted":true}))
+                },
+                "removeFolder"=>{
+                    let id=payload.get("folderId").and_then(Value::as_str).ok_or("Folder ID required")?;
+                    let library_id=payload.get("libraryId").and_then(Value::as_str).ok_or("Library ID required")?;
+                    if !lib.collections.iter().any(|c|c.id==library_id&&c.folder_ids.contains(&id.to_string())){
+                        return Err("Folder does not belong to the selected library".into());
+                    }
+                    lib.remove_folder(id);
+                    Ok(json!({"removed":true}))
+                },
+                "updateItem"=>{
+                    let library_id=payload.get("libraryId").and_then(Value::as_str).ok_or("Library ID required")?;
+                    let item_id=payload.get("itemId").and_then(Value::as_str).ok_or("Item ID required")?;
+                    let changes=payload.get("changes").cloned().ok_or("Changes required")?;
+                    lib.update_item(library_id,item_id,changes)?;
+                    Ok(json!({"updated":true}))
+                },
+                "rescan"=>{
+                    lib.rescan_all();
+                    Ok(json!({"count":lib.items.len()}))
+                },
+                _=>Err("Unknown media-library command".into()),
+            }
+        })();
+        let response=result.and_then(|v|lib.save(app).map(|_|v));
+        match response {
+            Ok(value)=>{let body=json!({"ok":true,"result":value}).to_string();
+                reply(&mut stream,"200 OK","application/json",body.as_bytes(),"",origin);}
+            Err(message)=>{let body=json!({"ok":false,"error":message}).to_string();
+                reply(&mut stream,"400 Bad Request","application/json",body.as_bytes(),"",origin);}
+        }
+        return;
+    }
+    if method!="GET" {
+        reply(&mut stream,"405 Method Not Allowed","text/plain",b"Method not allowed","",origin);return;
+    }
     if path=="/rescan" {
         lib.rescan_all();
         let saved=lib.save(app).is_ok();
@@ -76,16 +156,26 @@ fn handle(mut stream:TcpStream,app:&tauri::AppHandle){
         return;
     }
     if path=="/catalog" {
-        let items=lib.items.iter().enumerate().map(|(index,item)|{
-            let mut v=serde_json::to_value(item).unwrap_or(Value::Null);
-            if let Some(o)=v.as_object_mut(){
-                o.insert("url".into(),json!(format!("http://127.0.0.1:{PORT}/video/{index}?key={}",token())));
-            }
-            v
+        let libraries=lib.collections.iter().map(|collection|{
+            let ids=&collection.folder_ids;
+            let items=lib.items.iter().enumerate().filter(|(_,item)|
+                ids.contains(&item.folder_id)&&!collection.hidden_ids.contains(&item.id))
+                .map(|(index,item)|{
+                    let mut v=serde_json::to_value(item).unwrap_or(Value::Null);
+                    if let Some(o)=v.as_object_mut(){
+                        if let Some(changes)=lib.overrides.get(&item.id).and_then(Value::as_object){
+                            for (key,value) in changes{o.insert(key.clone(),value.clone());}
+                        }
+                        o.insert("url".into(),json!(format!("http://127.0.0.1:{PORT}/video/{index}?key={}",token())));
+                    }
+                    v
+                }).collect::<Vec<_>>();
+            json!({"id":collection.id,"name":collection.name,"kind":collection.kind,
+                "folders":lib.folders.iter().filter(|f|ids.contains(&f.id))
+                    .map(|f|json!({"id":f.id,"name":f.name})).collect::<Vec<_>>(),
+                "items":items,"lastScan":lib.last_scan})
         }).collect::<Vec<_>>();
-        let body=json!({"libraries":[{"id":"minternet-media","name":"Minternet Media Server","kind":"mixed",
-            "folders":lib.folders.iter().map(|f|json!({"id":f.id,"name":f.name})).collect::<Vec<_>>(),
-            "items":items,"lastScan":lib.last_scan}]}).to_string();
+        let body=json!({"libraries":libraries}).to_string();
         reply(&mut stream,"200 OK","application/json",body.as_bytes(),"",origin);return;
     }
     if let Some(id)=path.strip_prefix("/video/"){
@@ -161,31 +251,46 @@ pub fn bridge_script()->String {
         if(!r.ok)throw Error('Minternet media server unavailable ('+r.status+')');
         return r.json();
       };
-      const rescan=async()=>{
-        const r=await fetch(base+'/rescan?key='+key,{cache:'no-store'});
-        if(!r.ok)throw Error('Local media rescan failed ('+r.status+')');
-        return getCatalog();
+      const manage=async(action,props={})=>{
+        const r=await fetch(base+'/manage?key='+key,{
+          method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({action,...props}),cache:'no-store'
+        });
+        const data=await r.json();
+        if(!r.ok||!data.ok)throw Error(data.error||'Native library change failed');
+        return data.result;
       };
+      const rescan=async()=>{await manage('rescan');return getCatalog();};
       window.MinternetMediaLibrary=Object.freeze({
-        getCatalog,
-        rescan,
-        addFolder:async()=>{
+        getCatalog,rescan,
+        saveLibrary:async({id,name,kind})=>{
+          const result=await manage('saveLibrary',{id,name,kind});
+          return {...result,catalog:await getCatalog()};
+        },
+        deleteLibrary:async({id})=>{await manage('deleteLibrary',{id});return getCatalog();},
+        removeFolder:async({libraryId,folderId})=>{
+          await manage('removeFolder',{libraryId,folderId});return getCatalog();
+        },
+        updateItem:async({libraryId,itemId,changes})=>{
+          await manage('updateItem',{libraryId,itemId,changes});return true;
+        },
+        addFolder:({libraryId,name,kind}={})=>{
+          // The popup must be synchronous within the actual Add Folder click.
+          // The native handler creates a named library only after user picks a folder.
           const beforeRequest=getCatalog();
-          window.open('https://minternet-media.invalid/__add','_blank');
-          const before=await beforeRequest;
-          const oldCount=before.libraries?.[0]?.folders?.length||0;
-          return new Promise((resolve,reject)=>{
-            let attempts=0;
-            const check=async()=>{
-              try{
-                const current=await getCatalog();
-                if((current.libraries?.[0]?.folders?.length||0)>oldCount)return resolve(current);
-              }catch{}
-              if(++attempts>300)return reject(Error('Folder selection not completed'));
-              setTimeout(check,400);
-            };
-            setTimeout(check,350);
-          });
+          const query=new URLSearchParams({libraryId:libraryId||'',name:name||'',kind:kind||'movie'});
+          window.open('https://minternet-media.invalid/__add?'+query,'_blank');
+          return (async()=>{
+            const before=await beforeRequest;
+            const count=(before.libraries||[]).reduce((n,l)=>n+(l.folders||[]).length,0);
+            for(let attempt=0;attempt<300;attempt++){
+              await new Promise(resolve=>setTimeout(resolve,400));
+              const current=await getCatalog();
+              const newCount=(current.libraries||[]).reduce((n,l)=>n+(l.folders||[]).length,0);
+              if(newCount>count)return current;
+            }
+            throw Error('Folder not added. Selection may have been cancelled.');
+          })();
         }
       });
     })();"#;
