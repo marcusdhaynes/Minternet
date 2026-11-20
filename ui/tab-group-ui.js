@@ -503,7 +503,9 @@
     ghost=document.createElement('div');
     ghost.className='tab-drag-ghost';
     ghost.setAttribute('aria-hidden','true');
-    ghost.textContent='◉  '+(tab?.title||'New Tab');
+    const panes=supertabMembers(tabId);
+    ghost.textContent=panes.length>1?'◫  SuperTab · '+panes.length+' panes':
+      '◉  '+(tab?.title||'New Tab');
     document.body.append(ghost);
   }
   function updateHover(x,y){
