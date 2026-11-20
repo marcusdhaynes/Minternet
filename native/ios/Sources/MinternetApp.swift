@@ -14,6 +14,8 @@ final class BrowserState: ObservableObject {
         var suspended = false
         var checking = false
         var inactiveSince: Date?
+        var copyingLogins = false
+        var copiedLogins = false
         @MainActor static func makeWebView(isPrivate: Bool) -> WKWebView {
             let configuration = WKWebViewConfiguration()
             configuration.websiteDataStore = isPrivate ? .nonPersistent() : .default()
@@ -39,7 +41,48 @@ final class BrowserState: ObservableObject {
     @Published var tabLimit: Int = max(0, UserDefaults.standard.object(forKey: "tabLimit") as? Int ?? 0) {
         didSet { UserDefaults.standard.set(tabLimit, forKey: "tabLimit") }
     }
+    @Published var privateLoginSharing: Bool =
+        UserDefaults.standard.object(forKey: "privateLoginSharing") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(privateLoginSharing, forKey: "privateLoginSharing") }
+    }
     init() { newTab() }
+
+    // Transfer regular-profile HTTP/HTTPS cookies, including HttpOnly sign-in
+    // cookies, to a non-persistent private data store BEFORE first navigation.
+    // No private cookie or browsing data is written to the normal store.
+    private func loadInTab(_ tab: Tab, url: URL) {
+        tab.url = url
+        guard let view = tab.webView else { return }
+        guard tab.isPrivate && privateLoginSharing && !tab.copiedLogins else {
+            if !tab.copyingLogins { view.load(URLRequest(url: url)) }
+            return
+        }
+        if tab.copyingLogins { return } // the completion loads the latest URL
+        tab.copyingLogins = true
+        let privateStore = view.configuration.websiteDataStore.httpCookieStore
+        WKWebsiteDataStore.default().httpCookieStore.getAllCookies { [weak self, weak tab, weak view] cookies in
+            guard let self, let tab, let view else { return }
+            let group = DispatchGroup()
+            for cookie in cookies {
+                guard cookie.isHTTPOnly || cookie.isSecure || cookie.expiresDate == nil ||
+                        cookie.domain.count > 0 else { continue }
+                group.enter()
+                privateStore.setCookie(cookie) { group.leave() }
+            }
+            group.notify(queue: .main) { [weak self, weak tab, weak view] in
+                Task { @MainActor in
+                    guard let self, let tab, let view,
+                          self.tabs.contains(where: { $0 === tab }),
+                          tab.webView === view else { return }
+                    tab.copyingLogins = false
+                    tab.copiedLogins = true
+                    if let destination = tab.url, destination.scheme == "https" {
+                        view.load(URLRequest(url: destination))
+                    }
+                }
+            }
+        }
+    }
 
     var active: Tab? { tabs.first(where: { $0.id == selectedId }) }
 
@@ -56,7 +99,7 @@ final class BrowserState: ObservableObject {
         selectedId = tab.id
         address = load?.absoluteString ?? ""
         tab.url = load
-        if let load { tab.webView?.load(URLRequest(url: load)) }
+        if let load { loadInTab(tab, url: load) }
         return tab.webView
     }
 
@@ -68,8 +111,10 @@ final class BrowserState: ObservableObject {
         if let tab, tab.suspended || tab.webView == nil {
             tab.webView = Tab.makeWebView(isPrivate: tab.isPrivate)
             tab.suspended = false
+            tab.copyingLogins = false
+            tab.copiedLogins = false
             if let destination=tab.url, destination.scheme == "https" {
-                tab.webView?.load(URLRequest(url: destination))
+                loadInTab(tab, url: destination)
             }
         }
         address = tab?.webView?.url?.absoluteString ?? tab?.url?.absoluteString ?? ""
@@ -93,7 +138,7 @@ final class BrowserState: ObservableObject {
         tabs[index] = replacement
         selectedId = replacement.id
         if let destination, destination.scheme == "https" {
-            replacement.webView?.load(URLRequest(url: destination))
+            loadInTab(replacement, url: destination)
             address = destination.absoluteString
         } else {
             address = ""
@@ -140,7 +185,7 @@ final class BrowserState: ObservableObject {
         }
         tab.url = url
         if tab.webView == nil { select(tab.id) }
-        tab.webView?.load(URLRequest(url: url))
+        else { loadInTab(tab, url: url) }
         address = url.absoluteString
     }
 
@@ -398,6 +443,7 @@ struct ContentView: View {
                         tabLimitDraft = String(state.tabLimit)
                         showTabLimitEditor = true
                     }
+                    Toggle("Retain Active Logins in Private Tabs", isOn: $state.privateLoginSharing)
                     Picker("Unload Inactive Tabs", selection: $state.autoUnloadMinutes) {
                         Text("Never").tag(0)
                         Text("1 minute").tag(1)
