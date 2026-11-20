@@ -386,9 +386,11 @@
           <span>Lock in</span>
           <input id="secretAutoLockAmount" type="number" min="0" max="999999" step="1" value="0" inputmode="numeric" aria-label="Delay after closing before Secret Bookmarks lock">
           <select id="secretAutoLockUnit" aria-label="Secret Bookmarks lock delay unit">
-            <option value="seconds">sec</option>
-            <option value="minutes">min</option>
-            <option value="hours">hours</option>
+            <option value="seconds">Seconds</option>
+            <option value="minutes">Minutes</option>
+            <option value="hours">Hours</option>
+            <option value="days">Days</option>
+            <option value="never">Never</option>
           </select>
         </label>
         <button type="button" id="secretLock" title="Lock secret vault immediately">Lock</button>

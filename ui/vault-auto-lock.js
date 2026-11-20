@@ -6,19 +6,25 @@
   const sections=new Set(['identities','logins','payments']);
   const active=new Map();
   const MAX=999999,MAX_TIMEOUT=2147483647;
-  const units={seconds:1000,minutes:60000,hours:3600000};
+  const units={seconds:1000,minutes:60000,hours:3600000,days:86400000};
+  const validUnit=unit=>unit==='never'||Object.hasOwn(units,unit);
   const normalize=(value,unit)=>({
     amount:Math.max(0,Math.min(MAX,Math.trunc(Number(value)||0))),
-    unit:Object.hasOwn(units,unit)?unit:'seconds'
+    unit:validUnit(unit)?unit:'seconds'
   });
   function forSection(section){
     if(!sections.has(section))throw Error('Unknown encrypted vault section');
     if(active.has(section))return active.get(section);
     const key='minternet.'+section+'-close-lock.v1';
-    let preference={amount:0,unit:'seconds'};
+    // Logins must stay unlocked while the application is running unless the
+    // user chooses a shorter auto-lock policy. This never bypasses the master
+    // password required after launch, a manual Lock, or OS session shutdown.
+    let preference=section==='logins'
+      ?{amount:0,unit:'never'}:{amount:0,unit:'seconds'};
     try{
       const saved=JSON.parse(localStorage.getItem(key)||'null');
-      preference=normalize(saved?.amount,saved?.unit);
+      if(saved&&typeof saved==='object')
+        preference=normalize(saved.amount,saved.unit);
     }catch{/* A corrupted preference uses the secure zero-second default. */}
     let opened=false,unlocked=false,timer=null,deadline=0,locking=null;
     const stop=()=>{clearTimeout(timer);timer=null;deadline=0;};
@@ -48,7 +54,7 @@
     }
     function schedule(){
       stop();
-      if(opened||!unlocked)return;
+      if(opened||!unlocked||preference.unit==='never')return;
       const ms=preference.amount*units[preference.unit];
       if(ms===0){void lock();return;}
       deadline=Date.now()+ms;
@@ -72,15 +78,22 @@
       amount.setAttribute('aria-label','Delay after closing before '+section+' lock');
       const unit=document.createElement('select');
       unit.setAttribute('aria-label',section+' lock delay unit');
-      for(const [value,text] of [['seconds','sec'],['minutes','min'],['hours','hours']]){
+      for(const [value,text] of [
+        ['seconds','Seconds'],['minutes','Minutes'],['hours','Hours'],
+        ['days','Days'],['never','Never']]){
         const option=document.createElement('option');
         option.value=value;option.textContent=text;unit.append(option);
       }
       unit.value=preference.unit;
+      amount.disabled=unit.value==='never';
       const save=()=>{
         preference=normalize(amount.value,unit.value);
         amount.value=String(preference.amount);unit.value=preference.unit;
+        amount.disabled=preference.unit==='never';
         try{localStorage.setItem(key,JSON.stringify(preference));}catch{}
+        // A selection made after the panel closed takes effect immediately.
+        // Never cancels any scheduled auto-lock; all others recalculate it.
+        if(!opened&&unlocked)schedule();
       };
       amount.addEventListener('change',save);
       unit.addEventListener('change',save);

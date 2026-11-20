@@ -229,21 +229,25 @@
   }
   function closeLockMillis(){
     const amount=Math.max(0,Math.min(999999,Math.trunc(Number($('secretAutoLockAmount').value)||0)));
-    const unit=['seconds','minutes','hours'].includes($('secretAutoLockUnit').value)
+    const unit=['seconds','minutes','hours','days','never'].includes($('secretAutoLockUnit').value)
       ?$('secretAutoLockUnit').value:'seconds';
-    return amount*(unit==='hours'?3600000:unit==='minutes'?60000:1000);
+    if(unit==='never')return Infinity;
+    return amount*(unit==='days'?86400000:unit==='hours'?3600000:unit==='minutes'?60000:1000);
   }
   function saveCloseLockPreference(){
     const amount=Math.max(0,Math.min(999999,Math.trunc(Number($('secretAutoLockAmount').value)||0)));
-    const unit=['seconds','minutes','hours'].includes($('secretAutoLockUnit').value)
+    const unit=['seconds','minutes','hours','days','never'].includes($('secretAutoLockUnit').value)
       ?$('secretAutoLockUnit').value:'seconds';
     $('secretAutoLockAmount').value=String(amount);
+    $('secretAutoLockAmount').disabled=unit==='never';
     try{localStorage.setItem(CLOSE_LOCK_PREF,JSON.stringify({amount,unit}));}catch{}
+    if(screen.hidden&&status.unlocked)scheduleCloseLock();
   }
   try{
     const saved=JSON.parse(localStorage.getItem(CLOSE_LOCK_PREF)||'null');
     $('secretAutoLockAmount').value=String(Math.max(0,Math.min(999999,Math.trunc(Number(saved?.amount)||0))));
-    $('secretAutoLockUnit').value=['seconds','minutes','hours'].includes(saved?.unit)?saved.unit:'seconds';
+    $('secretAutoLockUnit').value=['seconds','minutes','hours','days','never'].includes(saved?.unit)?saved.unit:'seconds';
+    $('secretAutoLockAmount').disabled=$('secretAutoLockUnit').value==='never';
   }catch{
     $('secretAutoLockAmount').value='0';$('secretAutoLockUnit').value='seconds';
   }
@@ -254,6 +258,7 @@
     if(!status.unlocked)return;
     const ms=closeLockMillis();
     if(ms===0){void lock(true);return;}
+    if(ms===Infinity)return; // Never locks only on explicit Lock or app exit.
     closeDeadline=Date.now()+ms;
     const step=()=>{
       if(!screen.hidden||!status.unlocked)return;

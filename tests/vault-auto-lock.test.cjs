@@ -50,7 +50,7 @@ const labelFor=(h,section)=>{
   const [caption,amount,unit]=label.children;
   return {label,caption,amount,unit};
 };
-test('all three managers display Secret Bookmarks exact Lock in, sec/min/hours controls',()=>{
+test('all managers offer matching Title Case Seconds, Minutes, Hours, Days and Never options',()=>{
   const h=harness();
   for(const section of ['identities','logins','payments']){
     const {label,caption,amount,unit}=labelFor(h,section);
@@ -62,12 +62,15 @@ test('all three managers display Secret Bookmarks exact Lock in, sec/min/hours c
     assert.equal(amount.step,'1');
     assert.equal(amount.value,'0');
     assert.deepEqual(unit.children.map(x=>[x.value,x.textContent]),
-      [['seconds','sec'],['minutes','min'],['hours','hours']]);
-    assert.equal(unit.value,'seconds');
+      [['seconds','Seconds'],['minutes','Minutes'],['hours','Hours'],
+       ['days','Days'],['never','Never']]);
+    assert.equal(unit.value,section==='logins'?'never':'seconds');
   }
 });
 test('zero seconds locks only the closed section immediately through native IPC',async()=>{
   const h=harness(),controller=h.window.minternetVaultAutoLock.forSection('logins');
+  const {unit}=labelFor(h,'logins');
+  unit.value='seconds';unit.change();
   await controller.openManager();
   controller.setUnlocked(true);
   assert.equal(h.calls.length,0);
@@ -96,6 +99,7 @@ test('delays persist independently and the timer starts only when closing',async
   assert.deepEqual(h.calls,[['vault-lock','identities']]);
   const login=labelFor(h,'logins');
   assert.equal(login.amount.value,'0');
+  assert.equal(login.unit.value,'never');
   const payments=labelFor(h,'payments');
   payments.amount.value='4';payments.unit.value='hours';payments.unit.change();
   assert.equal(JSON.parse(h.saved.get('minternet.payments-close-lock.v1')).unit,'hours');
@@ -120,6 +124,8 @@ test('reopening before the deadline cancels an in-progress delay and does not lo
 });
 test('reopening waits for a previously-started native lock before returning',async()=>{
   const h=harness(),ctrl=h.window.minternetVaultAutoLock.forSection('logins');
+  const {unit}=labelFor(h,'logins');
+  unit.value='seconds';unit.change();
   let finish;
   h.command(()=>new Promise(resolve=>{finish=resolve;}));
   await ctrl.openManager();ctrl.setUnlocked(true);
@@ -146,6 +152,30 @@ test('a transient native lock failure is retried while the panel stays closed',a
   assert.equal(attempts,2);
   assert.deepEqual(h.calls,[['vault-lock','payments'],['vault-lock','payments']]);
   assert.equal(h.timers.size,0);
+});
+test('Never preserves Logins session access without changing explicit Lock or restart protection',async()=>{
+  const h=harness(),ctrl=h.window.minternetVaultAutoLock.forSection('logins');
+  const {amount,unit}=labelFor(h,'logins');
+  assert.equal(unit.value,'never');
+  assert.equal(amount.disabled,true);
+  await ctrl.openManager();ctrl.setUnlocked(true);ctrl.closeManager(true);
+  h.advance(86400000*40);await h.flush();
+  assert.equal(h.calls.length,0);
+  unit.value='days';unit.change();amount.value='2';amount.change();
+  assert.equal(amount.disabled,false);
+  await ctrl.openManager();ctrl.closeManager(true);
+  assert.equal([...h.timers.values()][0].delay,172800000);
+  unit.value='never';unit.change();
+  assert.equal(amount.disabled,true);
+  assert.equal(h.timers.size,0);
+  assert.equal(h.calls.length,0);
+});
+test('Secret Bookmarks also supports Days/Never and Title Case',()=>{
+  const html=read('ui/index.html'),secret=read('ui/secret-bookmarks.js');
+  for(const option of ['Seconds','Minutes','Hours','Days','Never'])
+    assert.match(html,new RegExp('>'+option+'</option>'));
+  assert.match(secret,/unit==='never'/);
+  assert.match(secret,/unit==='days'\?86400000/);
 });
 test('timers safely chunk very long hours rather than overflowing setTimeout',async()=>{
   const h=harness(),{amount,unit}=labelFor(h,'identities');
