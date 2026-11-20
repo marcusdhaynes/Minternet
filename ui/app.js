@@ -436,6 +436,7 @@ const torItems=[
   {name:'Open Site in Fresh Tor Tab',action:'duplicate',requiresTor:true},
   {name:'New Identity · Close All Tor Tabs',action:'tor-new-identity'},
   {name:'Reconnect Tor',action:'tor-reconnect',requiresTor:true},
+  {name:'Verify Tor Exit',action:'tor-check',requiresTor:true},
   {name:'Tor Connection Status',action:'tor-status'}
 ];
 for(const item of torItems){
@@ -450,6 +451,11 @@ for(const item of torItems){
     if(item.requiresTor && !active?.tor)return toast('Select a Tor tab first.');
     torButton.disabled=true;
     try{
+      if(item.action==='tor-check'){
+        // Verify via the selected Tor WebView, never an ordinary browser tab.
+        await command('navigate','https://check.torproject.org/');
+        return;
+      }
       const result=await command(item.action,item.action==='duplicate'?active.id:undefined);
       if(item.action==='tor-status' && result && !result.message){
         const status=result.bootstrapped?'Tor client ready for traffic':'Tor client not ready';
