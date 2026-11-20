@@ -120,3 +120,30 @@ test('dropping a tab into a collapsed group preserves the user-selected collapse
  assert.equal(m.get(s,g.id).collapsed,true);
  assert.equal(m.isVisibleTab(s,5),false);
 });
+
+test('a 2–4 pane supertab moves atomically into, between and out of groups',()=>{
+ const state=m.blank(),alpha=m.create(state,{name:'One'}),beta=m.create(state,{name:'Two'});
+ m.prune(state,[1,2,3,4,5,6,7]);
+ const panes=[2,3,4];
+ assert.equal(m.assignMany(state,panes,alpha.id),true);
+ assert.deepEqual(panes.map(id=>m.findTab(state,id)?.id),[alpha.id,alpha.id,alpha.id]);
+ assert.equal(m.moveBlockRelative(state,panes,7,true),true);
+ assert.deepEqual(state.order,[1,5,6,7,2,3,4]);
+ assert.equal(m.assignMany(state,panes,beta.id),true);
+ assert.deepEqual(panes.map(id=>m.findTab(state,id)?.id),[beta.id,beta.id,beta.id]);
+ assert.equal(m.moveBlockRelative(state,panes,1,false),true);
+ assert.deepEqual(state.order,[2,3,4,1,5,6,7]);
+ assert.equal(m.assignMany(state,panes,null),true);
+ assert.deepEqual(panes.map(id=>m.findTab(state,id)),[undefined,undefined,undefined]);
+});
+test('invalid multi-pane assignments and reorders do not partially change state',()=>{
+ const state=m.blank(),g=m.create(state,{name:'Safe'});
+ m.prune(state,[1,2,3,4]);
+ const before=JSON.stringify(state.order);
+ assert.equal(m.assignMany(state,[1,2,2],g.id),false);
+ assert.equal(m.assignMany(state,[1,2],'missing'),false);
+ assert.equal(m.findTab(state,1),undefined);
+ assert.equal(m.moveBlockRelative(state,[1,999],3),false);
+ assert.equal(m.moveBlockRelative(state,[1,2],2),false);
+ assert.equal(JSON.stringify(state.order),before);
+});
