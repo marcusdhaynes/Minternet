@@ -4227,7 +4227,14 @@ fn fill_saved_credential_from(app:&tauri::AppHandle,id:u32,manual:bool,
         vault.matching_site(&actual_origin,manual,username,source_origin)
     };
     let Some(mut entry)=credential else {return Ok(false)};
-    let data=serde_json::json!({"origin":actual_origin,"username":entry.username,"password":entry.password});
+    let data=serde_json::json!({
+        "origin":actual_origin,
+        "username":entry.username,
+        "password":entry.password,
+        // Only verified, encrypted, eligible WGU credentials can trigger
+        // automatic sign-on. All other sites remain fill-only.
+        "autoSubmit":password_vault::trusted_wgu_origin(&actual_origin)
+    });
     // Exact-origin login forms only. A short, bounded observer accommodates
     // React/SPA forms added after the load event; never submit automatically,
     // change existing input, or select an arbitrary login on multi-account sites.
@@ -6574,7 +6581,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
     let required_section=if name.starts_with("vault-card-"){"payments"}
         else if name.starts_with("vault-identity-"){"identities"}
         else if matches!(name.as_str(),"vault-list"|"vault-put"|"vault-edit"|"vault-remove"|
-            "vault-fill"|"vault-wgu-default"|"vault-associate-login"|"vault-capture-login"){"logins"}
+            "vault-fill"|"vault-fill-status"|"vault-wgu-default"|"vault-associate-login"|"vault-capture-login"){"logins"}
         else{""};
     if !required_section.is_empty() && !vault_section_allowed(&app,required_section){
         return Err(format!("Unlock {} to use this section",required_section));
@@ -7280,6 +7287,27 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 .map_err(|e|e.to_string())?.active_id;
             let _=fill_saved_credential(&app,id,false,None);
             return Ok(json!({"ok":true}));
+        }
+        "vault-fill-status" => {
+            // Trusted chrome receives only booleans. Never expose a stored
+            // password, username, or page form values through this diagnostic.
+            let handle=app.clone();
+            return tauri::async_runtime::spawn_blocking(move||{
+                let (_origin,result)=browser_page_eval(&handle,r#"(() => {
+                  const state=window.__minternetLoginStatus;
+                  if(!state)return {ready:false,usernameFilled:false,
+                    passwordFilled:false,submitted:false};
+                  return {ready:true,usernameFilled:state.usernameFilled===true,
+                    passwordFilled:state.passwordFilled===true,
+                    submitted:state.submitted===true};
+                })()"#)?;
+                Ok(json!({
+                    "ready":result.get("ready").and_then(Value::as_bool).unwrap_or(false),
+                    "usernameFilled":result.get("usernameFilled").and_then(Value::as_bool).unwrap_or(false),
+                    "passwordFilled":result.get("passwordFilled").and_then(Value::as_bool).unwrap_or(false),
+                    "submitted":result.get("submitted").and_then(Value::as_bool).unwrap_or(false)
+                }))
+            }).await.map_err(|e|e.to_string())?;
         }
         "vault-fill" => {
             let username=value.as_str()

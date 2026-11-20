@@ -328,3 +328,14 @@ test('password reset and incomplete forms never auto-submit stored WGU credentia
   touched.fill('https://access.wgu.edu',{autoSubmit:true});touched.runSubmitTimers();
   assert.equal(touched.form.submissions,0);
 });
+
+test('manual Fill verifies actual form values rather than trusting successful JavaScript injection',()=>{
+  const main=fs.readFileSync(path.join(__dirname,'../native/desktop/src-tauri/src/main.rs'),'utf8');
+  const chrome=fs.readFileSync(path.join(__dirname,'../ui/password-ui.js'),'utf8');
+  assert.match(main,/"autoSubmit":password_vault::trusted_wgu_origin\(&actual_origin\)/);
+  assert.match(main,/"vault-fill-status" => \{/);
+  assert.match(main,/let \(_origin,result\)=browser_page_eval/);
+  assert.match(chrome,/await call\('vault-fill-status'\)/);
+  assert.match(chrome,/status\?\.usernameFilled&&status\?\.passwordFilled/);
+  assert.match(chrome,/status\.submitted/);
+});

@@ -111,8 +111,31 @@
           report('Open '+entry.origin+' or a verified matching website first.');return;
         }
         const answer=await invoke('vault-fill',{origin:entry.origin,username:entry.username});
-        if(answer?.filled){close();}
-        else report('Cannot fill this page. Check the saved login and sign-in form.');
+        if(!answer?.filled){
+          report('No eligible login was sent. Check the saved website and unlocked vault.');
+          return;
+        }
+        // Native accepted the injection, but that is NOT proof the fields
+        // were filled. Reveal the webpage before checking both real values.
+        close();
+        window.minternetToast?.('Filling saved login…');
+        let confirmed=false;
+        for(let attempt=0;attempt<12;attempt++){
+          await new Promise(done=>setTimeout(done,450));
+          let status=null;
+          try{status=await call('vault-fill-status');}catch{}
+          if(status?.usernameFilled&&status?.passwordFilled){
+            confirmed=true;
+            window.minternetToast?.(
+              status.submitted?'WGU Sign On submitted; complete any required verification.':
+              'Username and password filled successfully.');
+            break;
+          }
+        }
+        if(!confirmed){
+          window.minternetToast?.(
+            'Fill was requested but not confirmed. Check whether the sign-on page redirected, or try again.');
+        }
       });
       if(isWguOrigin(entry.origin)){
         const wguDefault=document.createElement('button');
