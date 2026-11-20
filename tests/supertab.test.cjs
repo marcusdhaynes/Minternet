@@ -53,6 +53,9 @@ test('supertab icon buttons are individually focusable, clickable and have separ
    assert.deepEqual(context,[[10,{x:75,y:90}]]);
    assert.equal(stopped,3);
    assert.deepEqual(root.dataset.splitTabIds,'10,20,30');
+   assert.equal(root.dataset.tabId,'10');
+   root.fire('click',{target:root});
+   assert.deepEqual(changes,[30,20]);
  }finally{global.document=previous;}
 });
 
@@ -68,7 +71,13 @@ test('native snapshots, groups and tab menus treat panes as exactly one supertab
  assert.match(native,/state\.split_ids=if ids\.len\(\)>1/);
  assert.match(group,/MinternetSuperTab\.build\(splitTabs/);
  assert.match(group,/!splitSet\.has\(t\.id\)/);
- assert.match(group,/filter\(t=>!t\.pinned&&!splitSet\.has\(t\.id\)\)/);
+ assert.match(group,/const members=allMembers\.filter\(t=>!splitSet\.has\(t\.id\)\)/);
+ assert.match(group,/attachTabMenu\(superNode,splitTabs\[0\]\.id\)/);
+ assert.match(group,/const containsSuper=splitGroup\?\.id===g\.id/);
+ assert.match(group,/node\.classList\.add\('group-member'\)/);
+ assert.match(group,/supertabMembers\(finished\.id\)\.length===1/);
+ assert.match(group,/model\.moveBlockRelative\(state,ids,last\.id,true\)/);
+ assert.match(group,/model\.assignMany\(state,ids,groupId\)/);
  assert.match(group,/splitSet\.has\(tab\.id\)/);
  assert.match(menu,/#tabs \.split-super-pane\[data-tab-id\]/);
  assert.match(html,/src="\.\/supertab\.js"/);
@@ -80,4 +89,18 @@ test('native snapshots, groups and tab menus treat panes as exactly one supertab
  assert.match(css,/\.split-super-divider/);
  assert.match(css,/--minternet-supertab-gap/);
  assert.match(css,/--minternet-supertab-padding/);
+});
+
+test('super tabs drag from the full surface and render as one item inside groups',()=>{
+ const widget=read('ui/supertab.js');
+ const group=read('ui/tab-group-ui.js');
+ const css=read('ui/styles.css');
+ assert.match(widget,/node\.dataset\.tabId=String\(tabs\[0\]\.id\)/);
+ assert.match(group,/tabStrip\.addEventListener\('pointerdown',beginPointer\)/);
+ assert.match(group,/const tab=event\.target\.closest\('\.tab\[data-tab-id\]'\)/);
+ assert.match(group,/attachTabMenu\(superNode,splitTabs\[0\]\.id\)/);
+ assert.match(css,/\.tabs \.tab\.split-supertab,\.tabs \.split-supertab \.split-super-pane\{/);
+ assert.match(css,/cursor:grab;user-select:none/);
+ assert.match(group,/const visualMembers=containsSuper\?\[\.\.\.members,splitTabs\[0\]\]:members/);
+ assert.match(group,/const node=takeSuper\(\)/);
 });
