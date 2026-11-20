@@ -6,11 +6,14 @@
       const credential=__MINTERNET_LOGIN_PAYLOAD__;
       if(location.protocol!=='https:'||location.origin!==credential.origin||
          window!==window.top)return;
-      // A website can replace a sign-on form without changing its URL.
-      // Keep per-input fill history across native retries so clearing a
-      // previously filled field is respected as a user choice.
+      // WGU and other SPA sign-in pages sometimes clear an existing input.
+      // Recover from website resets, but never undo a real user's edits.
       const marked=window.__minternetFilledLoginInputs||new WeakSet();
+      const userTouched=window.__minternetUserChangedLoginInputs||new WeakSet();
+      const lastFilled=window.__minternetLastLoginFillTime||new WeakMap();
       window.__minternetFilledLoginInputs=marked;
+      window.__minternetUserChangedLoginInputs=userTouched;
+      window.__minternetLastLoginFillTime=lastFilled;
       try{window.__minternetLoginJob?.stop?.();}catch{}
       const register=/(?:sign.?up|register|create.?account|join|forgot.?password|reset.?password|change.?password)/i;
       const signin=/(?:log.?in|sign.?in|sign.?on|pingfed|saml|sso|auth|account|session|identify)/i;
@@ -67,8 +70,11 @@
         return list.filter(visible);
       }
       const put=(element,value)=>{
-        if(!element||element.value||marked.has(element)||
+        if(!element||element.value||userTouched.has(element)||
            typeof value!=='string'||!value)return false;
+        // Avoid a hot loop when a site instantly empties its own form.
+        const now=Date.now();
+        if(lastFilled.has(element)&&now-lastFilled.get(element)<900)return false;
         // Use the input's own Window: same-origin frames have different DOM
         // prototypes, so the parent Window's setter can silently fail.
         const win=element.ownerDocument?.defaultView||window;
@@ -79,6 +85,10 @@
         element.dispatchEvent(new EventType('input',{bubbles:true,composed:true}));
         element.dispatchEvent(new EventType('change',{bubbles:true,composed:true}));
         marked.add(element);
+        lastFilled.set(element,now);
+        element.addEventListener?.('input',event=>{
+          if(event.isTrusted)userTouched.add(element);
+        });
         return true;
       };
       const userCandidate=el=>
