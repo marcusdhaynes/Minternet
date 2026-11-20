@@ -117,10 +117,16 @@
         }
         // Native accepted the injection, but that is NOT proof the fields
         // were filled. Reveal the webpage before checking both real values.
+        const startingSite=activeSite();
         close();
         window.minternetToast?.('Filling saved login…');
-        let confirmed=false;
+        let confirmed=false,redirected=false;
         for(let attempt=0;attempt<12;attempt++){
+          if(startingSite&&activeSite()&&activeSite()!==startingSite){
+            redirected=true;
+            window.minternetToast?.('Sign-on redirected; continue any WGU verification.');
+            break;
+          }
           await new Promise(done=>setTimeout(done,450));
           let status=null;
           try{status=await call('vault-fill-status');}catch{}
@@ -132,9 +138,9 @@
             break;
           }
         }
-        if(!confirmed){
+        if(!confirmed&&!redirected){
           window.minternetToast?.(
-            'Fill was requested but not confirmed. Check whether the sign-on page redirected, or try again.');
+            'Fill was requested but the fields were not confirmed. Check that Logins is unlocked and retry.');
         }
       });
       if(isWguOrigin(entry.origin)){

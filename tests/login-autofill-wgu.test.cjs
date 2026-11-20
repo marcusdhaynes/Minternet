@@ -9,7 +9,8 @@ const fillSource=file('login_autofill.js');
 const probeSource=file('login_form_context.js');
 
 function fakePage({origin='https://access.wgu.edu',route='/pingfed/idp/SSO.saml2',
-  username='',password='',accountName='pf.anon',extra=[]}={}){
+  username='',password='',accountName='pf.anon',extra=[],
+  navType='navigate',sessionStore=null}={}){
   class Form {
     constructor(){this.id='signinForm';this.className='';this.submissions=0;this.isConnected=true;}
     getAttribute(name){return name==='action'?route:null;}
@@ -65,7 +66,10 @@ function fakePage({origin='https://access.wgu.edu',route='/pingfed/idp/SSO.saml2
   doc.defaultView=view;
   for(const input of inputs)input.ownerDocument=doc;
   let scheduled=0,notifyChanges=()=>{},clock=0;
-  const timers=new Map(),store=new Map();
+  const timers=new Map(),store=sessionStore||new Map();
+  view.performance={getEntriesByType(type){
+    return type==='navigation'?[{type:navType}]:[];
+  }};
   view.sessionStorage={
     getItem(key){return store.get(key)??null;},
     setItem(key,value){store.set(key,String(value));}
@@ -338,4 +342,18 @@ test('manual Fill verifies actual form values rather than trusting successful Ja
   assert.match(chrome,/await call\('vault-fill-status'\)/);
   assert.match(chrome,/status\?\.usernameFilled&&status\?\.passwordFilled/);
   assert.match(chrome,/status\.submitted/);
+});
+
+test('explicit WGU refresh can sign in again, but immediate automatic redirect cannot loop',()=>{
+  const store=new Map();
+  const first=fakePage({route:'/pingfed/as/authorization.oauth2',sessionStore:store});
+  first.fill('https://access.wgu.edu',{autoSubmit:true});first.runSubmitTimers();
+  assert.equal(first.form.submissions,1);
+  const redirect=fakePage({route:'/pingfed/as/authorization.oauth2',sessionStore:store});
+  redirect.fill('https://access.wgu.edu',{autoSubmit:true});redirect.runSubmitTimers();
+  assert.equal(redirect.form.submissions,0,'unprompted bounce must not loop');
+  const refresh=fakePage({route:'/pingfed/as/authorization.oauth2',
+    navType:'reload',sessionStore:store});
+  refresh.fill('https://access.wgu.edu',{autoSubmit:true});refresh.runSubmitTimers();
+  assert.equal(refresh.form.submissions,1,'manual page refresh signs in again');
 });

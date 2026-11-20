@@ -12,7 +12,9 @@
       const wguSignOn=isWgu&&
         /^\/(?:pingfed|signin|signon|login|sso|auth)(?:\/|$)/i.test(location.pathname);
       const submitEnabled=credential.autoSubmit===true&&wguSignOn;
-      const status={usernameFilled:false,passwordFilled:false,submitted:false,waiting:true};
+      const previous=window.__minternetLoginStatus;
+      const status={usernameFilled:false,passwordFilled:false,
+        submitted:previous?.submitted===true,waiting:true};
       window.__minternetLoginStatus=status;
       const submittedForms=window.__minternetWguSubmittedForms||new WeakSet();
       window.__minternetWguSubmittedForms=submittedForms;
@@ -141,7 +143,12 @@
             (invalidAccount(input)||token(input).includes('one-time-code'))))return;
         let previous;
         try{previous=JSON.parse(sessionStorage.getItem('minternet.wgu.signon.last.v1')||'null');}catch{}
-        if(previous?.path===location.pathname &&
+        // An explicit browser Refresh is a new user-requested sign-on.
+        // It must autofill AND sign in, even immediately after an earlier
+        // attempt. Automatic redirects retain the cooldown to prevent
+        // invalid-password loops.
+        const navType=window.performance?.getEntriesByType?.('navigation')?.[0]?.type;
+        if(navType!=='reload'&&previous?.path===location.pathname &&
            Date.now()-Number(previous.at||0)<8000)return;
         submittedForms.add(form); // No repeated submissions on native retries.
         submissionTimer=setTimeout(()=>{
