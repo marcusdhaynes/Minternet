@@ -345,3 +345,25 @@ pub fn bridge_script()->String {
     })();"#;
     js.replace("__TOKEN__",&serde_json::to_string(key).unwrap_or_default())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn only_approved_media_origins_receive_cors() {
+        assert!(allowed("https://marmaladeum.com"));
+        assert!(allowed("https://marcusdhaynes.github.io"));
+        assert!(!allowed("https://example.com"));
+        assert!(!allowed("http://marmaladeum.com"));
+    }
+    #[test]
+    fn picker_completion_is_correlated_to_its_request() {
+        let id="media-picker-test-abcdef1234";
+        assert!(valid_request_id(id));
+        assert!(!valid_request_id("../unsafe"));
+        begin_picker(id);
+        finish_picker(id,"success","Indexed");
+        let map=pickers().lock().unwrap();
+        assert_eq!(map.get(id).and_then(|s|s.get("state")).and_then(Value::as_str),Some("success"));
+    }
+}
