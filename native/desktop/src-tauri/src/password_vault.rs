@@ -104,6 +104,16 @@ pub struct Vault {
 impl Drop for Vault {
     fn drop(&mut self) { self.lock(); }
 }
+// Only HTTPS hosts beneath the real WGU DNS boundary share credentials.
+// No wildcard matching on URL text, parameters, or lookalike domains.
+pub fn trusted_wgu_origin(origin:&str)->bool{
+    let Ok(url)=tauri::Url::parse(origin)else{return false};
+    if url.scheme()!="https" || url.port_or_known_default()!=Some(443) ||
+       !url.username().is_empty() || url.password().is_some(){return false;}
+    let Some(host)=url.host_str() else{return false};
+    let host=host.to_ascii_lowercase();
+    host=="wgu.edu" || host.ends_with(".wgu.edu")
+}
 impl Vault {
     pub fn unlocked(&self) -> bool { self.key.is_some() }
     pub fn lock(&mut self) {
@@ -146,6 +156,52 @@ impl Vault {
         // explicitly designated during a previous Fill. Do not guess.
         let preferred=eligible.into_iter().filter(|e|e.preferred).collect::<Vec<_>>();
         if preferred.len()==1{Some(preferred[0].clone())}else{None}
+    }
+    /// Automatic selection refuses conflicting WGU accounts or passwords.
+    /// Explicitly saved exact-site settings always take precedence.
+    pub fn matching_site(&self,destination:&str,manual:bool,username:Option<&str>,
+                         source_origin:Option<&str>)->Option<Entry>{
+        if !self.unlocked(){return None;}
+        if manual{
+            let source=source_origin.unwrap_or(destination);
+            if source!=destination &&
+               !(trusted_wgu_origin(source)&&trusted_wgu_origin(destination)){
+                return None;
+            }
+            return self.matching(source,true,username);
+        }
+        // An explicitly disabled site must not acquire the credential from
+        // a sibling WGU site via fallback.
+        if self.entries.iter().any(|e|e.origin==destination){
+            return self.matching(destination,false,None);
+        }
+        if !trusted_wgu_origin(destination){return None;}
+        let mut choices=Vec::<&Entry>::new();
+        for entry in self.entries.iter().filter(|e|
+            e.autofill && trusted_wgu_origin(&e.origin)){
+            if !choices.iter().any(|known|known.username==entry.username &&
+                                  known.password==entry.password){
+                choices.push(entry);
+            }
+        }
+        if choices.len()==1{return Some(choices[0].clone());}
+        let preferred=choices.into_iter().filter(|choice|
+            self.entries.iter().any(|entry|entry.preferred &&
+                entry.username==choice.username && entry.password==choice.password &&
+                trusted_wgu_origin(&entry.origin))).collect::<Vec<_>>();
+        if preferred.len()==1{Some(preferred[0].clone())}else{None}
+    }
+    pub fn prefer_site(&mut self,origin:&str,username:&str)->bool{
+        if !self.unlocked(){return false;}
+        if !self.entries.iter().any(|e|e.origin==origin &&
+            e.username==username&&e.autofill){return false;}
+        let shared=trusted_wgu_origin(origin);
+        for item in &mut self.entries{
+            if item.origin==origin || (shared&&trusted_wgu_origin(&item.origin)){
+                item.preferred=item.origin==origin && item.username==username;
+            }
+        }
+        true
     }
     fn key_from(password:&str,salt:&[u8;16]) -> Result<[u8;32],String> {
         if password.len()<12||password.len()>1024{return Err("Master password must contain 12–1024 characters".into());}
@@ -416,6 +472,30 @@ impl Vault {
             if self.entries.len()>=MAX_ENTRIES{return Err("Vault limit reached".into());}
             self.entries.push(Entry{origin,username,password,autofill,preferred:false});
         }
+        Ok(())
+    }
+    /// Preserve the existing secret if the password edit field is empty.
+    pub fn edit_login(&mut self,old_origin:&str,old_username:&str,
+                      origin:String,username:String,password:Option<String>,
+                      autofill:bool)->Result<(),String>{
+        if !self.unlocked(){return Err("Vault locked".into());}
+        if username.len()>320 || password.as_ref().is_some_and(|p|
+            p.is_empty()||p.len()>4096){return Err("Invalid credential length".into());}
+        let index=self.entries.iter().position(|e|
+            e.origin==old_origin&&e.username==old_username)
+            .ok_or("Saved login not found")?;
+        if self.entries.iter().enumerate().any(|(i,e)|i!=index &&
+            e.origin==origin && e.username==username){
+            return Err("A login already exists with that website and username".into());
+        }
+        let e=&mut self.entries[index];
+        if let Some(replacement)=password{
+            e.password.zeroize();
+            e.password=replacement;
+        }
+        e.username.zeroize();e.username=username;
+        e.origin=origin;e.autofill=autofill;
+        if !autofill{e.preferred=false;}
         Ok(())
     }
     pub fn list_cards(&self)->Result<serde_json::Value,String>{
