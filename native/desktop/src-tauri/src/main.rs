@@ -5089,7 +5089,9 @@ async fn restore_tor_proxy(app:&tauri::AppHandle,id:u32,force_check:bool)
     };
     if !is_tor{return Ok(false);}
     let listener_alive=tor_transport::proxy_url(id).is_ok();
-    if listener_alive && !force_check{return Ok(false);}
+    if listener_alive && tor_transport::network_ready() && !force_check{return Ok(false);}
+    // Network loss can invalidate Arti's bootstrap while the listener is
+    // still alive. Repair both network state and the listener, fail-closed.
     tor_transport::prepare(id).await?;
     if listener_alive{return Ok(false);}
     // The former WebView2 controller contains an obsolete SOCKS port.
