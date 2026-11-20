@@ -2277,6 +2277,13 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { di
 }
 .tabs .split-supertab .split-super-pane:hover,
 .tabs .split-supertab .split-super-pane.current{background:#7984b439;}
+/* A supertab is one draggable surface, including every icon and the padding.
+   Do not turn its pane buttons into native HTML drag/drop sources. */
+.tabs .tab.split-supertab,.tabs .split-supertab .split-super-pane{
+  cursor:grab;user-select:none;-webkit-user-select:none;touch-action:none;
+}
+body.tab-dragging .tabs .tab.split-supertab,
+body.tab-dragging .tabs .split-supertab .split-super-pane{cursor:grabbing!important;}
 .tabs .split-supertab .tab-symbol{width:15px;height:15px;display:grid;place-items:center;overflow:hidden;line-height:1;}
 .tabs .split-supertab .tab-symbol img{width:15px;height:15px;object-fit:contain;}
 .tabs .split-supertab .split-super-divider{
