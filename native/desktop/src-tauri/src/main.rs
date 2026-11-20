@@ -3594,6 +3594,11 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                             let _=app.run_on_main_thread(move||refresh_browser_favicon(&worker,id,&label));
                         });
                     }
+                    #[cfg(windows)]
+                    if is_active && event.url().host_str()==Some("example.com") &&
+                       std::env::args().any(|arg|arg=="--minternet-autofill-smoke"){
+                        start_native_autofill_smoke(&for_load,id,view.label().to_string());
+                    }
                     // Automatically fill one enabled, encrypted saved login
                     // after the exact HTTPS page has loaded. Locked vaults,
                     // private/secret tabs and ambiguous accounts are skipped.
@@ -4234,6 +4239,79 @@ fn fill_saved_credential_from(app:&tauri::AppHandle,id:u32,manual:bool,
     script.zeroize();
     result?;
     Ok(true)
+}
+
+// CI-only: genuine WebView2 receives a dummy saved login on an HTTPS page.
+// This is a native injection and DOM-verification test, not a claim that
+// anyone's WGU account has been tested. Real user data is never involved.
+#[cfg(windows)]
+fn start_native_autofill_smoke(app:&tauri::AppHandle,id:u32,label:String){
+    static STARTED:AtomicBool=AtomicBool::new(false);
+    if STARTED.swap(true,Ordering::AcqRel){return;}
+    let owner=app.clone();
+    std::thread::spawn(move||{
+        std::thread::sleep(Duration::from_millis(500));
+        let task=owner.clone();
+        let _=owner.run_on_main_thread(move||{
+            let marker=std::env::temp_dir().join(format!(
+                "minternet-autofill-{}",std::process::id()));
+            let Some(view)=task.get_webview(&label)else{
+                let _=std::fs::write(marker.with_extension("failed"),"Missing real WebView2");
+                return;
+            };
+            let fixture=r#"(() => {
+              if(location.origin!=='https://example.com')return false;
+              const form=document.createElement('form');
+              form.id='signinForm';
+              const username=document.createElement('input');
+              username.type='text';username.name='student-username';
+              username.autocomplete='username';username.id='minternet-smoke-user';
+              const password=document.createElement('input');
+              password.type='password';password.name='student-password';
+              password.autocomplete='current-password';password.id='minternet-smoke-password';
+              form.append(username,password);
+              document.body.replaceChildren(form);
+              return true;
+            })()"#;
+            if let Err(error)=view.eval(fixture){
+                let _=std::fs::write(marker.with_extension("failed"),error.to_string());
+                return;
+            }
+            if let Err(error)=fill_saved_credential(&task,id,false,None){
+                let _=std::fs::write(marker.with_extension("failed"),error);
+                return;
+            }
+            let follow=task.clone();
+            std::thread::spawn(move||{
+                std::thread::sleep(Duration::from_millis(750));
+                let app=follow.clone();
+                let _=follow.run_on_main_thread(move||{
+                    let Some(webview)=app.get_webview(&label)else{
+                        let _=std::fs::write(marker.with_extension("failed"),"Smoke WebView2 disappeared");
+                        return;
+                    };
+                    let result=webview.eval_with_callback(r#"(() => {
+                      const user=document.getElementById('minternet-smoke-user');
+                      const pass=document.getElementById('minternet-smoke-password');
+                      return user?.value==='smoke-wgu-student' &&
+                             pass?.value==='smoke-wgu-password';
+                    })()"#,move|result|{
+                        if result.trim()=="true"{
+                            let _=std::fs::write(marker.with_extension("ok"),
+                                "PASS: real WebView2 filled both encrypted-vault dummy login fields");
+                        }else{
+                            let _=std::fs::write(marker.with_extension("failed"),
+                                format!("Autofill did not populate both fields: {}",result.chars().take(120).collect::<String>()));
+                        }
+                    });
+                    if let Err(error)=result{
+                        let _=std::fs::write(std::env::temp_dir().join(format!(
+                            "minternet-autofill-{}.failed",std::process::id())),error.to_string());
+                    }
+                });
+            });
+        });
+    });
 }
 
 // Prepare one lightweight WebView2 controller only after the user focuses a
@@ -8398,6 +8476,23 @@ fn main() {
             let turbo_smoke = std::env::args().any(|a| a == "--minternet-turbo-smoke");
             let tor_browser_smoke = std::env::args().any(|a| a == "--minternet-tor-browser-smoke");
             let auth_popup_smoke = std::env::args().any(|a| a == "--minternet-auth-popup-smoke");
+            let autofill_smoke = std::env::args().any(|a| a == "--minternet-autofill-smoke");
+            if autofill_smoke {
+                // A throwaway encrypted vault with fictional credentials
+                // verifies the same native selection/injection path as Logins.
+                let scratch=std::env::temp_dir().join(format!(
+                    "minternet-autofill-vault-{}.enc",std::process::id()));
+                let mut temp=password_vault::Vault::default();
+                temp.unlock(&scratch,"Smoke-only Master Password 2026!",true)
+                    .map_err(std::io::Error::other)?;
+                temp.put("https://example.com".into(),
+                         "smoke-wgu-student".into(),"smoke-wgu-password".into(),true)
+                    .map_err(std::io::Error::other)?;
+                *app.state::<Mutex<password_vault::Vault>>().lock()
+                    .map_err(|e|std::io::Error::other(e.to_string()))?=temp;
+                app.state::<Mutex<lock_preferences::Access>>().lock()
+                    .map_err(|e|std::io::Error::other(e.to_string()))?.permit("logins");
+            }
             let passkey_smoke = std::env::args().any(|a| a == "--minternet-passkey-smoke");
             let blank_render_smoke=std::env::args().any(|a|a=="--minternet-blank-render-smoke");
             let white_surface_smoke=std::env::args().any(|a|a=="--minternet-white-surface-smoke");
@@ -8552,7 +8647,8 @@ fn main() {
                                     }
                                   },300);
                                 "#);
-                            } else if smoke || auth_popup_smoke || passkey_smoke || cookie_smoke ||
+                            } else if smoke || auth_popup_smoke || autofill_smoke ||
+                                passkey_smoke || cookie_smoke ||
                                 blank_render_smoke || white_surface_smoke {
                                 let _ = view.eval(
                                     "setTimeout(() => window.minternet?.command('navigate', 'https://example.com'), 200)"

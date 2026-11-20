@@ -263,3 +263,14 @@ test('manual WGU default is native-verified and overrides stale enabled subdomai
   assert.match(vault,/entry\.preferred && entry\.autofill/);
   assert.match(vault,/e\.origin==destination&&!e\.autofill/);
 });
+
+test('Windows release verifies actual WebView2 login autofill, not only eval submission',()=>{
+  const native=fs.readFileSync(path.join(__dirname,'../native/desktop/src-tauri/src/main.rs'),'utf8');
+  const workflow=fs.readFileSync(path.join(__dirname,'../.github/workflows/native-windows.yml'),'utf8');
+  assert.match(native,/fn start_native_autofill_smoke/);
+  assert.match(native,/--minternet-autofill-smoke/);
+  assert.match(native,/fill_saved_credential\(&task,id,false,None\)/);
+  assert.match(native,/eval_with_callback/);
+  assert.match(workflow,/Verify actual WebView2 login autofill from a throwaway encrypted native vault/);
+  assert.match(workflow,/minternet-autofill-\$\(\$p.Id\)\.ok/);
+});

@@ -160,6 +160,34 @@ jobs:
             if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
             Remove-Item $marker -Force -ErrorAction SilentlyContinue
           }
+      - name: Verify actual WebView2 login autofill from a throwaway encrypted native vault
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = "$env:RUNNER_TEMP\minternet-portable\Minternet-Portable-x64.exe"
+          $p = Start-Process -FilePath $exe -ArgumentList "--minternet-autofill-smoke" -PassThru
+          $ok = Join-Path $env:TEMP "minternet-autofill-$($p.Id).ok"
+          $failed = Join-Path $env:TEMP "minternet-autofill-$($p.Id).failed"
+          $scratch = Join-Path $env:TEMP "minternet-autofill-vault-$($p.Id).enc"
+          try {
+            $found = $false
+            for ($i = 0; $i -lt 40; $i++) {
+              Start-Sleep -Seconds 2
+              $p.Refresh()
+              if ($p.HasExited) { throw "Minternet exited during real WebView2 login autofill smoke" }
+              if (Test-Path $failed) { throw "Native autofill failed: $(Get-Content $failed -Raw)" }
+              if (Test-Path $ok) { $found = $true; break }
+            }
+            if (!$found) { throw "WebView2 did not confirm filling both dummy login fields" }
+            $proof = Get-Content $ok -Raw
+            if ($proof -notmatch 'real WebView2 filled both encrypted-vault dummy login fields') {
+              throw "Autofill proof was invalid: $proof"
+            }
+            "PASS: Native WebView2 decrypted and populated synthetic login form (no real accounts)." >> $env:GITHUB_STEP_SUMMARY
+          } finally {
+            if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
+            Remove-Item $ok,$failed,$scratch -Force -ErrorAction SilentlyContinue
+          }
       - name: Reopen actual last selected website from saved session after fresh launch
         shell: pwsh
         run: |
