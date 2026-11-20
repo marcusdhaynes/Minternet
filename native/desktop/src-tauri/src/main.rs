@@ -96,6 +96,15 @@ impl Default for BrowserPreferences{
 }
 struct BrowserPreferenceState(Mutex<BrowserPreferences>);
 
+// An in-memory, per-process gate: cookies are never written to a Minternet
+// settings file, a log, cloud sync or browser-chrome IPC.
+#[derive(Default)]
+struct PrivateLoginCopies {
+    pending:std::collections::HashSet<u32>,
+    seeded:std::collections::HashSet<u32>,
+}
+struct PrivateLoginCopyState(Mutex<PrivateLoginCopies>);
+
 fn validate_homepage(url:&str)->Result<String,String>{
     if url.len()>2048{return Err("Homepage URL too long".into());}
     let candidate=tauri::Url::parse(url)
@@ -4668,11 +4677,14 @@ fn prepare_active(app: &tauri::AppHandle) -> Result<(), String> {
                 display_active(app);
             }
         }
-        Some((url, _, active)) if url != HOME => {
-            // Enter may have arrived during initialization. The same prepared
-            // controller can now navigate, avoiding a second WebView2 startup.
-            view.navigate(tauri::Url::parse(&url).map_err(|e| e.to_string())?)
-                .map_err(|e| e.to_string())?;
+        Some((url, current_private, active)) if url != HOME => {
+            // Enter may have arrived during initialization. Snapshot regular
+            // logins first, then navigate this already-prepared InPrivate view.
+            let target=tauri::Url::parse(&url).map_err(|e|e.to_string())?;
+            if !(current_private &&
+                defer_private_first_navigation(app,id,&target,Some(view.clone()))?){
+                view.navigate(target).map_err(|e|e.to_string())?;
+            }
             if active { display_active(app); }
         }
         Some(_) => { /* Empty tab stays hidden until the first navigation. */ }
@@ -4743,6 +4755,115 @@ fn new_window_startup()->Option<(tauri::Url,bool)>{
             .map(|url|(url,a[0]=="--minternet-open-private-window")))
 }
 
+// Copy the current regular-profile cookie jar, including HttpOnly session
+// cookies, into a new InPrivate WebView *before* its first real navigation.
+// Tauri WebView2 cookie reads can deadlock on the UI thread: perform all cookie
+// enumeration on a separate native worker. The HTTPS destination, cookie names
+// and values are never exposed to the browser chrome or saved by Minternet.
+//
+// This is a one-way snapshot. It cannot copy site-specific IndexedDB,
+// localStorage or hardware-bound sign-in state, and intentionally never syncs
+// cookies back out of the InPrivate renderer.
+fn private_login_sharing_enabled(app:&tauri::AppHandle)->bool{
+    app.state::<BrowserPreferenceState>().0.lock()
+        .map(|prefs|prefs.private_login_sharing).unwrap_or(false)
+}
+fn defer_private_first_navigation(app:&tauri::AppHandle,id:u32,
+    target:&tauri::Url,existing:Option<tauri::Webview>)->Result<bool,String>{
+    if !matches!(target.scheme(),"https"|"http")||
+       !private_login_sharing_enabled(app){return Ok(false);}
+    let (is_private,normal_labels)={
+        let state=app.state::<Mutex<Browser>>();
+        let browser=state.lock().map_err(|e|e.to_string())?;
+        let eligible=browser.tabs.iter().any(|tab|tab.id==id&&tab.private&&
+            !tab.tor&&tab.secret_id.is_none());
+        // Include non-private website profiles (including extension-isolated
+        // ones), but never read from a Tor, Secret or Private Tab.
+        let labels=browser.tabs.iter().filter(|tab|
+            !tab.private&&!tab.tor&&tab.secret_id.is_none())
+            .filter_map(|tab|tab.view.clone()).collect::<Vec<_>>();
+        (eligible,labels)
+    };
+    if !is_private{return Ok(false);}
+    {
+        let state=app.state::<PrivateLoginCopyState>();
+        let saved=state.0.lock().map_err(|e|e.to_string())?;
+        if saved.seeded.contains(&id){return Ok(false);}
+        if saved.pending.contains(&id){return Ok(true);}
+    }
+    // The trusted chrome uses the persistent default browser profile.
+    // Querying it also works after the user has closed all normal tabs.
+    let mut sources=Vec::new();
+    if let Some(chrome)=app.get_webview("chrome"){sources.push(chrome);}
+    for label in normal_labels{
+        if let Some(normal)=app.get_webview(&label){sources.push(normal);}
+    }
+    if sources.is_empty(){return Ok(false);}
+    let private_view=if let Some(view)=existing{view}else{
+        // A temporary first-party warmup view is essential: the first HTTP
+        // request must not race the session-cookie import.
+        create_webview(app,id,WebviewUrl::App("warmup.html".into()),true)?;
+        app.get_webview(&format!("tab-{id}"))
+            .ok_or("Could not create isolated Private Tab")?
+    };
+    let expected_label=private_view.label().to_string();
+    {
+        let state=app.state::<PrivateLoginCopyState>();
+        let mut saved=state.0.lock().map_err(|e|e.to_string())?;
+        if saved.seeded.contains(&id){return Ok(false);}
+        if !saved.pending.insert(id){return Ok(true);}
+    }
+    let owner=app.clone();
+    std::thread::spawn(move||{
+        let mut seen=std::collections::HashSet::new();
+        // Cookie data exists only within this worker and its isolated target
+        // profile. Never print it or send it through the JS command bridge.
+        for source in sources{
+            if !private_login_sharing_enabled(&owner){break;}
+            if let Ok(cookies)=source.cookies(){
+                for cookie in cookies.into_iter().take(8000){
+                    if !private_login_sharing_enabled(&owner){break;}
+                    let key=(cookie.domain().unwrap_or("").to_string(),
+                        cookie.path().unwrap_or("/").to_string(),
+                        cookie.name().to_string());
+                    if seen.insert(key){
+                        let _=private_view.set_cookie(cookie);
+                    }
+                }
+            }
+        }
+        let handle=owner.clone();
+        let _=owner.run_on_main_thread(move||{
+            // A closed or switched tab must never navigate using a stale
+            // login import. The callback always resolves the current URL.
+            let destination={
+                let state=handle.state::<Mutex<Browser>>();
+                state.lock().ok().and_then(|browser|
+                    browser.tabs.iter().find(|tab|
+                        tab.id==id&&tab.private&&!tab.tor&&tab.secret_id.is_none()&&
+                        tab.view.as_deref()==Some(expected_label.as_str())&&
+                        tab.url!=HOME).map(|tab|tab.url.clone()))
+            };
+            {
+                let state=handle.state::<PrivateLoginCopyState>();
+                if let Ok(mut saved)=state.0.lock(){
+                    saved.pending.remove(&id);
+                    if destination.is_some(){saved.seeded.insert(id);}
+                }
+            }
+            if let Some(address)=destination{
+                if let Ok(url)=tauri::Url::parse(&address){
+                    if let Some(view)=handle.get_webview(&expected_label){
+                        let _=view.navigate(url);
+                        display_active(&handle);
+                    }
+                }
+            }
+        });
+    });
+    Ok(true)
+}
+
 fn navigate_tab(app: &tauri::AppHandle, id: u32, url: Option<tauri::Url>, append: bool) -> Result<(), String> {
     let str_url = url.as_ref().map(|u| u.as_str()).unwrap_or(HOME).to_string();
     // Only Tor profiles may navigate to .onion destinations.
@@ -4785,17 +4906,25 @@ fn navigate_tab(app: &tauri::AppHandle, id: u32, url: Option<tauri::Url>, append
             display_active(app);
             return Ok(());
         }
-        if let Some(label) = existing {
-            if let Some(view) = app.get_webview(&label) {
-                view.navigate(url).map_err(|e| e.to_string())?;
-            } else {
-                create_webview(app, id, WebviewUrl::External(url), private)?;
-            }
+        // Do not let the first HTTP request race imported login cookies.
+        // Existing private WebViews are kept in an isolated InPrivate profile.
+        let existing_view=existing.as_deref().and_then(|label|app.get_webview(label));
+        if private && defer_private_first_navigation(app,id,&url,existing_view.clone())?{
+            display_active(app);
+            return Ok(());
+        }
+        if let Some(view)=existing_view {
+            view.navigate(url).map_err(|e|e.to_string())?;
         } else {
-            create_webview(app, id, WebviewUrl::External(url), private)?;
+            create_webview(app,id,WebviewUrl::External(url),private)?;
         }
     } else if let Some(label) = existing {
         if let Some(view) = app.get_webview(&label) { let _ = view.close(); }
+        if private {
+            if let Ok(mut copy)=app.state::<PrivateLoginCopyState>().0.lock(){
+                copy.seeded.remove(&id);
+            }
+        }
         let state = app.state::<Mutex<Browser>>();
         if let Ok(mut b) = state.lock() {
             if let Some(tab) = b.tabs.iter_mut().find(|t| t.id == id) { tab.view = None; }
@@ -8487,6 +8616,7 @@ fn main() {
         .manage(UndoHistory(Mutex::new(VecDeque::new())))
         .manage(Mutex::new(Browser::new()))
         .manage(BrowserPreferenceState(Mutex::new(BrowserPreferences::default())))
+        .manage(PrivateLoginCopyState(Mutex::new(PrivateLoginCopies::default())))
         .manage(Mutex::new(password_vault::Vault::default()))
         .manage(Mutex::new(lock_preferences::Access::default()))
         .manage(Mutex::new(secret_bookmarks::SecretVault::default()))
