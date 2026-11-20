@@ -5,6 +5,9 @@ use std::{io::{Read,Write},net::{TcpListener,TcpStream},sync::{OnceLock,Mutex},
 use serde_json::{json,Value};
 use rand::{rngs::OsRng,RngCore};
 use tauri::Manager;
+use base64::Engine;
+use sha2::Digest;
+use std::fs;
 
 const PORT:u16=18761;
 static SECRET:OnceLock<String>=OnceLock::new();
@@ -48,6 +51,48 @@ fn cors(origin:&str)->String {
 fn reply(stream:&mut TcpStream,status:&str,content_type:&str,body:&[u8],extra:&str,origin:&str) {
     let headers=format!("HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nConnection: close\r\n{}{}\r\n",body.len(),cors(origin),extra);
     let _=stream.write_all(headers.as_bytes());let _=stream.write_all(body);
+}
+// Custom artwork is saved as a small separate file in the extension's
+// native storage, not embedded in every catalog response or video file.
+fn store_poster(app:&tauri::AppHandle, changes:&mut Value)->Result<(),String>{
+    let Some(object)=changes.as_object_mut() else{return Err("Invalid media changes".into())};
+    let Some(value)=object.get("poster").and_then(Value::as_str) else{return Ok(())};
+    if !value.starts_with("data:image/"){return Ok(())}
+    let (mime,encoded)=value.split_once(",").ok_or("Malformed poster image")?;
+    let extension=match mime{
+        "data:image/webp;base64"=>"webp",
+        "data:image/jpeg;base64"=>"jpg",
+        _=>return Err("Unsupported local poster format".into())
+    };
+    if encoded.len()>360*1024{return Err("Poster image exceeds maximum size".into())}
+    let bytes=base64::engine::general_purpose::STANDARD
+        .decode(encoded).map_err(|_|"Invalid poster image encoding".to_string())?;
+    if bytes.len()<12||bytes.len()>256*1024 {
+        return Err("Poster image size is outside accepted limits".into());
+    }
+    let valid=match extension{
+        "webp"=>bytes.starts_with(b"RIFF")&&bytes.get(8..12)==Some(b"WEBP"),
+        "jpg"=>bytes.starts_with(&[0xff,0xd8,0xff]),
+        _=>false
+    };
+    if !valid{return Err("Selected file is not a valid poster image".into())}
+    let digest=sha2::Sha256::digest(&bytes);
+    let hash=digest.iter().map(|n|format!("{n:02x}")).collect::<String>();
+    let filename=format!("{hash}.{extension}");
+    let folder=app.path().app_data_dir().map_err(|e|e.to_string())?.join("media-posters");
+    fs::create_dir_all(&folder).map_err(|e|e.to_string())?;
+    let destination=folder.join(&filename);
+    if !destination.exists(){
+        // Content-addressed image names cannot escape the dedicated directory.
+        fs::write(&destination,&bytes).map_err(|e|e.to_string())?;
+    }
+    object.insert("poster".into(),json!(format!("native-poster:{filename}")));
+    Ok(())
+}
+fn valid_poster_file(name:&str)->bool{
+    let (hash,extension)=name.rsplit_once('.').unwrap_or(("",""));
+    hash.len()==64&&hash.bytes().all(|c|c.is_ascii_hexdigit()&&!(b'A'..=b'F').contains(&c))&&
+        matches!(extension,"webp"|"jpg")
 }
 fn mime(path:&Path)->&'static str {
     match path.extension().and_then(|x|x.to_str()).unwrap_or("").to_lowercase().as_str(){
@@ -127,7 +172,7 @@ fn handle(mut stream:TcpStream,app:&tauri::AppHandle){
     // All mutations require an explicit CORS-approved POST plus an unguessable
     // in-process token. Page JavaScript can never pass arbitrary file paths.
     if method=="POST" && path=="/manage" {
-        if content_length==0||content_length>48*1024 {
+        if content_length==0||content_length>512*1024 {
             reply(&mut stream,"413 Payload Too Large","text/plain",b"Invalid request","",origin);return;
         }
         let mut body=request_bytes[end+4..].to_vec();
@@ -167,7 +212,13 @@ fn handle(mut stream:TcpStream,app:&tauri::AppHandle){
                 "updateItem"=>{
                     let library_id=payload.get("libraryId").and_then(Value::as_str).ok_or("Library ID required")?;
                     let item_id=payload.get("itemId").and_then(Value::as_str).ok_or("Item ID required")?;
-                    let changes=payload.get("changes").cloned().ok_or("Changes required")?;
+                    let mut changes=payload.get("changes").cloned().ok_or("Changes required")?;
+                    // Validate ownership before storing the poster bytes.
+                    if !lib.collections.iter().any(|l|l.id==library_id &&
+                        lib.items.iter().any(|i|i.id==item_id&&l.folder_ids.contains(&i.folder_id))){
+                        return Err("Video is not in this library".into());
+                    }
+                    store_poster(app,&mut changes)?;
                     lib.update_item(library_id,item_id,changes)?;
                     Ok(json!({"updated":true}))
                 },
@@ -209,6 +260,13 @@ fn handle(mut stream:TcpStream,app:&tauri::AppHandle){
                         if let Some(changes)=lib.overrides.get(&item.id).and_then(Value::as_object){
                             for (key,value) in changes{o.insert(key.clone(),value.clone());}
                         }
+                        if let Some(name)=o.get("poster").and_then(Value::as_str)
+                            .and_then(|s|s.strip_prefix("native-poster:")){
+                            if valid_poster_file(name){
+                                o.insert("poster".into(),json!(format!(
+                                    "http://127.0.0.1:{PORT}/poster/{name}?key={}",token())));
+                            }
+                        }
                         o.insert("url".into(),json!(format!("http://127.0.0.1:{PORT}/video/{index}?key={}",token())));
                     }
                     v
@@ -221,6 +279,27 @@ fn handle(mut stream:TcpStream,app:&tauri::AppHandle){
         }).collect::<Vec<_>>();
         let body=json!({"libraries":libraries}).to_string();
         reply(&mut stream,"200 OK","application/json",body.as_bytes(),"",origin);return;
+    }
+    if let Some(name)=path.strip_prefix("/poster/"){
+        if !valid_poster_file(name){
+            reply(&mut stream,"400 Bad Request","text/plain",b"Invalid image name","",origin);
+            return;
+        }
+        let Ok(folder)=app.path().app_data_dir() else{return};
+        let folder=folder.join("media-posters");
+        let source=folder.join(name);
+        drop(lib);
+        let Ok(content)=fs::read(source) else{
+            reply(&mut stream,"404 Not Found","text/plain",b"Poster unavailable","",origin);
+            return;
+        };
+        if content.len()>256*1024{
+            reply(&mut stream,"413 Payload Too Large","text/plain",b"Poster invalid","",origin);
+            return;
+        }
+        reply(&mut stream,"200 OK",if name.ends_with(".webp"){"image/webp"}else{"image/jpeg"},
+            &content,"",origin);
+        return;
     }
     if let Some(id)=path.strip_prefix("/video/"){
         let Some(index)=id.parse::<usize>().ok() else{return};
