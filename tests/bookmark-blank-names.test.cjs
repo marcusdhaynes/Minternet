@@ -59,6 +59,8 @@ test('editing an unnamed bookmark does not prefill its Name with the website tit
   const editor=ui.slice(start,end);
   assert.match(editor,/\$\('bookmarkName'\)\.value\s*=\s*node\s*\?\s*node\.name\s*:/);
   assert.doesNotMatch(editor,/node\?\.name\s*\|\|/);
+  assert.match(editor,/\$\('bookmarkName'\)\.value\s*=\s*node\s*\?\s*node\.name\s*:\s*''/);
+  assert.doesNotMatch(editor,/currentTitle\s*&&/);
 });
 
 test('unnamed bookmarks keep icon-only Bookmark Bar rendering and an optional Name field', () => {

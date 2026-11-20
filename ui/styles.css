@@ -2026,10 +2026,13 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { di
 .history-suggestion-remove{flex:0 0 24px;width:24px;height:25px;margin-right:3px;
  background:transparent;border:0;border-radius:4px;color:#bab1c9;font-size:18px;cursor:pointer;}
 .history-suggestion-remove:hover,.history-suggestion-remove:focus-visible{background:#98405470;color:white;}
-/* One turn per page reload, continuously until native page loading is finished. */
-#reload.refresh-spinning{animation:minternet-refresh-turn .8s linear infinite;transform-origin:center;}
+/* Animate only the symbol, never the surrounding reload button. */
+#reload .reload-glyph{display:inline-block;line-height:1;transform-origin:center;}
+#reload.refresh-spinning .reload-glyph{animation:minternet-refresh-turn .8s linear infinite;}
 @keyframes minternet-refresh-turn{to{transform:rotate(360deg);}}
-@media (prefers-reduced-motion:reduce){#reload.refresh-spinning{animation:none;}}
+@media (prefers-reduced-motion:reduce){
+  #reload.refresh-spinning .reload-glyph{animation:none;}
+}
 /* Explicitly align all generated hundred-percent markers, whatever the max. */
 .volume-slider-wrap .volume-tick{height:8px;}
 

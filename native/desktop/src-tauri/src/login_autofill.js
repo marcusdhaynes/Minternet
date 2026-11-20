@@ -14,7 +14,7 @@
       try{window.__minternetLoginJob?.stop?.();}catch{}
       const register=/(?:sign.?up|register|create.?account|join|forgot.?password|reset.?password|change.?password)/i;
       const signin=/(?:log.?in|sign.?in|sign.?on|pingfed|saml|sso|auth|account|session|identify)/i;
-      const safeRoute=()=>!register.test(location.pathname);
+      const safeRoute=()=>!register.test(location.pathname+' '+(location.hash||''));
       const visible=el=>el?.tagName==='INPUT'&&
         !el.disabled&&!el.readOnly&&el.getClientRects().length>0&&
         el.type!=='hidden'&&el.type!=='file';
@@ -153,11 +153,16 @@
         }
         // Username-first providers (Google, Microsoft and many SPAs) show
         // the email field before creating a password input.
-        const username=inputs.find(el=>token(el).includes('username'))||
-          inputs.find(el=>userCandidate(el)&&
-            (signin.test(location.pathname)||signin.test(
-              (el.form?.getAttribute('action')||'')+' '+
-              (el.form?.id||'')+' '+(el.form?.className||''))));
+        const accountInputs=inputs.filter(el=>
+          ['text','email'].includes(el.type)&&!invalidAccount(el));
+        const username=accountInputs.find(el=>token(el).includes('username'))||
+          accountInputs.find(el=>userCandidate(el)&&
+            (signin.test(location.pathname+' '+(location.hash||''))||
+             signin.test((el.form?.getAttribute('action')||'')+' '+
+               (el.form?.id||'')+' '+(el.form?.className||''))||
+             // A sole email input may be step one even on a neutral URL.
+             (accountInputs.length===1&&
+               (el.type==='email'||token(el).includes('email')))));
         if(username&&!dangerousForm(username) && !username.value){
           put(username,credential.username);
         }

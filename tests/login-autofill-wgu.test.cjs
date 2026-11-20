@@ -200,4 +200,7 @@ test('no repeated WGU password prompt when optional Windows auto unlock is enabl
   assert.match(preferences,/logins:!policy\.logins/);
   const script=file('login_autofill.js');
   assert.match(script,/if\(\(password\.value&&!marked\.has\(password\)\)/);
+  assert.match(script,/accountInputs\.length===1/);
+  assert.match(script,/token\(el\)\.includes\('email'\)/);
+  assert.match(script,/location\.hash/);
 });

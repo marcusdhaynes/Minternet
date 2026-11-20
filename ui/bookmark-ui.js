@@ -45,6 +45,8 @@
       const thumb=canvas.toDataURL('image/png');
       rememberThumb(address,thumb);
       if(source!==address)rememberThumb(source,thumb);
+      const scope=iconScope(address);
+      if(scope)rememberThumb(scope,thumb);
     }catch{}finally{thumbnailJobs.delete(address);}
   }
   let data;
@@ -113,7 +115,18 @@
   // Cache requests for identical bookmarks; never touch manually chosen icons.
   const faviconCandidates=new Map();
   const faviconGood=new Map();
-  const faviconBad=new Set();
+  // Transient network failures must not hide the icon for this whole session.
+  const faviconBad=new Map();
+  function iconScope(address){
+    try{
+      const page=new URL(address);
+      if(!['https:','http:'].includes(page.protocol))return null;
+      const project=page.hostname.toLowerCase().endsWith('.github.io')
+        ?page.pathname.split('/').filter(Boolean)[0]:null;
+      // GitHub Pages project icons belong to their projects, not the host.
+      return page.origin+(project?'/'+project+'/':'/');
+    }catch{return null;}
+  }
   const iconJobs=[];
   let iconsRunning=0;
   function runIconJobs(){
@@ -212,7 +225,10 @@
     // Keep the site-specific host-letter icon when no usable favicon exists.
     if(index>=candidates.length)return;
     const candidate=candidates[index];
-    if(faviconBad.has(candidate)){tryIcon(slot,address,candidates,index+1);return;}
+    const failedAt=faviconBad.get(candidate);
+    if(failedAt&&Date.now()-failedAt<30000){
+      tryIcon(slot,address,candidates,index+1);return;
+    }
     const img=document.createElement('img');
     img.alt='';
     img.decoding='async';
@@ -221,6 +237,7 @@
       pendingIconRequests.delete(img);
       if(torBookmarkMode)return;
       faviconGood.set(address,candidate);
+      faviconBad.delete(candidate);
       slot.replaceChildren(img);
       slot.classList.remove('bookmark-site-fallback');
       slot.style.removeProperty('--bookmark-icon-hue');
@@ -228,7 +245,7 @@
     },{once:true});
     img.addEventListener('error',()=>{
       pendingIconRequests.delete(img);
-      faviconBad.add(candidate);
+      faviconBad.set(candidate,Date.now());
       tryIcon(slot,address,candidates,index+1);
     },{once:true});
     pendingIconRequests.add(img);
@@ -277,7 +294,7 @@
       const likelySource=['youtube.com','www.youtube.com','m.youtube.com','youtu.be'].includes(faviconHost)
         ?'https://www.youtube.com/favicon.ico'
         :(currentGoogleIcons(safe)[0]||model.favicon(safe));
-      const thumbnail=thumbs.get(safe)||thumbs.get(likelySource);
+      const thumbnail=thumbs.get(safe)||thumbs.get(iconScope(safe))||thumbs.get(likelySource);
       if(thumbnail){
         const img=document.createElement('img');img.alt='';img.decoding='sync';img.src=thumbnail;
         slot.append(img);return slot;
@@ -294,6 +311,52 @@
       slot.textContent=isFolder?'📁':'🔖';
     }
     return slot;
+  }
+  // Learn genuine favicon bytes from normal tabs, including authenticated sites
+  // that reject unauthenticated probes. Never persist private/Secret tab icons.
+  async function learnNativeBookmarkIcon(payload){
+    const {tabId,page,image}=payload||{};
+    if(!Number.isSafeInteger(tabId)||typeof page!=='string'||
+       typeof image!=='string'||image.length>125000||
+       !/^data:image\/png;base64,[a-z0-9+/=]+$/i.test(image))return;
+    const tab=window.minternetGroups?.getLatest()?.tabs?.find(item=>item.id===tabId);
+    if(!tab||tab.private||tab.secretTab||!/^https:\/\//i.test(tab.url))return;
+    const scope=iconScope(page);
+    if(!scope||scope!==iconScope(tab.url))return;
+    const addresses=[];
+    const visit=nodes=>{
+      for(const item of nodes||[]){
+        if(item.kind==='folder')visit(item.children);
+        else if(item.kind==='link'&&!model.icon(item.icon)&&iconScope(item.url)===scope)
+          addresses.push(item.url);
+      }
+    };
+    visit(data.items);
+    if(!addresses.length)return;
+    try{
+      const bitmap=new Image();bitmap.src=image;
+      await bitmap.decode();
+      if(!bitmap.naturalWidth||!bitmap.naturalHeight)return;
+      const canvas=document.createElement('canvas');
+      canvas.width=24;canvas.height=24;
+      const ctx=canvas.getContext('2d');
+      if(!ctx)return;
+      const scale=Math.min(24/bitmap.naturalWidth,24/bitmap.naturalHeight);
+      ctx.clearRect(0,0,24,24);
+      ctx.drawImage(bitmap,(24-bitmap.naturalWidth*scale)/2,
+        (24-bitmap.naturalHeight*scale)/2,bitmap.naturalWidth*scale,bitmap.naturalHeight*scale);
+      const thumb=canvas.toDataURL('image/png');
+      rememberThumb(scope,thumb);
+      for(const address of addresses)rememberThumb(address,thumb);
+      renderBar();
+      if(mode==='manager')renderManager();
+      else if(mode==='folder')renderFolder();
+    }catch{/* Icon decoding errors cannot disrupt browser chrome. */}
+  }
+  if(window.__TAURI__?.event){
+    void window.__TAURI__.event.listen('minternet:native-favicon',event=>{
+      void learnNativeBookmarkIcon(event.payload);
+    }).catch(()=>{});
   }
   function textFor(node) {
     if(node.name)return node.name;
@@ -1099,14 +1162,8 @@
     const node = id ? model.find(data, id) : null;
     draft = { kind, id, parentId };
     $('bookmarkEditorTitle').textContent = id ? 'Edit ' + (kind === 'folder' ? 'Folder' : 'Bookmark') : 'New ' + (kind === 'folder' ? 'Folder' : 'Bookmark');
-    // Only suggest a page title for a new link. An existing blank name is
-    // intentional and must remain blank when the bookmark is reopened.
-    $('bookmarkName').value = node ? node.name :
-      (kind==='link'
-        ?(currentTitle&&currentTitle!=='New Tab'
-           ?currentTitle
-           :window.MinternetSiteNames?.label(currentUrl)||'')
-        :'');
+    // A blank name is an intentional icon-only bookmark, never a missing title.
+    $('bookmarkName').value = node ? node.name : '';
     $('bookmarkUrlField').hidden = kind === 'folder';
     $('bookmarkUrl').value = node?.url || (kind === 'link' ? model.url(currentUrl) || '' : '');
     $('bookmarkRemove').hidden = !id;
