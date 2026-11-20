@@ -71,10 +71,10 @@ fn handle(mut stream:TcpStream,app:&tauri::AppHandle){
     let state=app.state::<std::sync::Mutex<super::media_library::MediaLibrary>>();
     let Ok(lib)=state.lock() else{return};
     if path=="/catalog" {
-        let items=lib.items.iter().map(|item|{
+        let items=lib.items.iter().enumerate().map(|(index,item)|{
             let mut v=serde_json::to_value(item).unwrap_or(Value::Null);
             if let Some(o)=v.as_object_mut(){
-                o.insert("url".into(),json!(format!("http://127.0.0.1:{PORT}/video/{}?key={}",item.id,token())));
+                o.insert("url".into(),json!(format!("http://127.0.0.1:{PORT}/video/{index}?key={}",token())));
             }
             v
         }).collect::<Vec<_>>();
@@ -84,7 +84,8 @@ fn handle(mut stream:TcpStream,app:&tauri::AppHandle){
         reply(&mut stream,"200 OK","application/json",body.as_bytes(),"",origin);return;
     }
     if let Some(id)=path.strip_prefix("/video/"){
-        let Some(item)=lib.items.iter().find(|i|i.id==id) else{
+        let Some(index)=id.parse::<usize>().ok() else{return};
+        let Some(item)=lib.items.get(index) else{
             reply(&mut stream,"404 Not Found","text/plain",b"Not Found","",origin);return;
         };
         let Some(folder)=lib.folders.iter().find(|f|f.id==item.folder_id) else{return};
@@ -160,9 +161,10 @@ pub fn bridge_script()->String {
       window.MinternetMediaLibrary=Object.freeze({
         getCatalog,
         addFolder:async()=>{
-          const before=await getCatalog();
-          const oldCount=before.libraries?.[0]?.folders?.length||0;
+          const beforeRequest=getCatalog();
           window.open('https://minternet-media.invalid/__add','_blank');
+          const before=await beforeRequest;
+          const oldCount=before.libraries?.[0]?.folders?.length||0;
           return new Promise((resolve,reject)=>{
             let attempts=0;
             const check=async()=>{
