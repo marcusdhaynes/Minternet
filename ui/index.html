@@ -258,6 +258,13 @@
           <button id="tabLimitSave" type="button">Save</button>
         </div>
       </section>
+      <section class="browser-path-setting" id="privateLoginSettings" aria-label="Private Tab Login Sessions">
+        <label class="auto-unload-setting" for="privateLoginSharing">
+          <span><strong>Retain Active Logins in Private Tabs</strong>
+            <small>On by default. Copy existing regular-tab login cookies into newly opened Private Tabs without saving Private Tab history or copying their new cookies back. Turn off to open future Private Tabs signed out. Some sites require additional sign-in steps.</small></span>
+          <input type="checkbox" id="privateLoginSharing" checked aria-label="Retain active sign-ins in new Private Tabs">
+        </label>
+      </section>
       <small id="browserPreferencesStatus" class="browser-preferences-status" aria-live="polite" hidden></small>
       <section class="render-compat-settings" aria-label="WebView2 Rendering">
         <strong>Website Rendering</strong>
