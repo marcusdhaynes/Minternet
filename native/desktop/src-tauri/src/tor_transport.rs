@@ -17,7 +17,7 @@ struct TabProxy {
 static CLIENT: tokio::sync::OnceCell<Arc<Client>> = tokio::sync::OnceCell::const_new();
 // Serializes reconnection so competing Tor navigation commands cannot replace
 // a just-created SOCKS port and strand the already-configured WebView2.
-static PREPARE_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new();
+static PREPARE_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 static PROXIES: OnceLock<Mutex<HashMap<u32,TabProxy>>> = OnceLock::new();
 static SESSION_TAG: OnceLock<String> = OnceLock::new();
 
