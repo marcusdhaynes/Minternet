@@ -435,6 +435,7 @@ const torItems=[
   {name:'New Tor Tab',action:'tor'},
   {name:'Open Site in Fresh Tor Tab',action:'duplicate',requiresTor:true},
   {name:'New Identity · Close All Tor Tabs',action:'tor-new-identity'},
+  {name:'Reconnect Tor',action:'tor-reconnect',requiresTor:true},
   {name:'Tor Connection Status',action:'tor-status'}
 ];
 for(const item of torItems){
@@ -452,7 +453,8 @@ for(const item of torItems){
       const result=await command(item.action,item.action==='duplicate'?active.id:undefined);
       if(item.action==='tor-status' && result && !result.message){
         const status=result.bootstrapped?'Tor client ready for traffic':'Tor client not ready';
-        toast(status+' · '+Number(result.bootstrapProgressPercent||0)+'% bootstrap · Not equivalent to Tor Browser');
+        const listener=Number(result.activeTabs||0)>0?' · SOCKS listener active':' · No active SOCKS listener';
+        toast(status+' · '+Number(result.bootstrapProgressPercent||0)+'% bootstrap'+listener+' · Not equivalent to Tor Browser');
       }
       if(result?.tor)focusNewTabAddress();
     }finally{torButton.disabled=false;}
