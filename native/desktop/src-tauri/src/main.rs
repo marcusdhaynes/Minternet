@@ -5360,17 +5360,18 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         return media_library::action(&app,&name,&value);
     }
     if name=="media-library-choose-folder" {
-        let (send,recv)=std::sync::mpsc::channel();
-        let handle=app.clone();
-        app.dialog().file().pick_folder(move |folder| {
-            let result=folder.map(|f|f.to_string());
-            let _=send.send(result);
-        });
-        // The native folder selector returns a path, never browser-provided input.
-        let chosen=tauri::async_runtime::spawn_blocking(move || recv.recv()).await
-            .map_err(|e|e.to_string())?.map_err(|e|e.to_string())?;
-        if let Some(path)=chosen {
-            let result=media_library::action(&handle,"media-library-add-folder",&json!({"path":path}))?;
+        let chosen=tauri::async_runtime::spawn_blocking({
+            let handle=app.clone();
+            move||{
+                let picker=handle.dialog().file().set_title("Add Media Folder");
+                if let Some(main)=handle.get_window("main"){
+                    picker.set_parent(&main).blocking_pick_folder()
+                }else{picker.blocking_pick_folder()}
+            }
+        }).await.map_err(|e|format!("Folder picker failed: {e}"))?;
+        if let Some(folder)=chosen {
+            let path=folder.into_path().map_err(|e|e.to_string())?;
+            let result=media_library::action(&app,"media-library-add-folder",&json!({"path":path.to_string_lossy()}))?;
             return Ok(result);
         }
         return Ok(json!({"ok":false,"cancelled":true}));
