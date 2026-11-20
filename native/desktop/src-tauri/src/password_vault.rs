@@ -155,7 +155,7 @@ impl Vault {
         // Multiple accounts: automatically use only an account the person
         // explicitly designated during a previous Fill. Do not guess.
         let preferred=eligible.into_iter().filter(|e|e.preferred).collect::<Vec<_>>();
-        if preferred.len()==1{Some(preferred[0].clone())}else{None}
+        if preferred.len()==1{Some((*preferred[0]).clone())}else{None}
     }
     /// Automatic selection refuses conflicting WGU accounts or passwords.
     /// Explicitly saved exact-site settings always take precedence.
@@ -184,7 +184,7 @@ impl Vault {
                 choices.push(entry);
             }
         }
-        if choices.len()==1{return Some(choices[0].clone());}
+        if choices.len()==1{return Some((*choices[0]).clone());}
         let preferred=choices.into_iter().filter(|choice|
             self.entries.iter().any(|entry|entry.preferred &&
                 entry.username==choice.username && entry.password==choice.password &&
@@ -644,6 +644,53 @@ mod tests {
             .unwrap().username,"alice");
         vault.lock();
         let _=fs::remove_file(file);
+    }
+    #[test]
+    fn wgu_subdomains_share_only_an_unambiguous_enabled_login(){
+        let path=std::env::temp_dir().join(format!("minternet-wgu-test-{}.enc",rand::random::<u64>()));
+        let mut vault=Vault::default();
+        vault.unlock(&path,"correct horse battery staple",true).unwrap();
+        vault.put("https://my.wgu.edu".into(),"student".into(),"first-secret".into(),true).unwrap();
+        assert_eq!(vault.matching_site("https://access.wgu.edu",false,None,None)
+            .unwrap().password,"first-secret");
+        assert_eq!(vault.matching_site("https://arbitrary.wgu.edu",false,None,None)
+            .unwrap().username,"student");
+        assert!(vault.matching_site("https://access.wgu.edu.evil.example",false,None,None).is_none());
+        assert!(vault.matching_site("https://fakewgu.edu",false,None,None).is_none());
+        assert!(!trusted_wgu_origin("http://access.wgu.edu"));
+        assert!(!trusted_wgu_origin("https://wgu.edu.attacker.example"));
+        assert!(!trusted_wgu_origin("https://access.wgu.edu:8443"));
+        vault.put("https://access.wgu.edu".into(),"student".into(),"second-secret".into(),true).unwrap();
+        assert!(vault.matching_site("https://other.wgu.edu",false,None,None).is_none());
+        assert!(vault.prefer_site("https://my.wgu.edu","student"));
+        assert_eq!(vault.matching_site("https://other.wgu.edu",false,None,None)
+            .unwrap().password,"first-secret");
+        assert_eq!(vault.matching_site("https://access.wgu.edu",false,None,None)
+            .unwrap().password,"second-secret");
+        vault.put("https://other.wgu.edu".into(),"student".into(),"disabled".into(),false).unwrap();
+        assert!(vault.matching_site("https://other.wgu.edu",false,None,None).is_none());
+        // A user-selected record can fill another verified WGU origin.
+        assert_eq!(vault.matching_site("https://other.wgu.edu",true,
+            Some("student"),Some("https://my.wgu.edu")).unwrap().password,"first-secret");
+        assert!(vault.matching_site("https://notwgu.example",true,
+            Some("student"),Some("https://my.wgu.edu")).is_none());
+        vault.lock();let _=fs::remove_file(path);
+    }
+    #[test]
+    fn editing_saved_login_retains_old_password_unless_replaced(){
+        let path=std::env::temp_dir().join(format!("minternet-login-edit-{}.enc",rand::random::<u64>()));
+        let mut vault=Vault::default();
+        vault.unlock(&path,"correct horse battery staple",true).unwrap();
+        vault.put("https://my.wgu.edu".into(),"old-name".into(),"original".into(),true).unwrap();
+        vault.edit_login("https://my.wgu.edu","old-name",
+            "https://my.wgu.edu".into(),"new-name".into(),None,true).unwrap();
+        assert!(vault.matching("https://my.wgu.edu",true,Some("old-name")).is_none());
+        assert_eq!(vault.matching("https://my.wgu.edu",true,Some("new-name"))
+            .unwrap().password,"original");
+        vault.edit_login("https://my.wgu.edu","new-name",
+            "https://my.wgu.edu".into(),"new-name".into(),Some("updated".into()),true).unwrap();
+        assert_eq!(vault.matching("https://my.wgu.edu",false,None).unwrap().password,"updated");
+        vault.lock();let _=fs::remove_file(path);
     }
     #[test]
     fn identities_are_encrypted_masked_and_persist_with_existing_logins(){
