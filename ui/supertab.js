@@ -19,6 +19,12 @@
    node.setAttribute('aria-label','Split View: '+tabs.map(t=>t.title||'New Tab').join(' | '));
    node.title=tabs.map((t,i)=>(i+1)+'. '+(t.title||'New Tab')).join(' · ');
    node.dataset.splitTabIds=tabs.map(t=>t.id).join(',');
+   // The whole supertab, including its pane buttons, separators and padding,
+   // is a single draggable tab-strip target. Each pane still clicks separately.
+   node.dataset.tabId=String(tabs[0].id);
+   node.addEventListener('click',event=>{
+     if(event.target===node)activate?.((tabs.find(t=>t.id===activeId)||tabs[0]).id);
+   });
    tabs.forEach((tab,i)=>{
      if(i){
        const divider=document.createElement('span');
