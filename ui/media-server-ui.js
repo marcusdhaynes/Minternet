@@ -46,5 +46,15 @@
     try{await call('media-library-rescan');await render();}
     catch(e){say(e.message);}finally{refresh.disabled=false;}
   });
-  void render();
+  // This panel belongs to the user-imported .mext add-on, not to Minternet
+  // itself. Do not show an apparently usable built-in server before install.
+  void (async()=>{
+    try{
+      const state=await call('extensions-list');
+      const installed=(state.extensions||[]).some(extension=>
+        extension.source==='minternet'&&extension.enabled&&extension.nativeMediaServer);
+      host.hidden=!installed;
+      if(installed)await render();
+    }catch{host.hidden=true;}
+  })();
 })();
