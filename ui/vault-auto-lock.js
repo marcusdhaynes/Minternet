@@ -33,8 +33,18 @@
         }catch{/* A temporary IPC failure must not forge a locked state. */}
         return false;
       })();
-      try{return await locking;}
-      finally{locking=null;}
+      let success=false;
+      try{
+        success=await locking;
+        return success;
+      }finally{
+        locking=null;
+        // If IPC was temporarily unavailable, keep the vault closed in the
+        // UI and retry the native revocation instead of silently giving up.
+        if(!success&&!opened&&unlocked){
+          timer=setTimeout(()=>{void lock();},2000);
+        }
+      }
     }
     function schedule(){
       stop();

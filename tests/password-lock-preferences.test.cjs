@@ -35,6 +35,9 @@ test('shared underlying vault does not authorize a locked category',()=>{
   assert.match(main,/name\.starts_with\("vault-identity-"\)/);
   assert.match(main,/vault_section_allowed\(app,"logins"\)/);
   assert.match(main,/section=value\.get\("section"\)/);
+  assert.match(main,/let password_required=lock_preferences::load\(&app\)\.required\(section\)\?/);
+  assert.match(main,/if !password_required && !vault_section_allowed\(&app,section\)/);
+  assert.match(main,/unlock_permitted_sections_from_device\(&app\)/);
   assert.match(main,/access\.lock\(\).*permit\(section\)/s);
 });
 test('settings show independent passwords switches and one-time authorization',()=>{

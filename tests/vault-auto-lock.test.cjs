@@ -132,6 +132,21 @@ test('reopening waits for a previously-started native lock before returning',asy
   await reopening;
   assert.equal(reopened,true);
 });
+test('a transient native lock failure is retried while the panel stays closed',async()=>{
+  const h=harness(),ctrl=h.window.minternetVaultAutoLock.forSection('payments');
+  let attempts=0;
+  h.command(async()=>({ok:++attempts>1}));
+  await ctrl.openManager();ctrl.setUnlocked(true);
+  ctrl.closeManager(true);
+  await h.flush();
+  assert.equal(attempts,1);
+  assert.equal([...h.timers.values()][0].delay,2000);
+  h.advance(2000);
+  await h.flush();
+  assert.equal(attempts,2);
+  assert.deepEqual(h.calls,[['vault-lock','payments'],['vault-lock','payments']]);
+  assert.equal(h.timers.size,0);
+});
 test('timers safely chunk very long hours rather than overflowing setTimeout',async()=>{
   const h=harness(),{amount,unit}=labelFor(h,'identities');
   amount.value='999999';unit.value='hours';unit.change();
