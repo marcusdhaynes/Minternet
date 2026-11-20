@@ -3155,7 +3155,9 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
             .extensions_path(extensions::active_dir(app)?)
     }else{builder};
     let builder = builder
-        .initialization_script(if private || tor {String::new()} else {media_server::bridge_script()})
+        .initialization_script(if private || tor || !extensions::media_server_enabled(app) {
+            String::new()
+        } else {media_server::bridge_script()})
         .initialization_script(include_str!("../../../../ui/site-media-bridge.js"))
         .initialization_script(include_str!("../../../../ui/site-fullscreen-bridge.js"))
         .initialization_script(include_str!("../../../../ui/site-download-links.js"))
@@ -3334,7 +3336,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                             page.starts_with("https://marcusdhaynes.github.io/MarmaladePlayer/")
                         )
                     });
-                if allowed {
+                if allowed && extensions::media_server_enabled(&for_popup) {
                     let app=for_popup.clone();
                     std::thread::spawn(move||{
                         let picked=app.dialog().file()
@@ -5473,6 +5475,10 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         }
         schedule_surface_restore(&app);
         return Ok(json!({"ok":true}));
+    }
+    if matches!(name.as_str(),"media-library-get"|"media-library-add-folder"|"media-library-remove-folder"|"media-library-rescan"|"media-library-choose-folder")
+        && !extensions::media_server_enabled(&app){
+        return Err("Install and enable Marmaladeum Media Server.mext in Minternet Extensions, then restart.".into());
     }
     if matches!(name.as_str(),"media-library-get"|"media-library-add-folder"|"media-library-remove-folder"|"media-library-rescan"){
         return media_library::action(&app,&name,&value);
@@ -8384,8 +8390,12 @@ fn main() {
                 let _=std::fs::remove_file(folder.join("privacy-shield.v1.json"));
             }
             media_devices::load(app.handle());
-            if let Err(error)=media_server::start(app.handle().clone()){
-                eprintln!("Minternet Media Server unavailable: {error}");
+            // Only start the native engine after the user installs and enables
+            // the Marmaladeum Media Server .mext add-on. Restart applies changes.
+            if extensions::media_server_enabled(app.handle()){
+                if let Err(error)=media_server::start(app.handle().clone()){
+                    eprintln!("Marmaladeum Media Server add-on unavailable: {error}");
+                }
             }
             if let Ok(mut library)=app.state::<Mutex<media_library::MediaLibrary>>().lock(){
                 *library=media_library::MediaLibrary::load(app.handle());
