@@ -5,6 +5,7 @@
 (() => {
   const $=id=>document.getElementById(id);
   const trigger=$('paymentManagerOpen');
+  const autoLock=window.minternetVaultAutoLock?.forSection('payments');
   const toolbar=$('paymentToolbarButton');
   if(!trigger||!window.minternet)return;
   const invoke=async(name,value)=>{
@@ -26,6 +27,7 @@
   function report(text){if(status)status.textContent=String(text||'');}
   function close(){
     if(!screen)return;
+    autoLock?.closeManager(!locked);
     toolbar?.setAttribute('aria-expanded','false');
     screen.remove();screen=null;panel=null;auth=null;form=null;list=null;status=null;master=null;
     editingId=null;editFields=null;
@@ -57,6 +59,7 @@
     const data=await invoke('vault-status','payments');
     if(!data)return;
     exists=Boolean(data.exists);locked=!data.unlocked;
+    autoLock?.setUnlocked(!locked);
     sync();
     if(!locked)await renderCards();
   }
@@ -109,6 +112,7 @@
   async function open(){
     if(screen){close();return;}
     if(!window.__TAURI__){window.minternetToast?.('Encrypted payment methods require the Windows desktop app.');return;}
+    await autoLock?.openManager();
     window.minternetHistory?.close?.();
     window.minternetBookmarks?.closeOverlay();
     screen=create('section','payment-screen');
@@ -121,10 +125,11 @@
     panel.setAttribute('aria-label','Saved Payment Methods');
     const header=create('div','payment-head');
     header.append(create('strong','','Payments'));
+    autoLock?.mount(header);
     const lock=create('button','payment-lock','Lock');lock.type='button';
     lock.addEventListener('click',async()=>{
       const result=await invoke('vault-lock','payments');
-      if(result?.ok){locked=true;sync();report('Vault locked.');master?.focus();}
+      if(result?.ok){locked=true;autoLock?.setUnlocked(false);sync();report('Vault locked.');master?.focus();}
     });
     const x=create('button','payment-close','×');x.type='button';
     x.setAttribute('aria-label','Close Payment Methods');
@@ -142,7 +147,7 @@
       event.preventDefault();
       const secret=master.value;master.value='';
       const result=await invoke(exists?'vault-unlock':'vault-create',{password:secret,section:'payments'});
-      if(result?.ok){exists=true;locked=false;sync();await renderCards();report('Encrypted vault unlocked.');}
+      if(result?.ok){exists=true;locked=false;autoLock?.setUnlocked(true);sync();await renderCards();report('Encrypted vault unlocked.');}
     });
     form=create('form','payment-form');
     form.autocomplete='off';

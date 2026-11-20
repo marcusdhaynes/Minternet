@@ -5,6 +5,8 @@
   const $=id=>document.getElementById(id);
   const screen=$('passwordVaultScreen');
   if(!screen)return;
+  const autoLock=window.minternetVaultAutoLock?.forSection('logins');
+  autoLock?.mount(screen.querySelector('.vault-head'));
   const call=(name,value)=>window.minternet?.command(name,value);
   let existing=false,unlocked=false;
   let entries=[],editing=null;
@@ -75,6 +77,7 @@
     const status=await invoke('vault-status');
     if(!status)return;
     existing=Boolean(status.exists);unlocked=Boolean(status.unlocked);
+    autoLock?.setUnlocked(unlocked);
     sync();
     if(unlocked)await list();
     else {entries=[];renderEntries();}
@@ -131,6 +134,7 @@
       window.minternetToast?.('Encrypted passwords require the native desktop version.');
       return;
     }
+    await autoLock?.openManager();
     window.minternetBookmarks?.closeOverlay();
     screen.hidden=false;
     await invoke('chrome-overlay',true);
@@ -141,7 +145,9 @@
     (unlocked?$('vaultUsername'):$('vaultMaster')).focus();
   }
   function close(){
+    if(screen.hidden)return;
     screen.hidden=true;
+    autoLock?.closeManager(unlocked);
     $('vaultMaster').value='';
     $('vaultPassword').value='';
     editing=null;
@@ -191,14 +197,14 @@
   $('vaultClose').addEventListener('click',close);
   $('vaultLock').addEventListener('click',async()=>{
     const result=await invoke('vault-lock','logins');
-    if(result?.ok){unlocked=false;sync();$('vaultMaster').value='';report('Vault locked.');}
+    if(result?.ok){unlocked=false;autoLock?.setUnlocked(false);sync();$('vaultMaster').value='';report('Vault locked.');}
   });
   $('vaultAuthForm').addEventListener('submit',async event=>{
     event.preventDefault();
     const input=$('vaultMaster'),password=input.value;
     input.value='';
     const result=await invoke(existing?'vault-unlock':'vault-create',{password,section:'logins'});
-    if(result?.ok){existing=true;unlocked=true;sync();await list();$('vaultUsername').focus();report('Logins unlocked. Matching saved passwords can now autofill.');}
+    if(result?.ok){existing=true;unlocked=true;autoLock?.setUnlocked(true);sync();await list();$('vaultUsername').focus();report('Logins unlocked. Matching saved passwords can now autofill.');}
   });
   $('vaultEntryForm').addEventListener('submit',async event=>{
     event.preventDefault();

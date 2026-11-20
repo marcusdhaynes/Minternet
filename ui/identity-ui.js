@@ -5,6 +5,7 @@
   const trigger=document.getElementById('identityManagerOpen');
   if(!trigger||!window.minternet)return;
   const command=(name,value)=>window.minternet.command(name,value);
+  const autoLock=window.minternetVaultAutoLock?.forSection('identities');
   const sections=[
     ['Personal',[
       ['full-name','Full Name'],['given-name','First Name'],['middle-name','Middle Name'],
@@ -57,6 +58,7 @@
   function close(){
     if(!screen)return;
     clearEditor();
+    autoLock?.closeManager(unlocked);
     screen.remove();
     screen=null;statusNode=null;auth=null;editor=null;list=null;master=null;
     inputs=new Map();customContainer=null;editingId=null;
@@ -97,6 +99,7 @@
     const result=await call('vault-status','identities');
     if(!result)return;
     exists=Boolean(result.exists);unlocked=Boolean(result.unlocked);
+    autoLock?.setUnlocked(unlocked);
     syncUi();
     if(!unlocked)return;
     const records=await call('vault-identity-list');
@@ -138,10 +141,12 @@
     }
   }
   async function open(){
+    if(screen)return;
     if(!window.__TAURI__){
       window.minternetToast?.('Encrypted identities require native Minternet.');
       return;
     }
+    await autoLock?.openManager();
     window.minternetBookmarks?.closeOverlay();
     window.minternetPayment?.close?.();
     window.minternetHistory?.close?.();
@@ -153,10 +158,11 @@
     panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');
     const head=make('div','payment-head');
     head.append(make('strong','','Identities'));
+    autoLock?.mount(head);
     const lock=make('button','identity-lock','Lock');lock.type='button';
     lock.addEventListener('click',async()=>{
       const result=await call('vault-lock','identities');
-      if(result?.ok){unlocked=false;syncUi();clearEditor();report('Encrypted vault locked.');}
+      if(result?.ok){unlocked=false;autoLock?.setUnlocked(false);syncUi();clearEditor();report('Encrypted vault locked.');}
     });
     const exit=make('button','','×');exit.type='button';exit.title='Close';
     exit.addEventListener('click',close);head.append(lock,exit);
@@ -171,7 +177,7 @@
       event.preventDefault();
       const secret=master.value;master.value='';
       const result=await call(exists?'vault-unlock':'vault-create',{password:secret,section:'identities'});
-      if(result?.ok){exists=true;unlocked=true;await reload();report('Vault unlocked.');}
+      if(result?.ok){exists=true;unlocked=true;autoLock?.setUnlocked(true);await reload();report('Vault unlocked.');}
     });
     editor=make('div','identity-editor');
     const savedTitle=make('strong','identity-subheading','Saved Identities');

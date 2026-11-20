@@ -1408,14 +1408,14 @@ html.minternet-overlay-active .group-editor-backdrop {
 .secret-heading-icon{font-size:21px;color:#bb9dff}
 .secret-heading button{border:1px solid #836b9b66;background:#3c3455;color:#ddd4ec;border-radius:6px;padding:5px 8px;font-size:11px;cursor:pointer}
 .secret-heading #secretLock{margin-left:0}.secret-heading #secretClose{font-size:18px;line-height:1;padding:1px 8px}
-.secret-heading .secret-close-lock{display:flex;align-items:center;gap:4px;margin-left:auto;white-space:nowrap;color:#b9abd4;font-size:10px}
-.secret-heading .secret-close-lock input,.secret-heading .secret-close-lock select{
+.secret-heading .secret-close-lock,.vault-head .secret-close-lock,.payment-head .secret-close-lock{display:flex;align-items:center;gap:4px;margin-left:auto;white-space:nowrap;color:#b9abd4;font-size:10px;min-width:0}
+.secret-heading .secret-close-lock input,.secret-heading .secret-close-lock select,.vault-head .secret-close-lock input,.vault-head .secret-close-lock select,.payment-head .secret-close-lock input,.payment-head .secret-close-lock select{
   height:24px;background:#16142a;color:#eee4ff;border:1px solid #806a9b;border-radius:4px;padding:2px;font:inherit;outline:0
 }
-.secret-heading .secret-close-lock input{width:40px;text-align:center;appearance:textfield;-moz-appearance:textfield}
-.secret-heading .secret-close-lock input::-webkit-inner-spin-button{appearance:none}
-.secret-heading .secret-close-lock select{width:53px;cursor:pointer}
-.secret-heading .secret-close-lock select:focus,.secret-heading .secret-close-lock input:focus{border-color:#bca7f6}
+.secret-heading .secret-close-lock input,.vault-head .secret-close-lock input,.payment-head .secret-close-lock input{width:40px;text-align:center;appearance:textfield;-moz-appearance:textfield}
+.secret-heading .secret-close-lock input::-webkit-inner-spin-button,.vault-head .secret-close-lock input::-webkit-inner-spin-button,.payment-head .secret-close-lock input::-webkit-inner-spin-button{appearance:none}
+.secret-heading .secret-close-lock select,.vault-head .secret-close-lock select,.payment-head .secret-close-lock select{width:53px;cursor:pointer}
+.secret-heading .secret-close-lock select:focus,.secret-heading .secret-close-lock input:focus,.vault-head .secret-close-lock select:focus,.vault-head .secret-close-lock input:focus,.payment-head .secret-close-lock select:focus,.payment-head .secret-close-lock input:focus{border-color:#bca7f6}
 .secret-description{font-size:11px;color:#c6badb;line-height:1.45;margin:11px 15px 8px;min-height:18px}
 .secret-auth,.secret-editor{display:grid;gap:10px;margin:13px 15px}
 .secret-auth label,.secret-editor label,.secret-group-setting{display:grid;gap:5px;font-size:11px;color:#dcd0f0}
