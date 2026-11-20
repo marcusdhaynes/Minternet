@@ -7,12 +7,12 @@ on:
 permissions:
   contents: write
   issues: write
-# Only the newest main-branch Windows build should consume runner time.
-# Superseded commits are canceled; never keep obsolete builds competing with
-# the version that the user's updater will actually install.
+# An active Windows compile must finish even if another commit arrives.
+# GitHub keeps at most one pending run in this group, coalescing rapid pushes
+# while ensuring expensive builds do not get perpetually cancelled.
 concurrency:
   group: minternet-windows-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   portable:
     if: github.ref == 'refs/heads/main'
