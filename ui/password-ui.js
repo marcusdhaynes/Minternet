@@ -7,7 +7,45 @@
   if(!screen)return;
   const call=(name,value)=>window.minternet?.command(name,value);
   let existing=false,unlocked=false;
-  let entries=[];
+  let entries=[],editing=null;
+  const isWguOrigin=origin=>{
+    try{
+      const url=new URL(origin),host=url.hostname.toLowerCase();
+      return url.protocol==='https:'&&(url.port===''||url.port==='443')&&
+        (host==='wgu.edu'||host.endsWith('.wgu.edu'));
+    }catch{return false;}
+  };
+  const siteMatches=(source,destination)=>source===destination||
+    (isWguOrigin(source)&&isWguOrigin(destination));
+  function resetEditor(){
+    editing=null;
+    $('vaultEntryTitle').textContent='Add Login';
+    $('vaultEditCancel').hidden=true;
+    $('vaultSaveButton').textContent='Save Login';
+    $('vaultPasswordHint').hidden=true;
+    $('vaultPassword').required=true;
+    $('vaultPassword').value='';
+    $('vaultPassword').type='password';
+    $('vaultOrigin').value=activeSite();
+    $('vaultUsername').value='';
+    $('vaultAutofill').checked=true;
+  }
+  function editLogin(entry){
+    editing={origin:entry.origin,username:entry.username};
+    $('vaultEntryTitle').textContent='Edit Login';
+    $('vaultEditCancel').hidden=false;
+    $('vaultSaveButton').textContent='Save Changes';
+    $('vaultPasswordHint').hidden=false;
+    $('vaultPassword').required=false;
+    $('vaultPassword').value='';
+    $('vaultPassword').type='password';
+    $('vaultOrigin').value=entry.origin;
+    $('vaultUsername').value=entry.username;
+    $('vaultAutofill').checked=entry.autofill!==false;
+    $('vaultOrigin').focus();
+    report('Editing '+entry.origin+'. Leave Password blank to retain the existing one.');
+  }
+  $('vaultEditCancel').addEventListener('click',()=>{resetEditor();report('Edit cancelled.');});
   let searchTimer=0;
   $('vaultSearch')?.addEventListener('input',()=>{
     clearTimeout(searchTimer);
@@ -63,12 +101,20 @@
       const username=document.createElement('small');
       username.textContent=entry.origin+' · '+entry.username;
       caption.append(domain,username);
-      const fill=document.createElement('button');fill.type='button';fill.textContent='Fill';fill.title='Fill current website (matching HTTPS origin only)';
+      const fill=document.createElement('button');fill.type='button';fill.textContent='Fill';
+      fill.title='Fill the current matching HTTPS site (WGU family supported)';
       fill.addEventListener('click',async()=>{
-        if(activeSite()!==entry.origin){report('Open '+entry.origin+' in the selected tab before filling.');return;}
-        const answer=await invoke('vault-fill',entry.username);
-        if(answer?.filled){close();}else report('No matching login form found. Open the login page first.');
+        if(!siteMatches(entry.origin,activeSite())){
+          report('Open '+entry.origin+' or a verified matching website first.');return;
+        }
+        const answer=await invoke('vault-fill',{origin:entry.origin,username:entry.username});
+        if(answer?.filled){close();}
+        else report('Cannot fill this page. Check the saved login and sign-in form.');
       });
+      const edit=document.createElement('button');edit.type='button';
+      edit.textContent='Edit';edit.className='vault-edit';
+      edit.title='Edit this saved login';
+      edit.addEventListener('click',()=>editLogin(entry));
       const del=document.createElement('button');del.type='button';del.textContent='×';
       del.className='vault-delete';del.title='Delete saved login';
       del.addEventListener('click',async()=>{
@@ -76,7 +122,7 @@
         const result=await invoke('vault-remove',{origin:entry.origin,username:entry.username});
         if(result?.ok)await list();
       });
-      row.append(caption,fill,del);host.append(row);
+      row.append(caption,fill,edit,del);host.append(row);
     }
     if(!visible)host.textContent='No matching logins';
   }
@@ -88,15 +134,17 @@
     window.minternetBookmarks?.closeOverlay();
     screen.hidden=false;
     await invoke('chrome-overlay',true);
-    $('vaultOrigin').value=activeSite();
+    resetEditor();
     report('');
     await refresh();
+    if(!unlocked)report('Autofill paused: unlock Logins or enable automatic unlock in Settings.');
     (unlocked?$('vaultUsername'):$('vaultMaster')).focus();
   }
   function close(){
     screen.hidden=true;
     $('vaultMaster').value='';
     $('vaultPassword').value='';
+    editing=null;
     report('');
     if(window.__TAURI__)void invoke('chrome-overlay',false);
   }
@@ -150,15 +198,23 @@
     const input=$('vaultMaster'),password=input.value;
     input.value='';
     const result=await invoke(existing?'vault-unlock':'vault-create',{password,section:'logins'});
-    if(result?.ok){existing=true;unlocked=true;sync();await list();$('vaultUsername').focus();report('Vault unlocked on this device.');}
+    if(result?.ok){existing=true;unlocked=true;sync();await list();$('vaultUsername').focus();report('Logins unlocked. Matching saved passwords can now autofill.');}
   });
   $('vaultEntryForm').addEventListener('submit',async event=>{
     event.preventDefault();
     const origin=$('vaultOrigin').value,username=$('vaultUsername').value;
     const password=$('vaultPassword').value,autofill=$('vaultAutofill').checked;
+    const command=editing?'vault-edit':'vault-put';
+    const data={origin,username,password,autofill,
+      ...(editing?{oldOrigin:editing.origin,oldUsername:editing.username}:{})};
+    const result=await invoke(command,data);
     $('vaultPassword').value='';
-    const result=await invoke('vault-put',{origin,username,password,autofill});
-    if(result?.ok){await list();report('Encrypted login saved.');}
+    if(result?.ok){
+      const wasEditing=Boolean(editing);
+      resetEditor();await list();
+      report(wasEditing?'Login updated. Autofill uses the revised details.':
+        'Encrypted login saved. Autofill works while Logins is unlocked.');
+    }
   });
 
   // Web Crypto CSPRNG with rejection sampling: no Math.random() for passwords.
