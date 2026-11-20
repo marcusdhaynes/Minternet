@@ -222,7 +222,16 @@ impl MediaLibrary {
     pub fn rescan_all(&mut self) {
         let mut items = Vec::new();
         for folder in &self.folders {
-            items.extend(scan_folder(folder));
+            let root=Path::new(&folder.path);
+            if root.is_dir()&&fs::read_dir(root).is_ok(){
+                items.extend(scan_folder(folder));
+            }else{
+                // Preserve the last known catalog if an external drive is
+                // unplugged or permission is temporarily denied. Never force
+                // users to re-add folders after reconnecting the drive.
+                items.extend(self.items.iter()
+                    .filter(|item|item.folder_id==folder.id).cloned());
+            }
         }
         self.items = items;
         self.last_scan = now_secs();
