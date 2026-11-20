@@ -10,6 +10,7 @@ mod media_devices;
 mod site_fullscreen;
 mod site_video_resume;
 mod media_library;
+mod media_server;
 #[cfg(windows)]
 mod native_surface;
 mod site_context_menu;
@@ -3154,6 +3155,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
             .extensions_path(extensions::active_dir(app)?)
     }else{builder};
     let builder = builder
+        .initialization_script(media_server::bridge_script())
         .initialization_script(include_str!("../../../../ui/site-media-bridge.js"))
         .initialization_script(include_str!("../../../../ui/site-fullscreen-bridge.js"))
         .initialization_script(include_str!("../../../../ui/site-download-links.js"))
@@ -3317,6 +3319,39 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
             }
         })
         .on_new_window(move |url, _features| {
+            if url.as_str()=="https://minternet-media.invalid/__add" {
+                // Sites can only request media folders from a pre-approved origin.
+                // The native picker never accepts web-provided filesystem paths.
+                let allowed=for_popup.state::<Mutex<Browser>>().lock().ok()
+                    .and_then(|browser|browser.tabs.iter().find(|tab|tab.id==id)
+                        .map(|tab|(tab.url.clone(),tab.private,tab.tor)))
+                    .is_some_and(|(page,private_tab,tor_tab)|{
+                        !private_tab&&!tor_tab&&(
+                            page.starts_with("https://marmaladeum.com/")||
+                            page=="https://marmaladeum.com"||
+                            page.starts_with("https://www.marmaladeum.com/")||
+                            page=="https://www.marmaladeum.com"||
+                            page.starts_with("https://marcusdhaynes.github.io/MarmaladePlayer/")
+                        )
+                    });
+                if allowed {
+                    let app=for_popup.clone();
+                    std::thread::spawn(move||{
+                        let picked=app.dialog().file()
+                            .set_title("Add Folder to Minternet Media Server")
+                            .blocking_pick_folder();
+                        if let Some(folder)=picked{
+                            if let Ok(path)=folder.into_path(){
+                                let _=media_library::action(
+                                    &app,"media-library-add-folder",
+                                    &json!({"path":path.to_string_lossy()})
+                                );
+                            }
+                        }
+                    });
+                }
+                return NewWindowResponse::Deny;
+            }
             if url.as_str()=="https://minternet-find.invalid/__open" {
                 let _=for_popup.emit_to("chrome","minternet:find-open",json!({}));
                 return NewWindowResponse::Deny;
@@ -8243,6 +8278,9 @@ fn main() {
                 let _=std::fs::remove_file(folder.join("privacy-shield.v1.json"));
             }
             media_devices::load(app.handle());
+            if let Err(error)=media_server::start(app.handle().clone()){
+                eprintln!("Minternet Media Server unavailable: {error}");
+            }
             if let Ok(mut library)=app.state::<Mutex<media_library::MediaLibrary>>().lock(){
                 *library=media_library::MediaLibrary::load(app.handle());
                 library.rescan_all();
