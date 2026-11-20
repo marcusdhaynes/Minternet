@@ -64,6 +64,38 @@
     remove.addEventListener('click',()=>void modify('extensions-remove',{
       id:entry.id,source:entry.source
     }));
+    if(entry.nativeMediaServer===true){
+      const tag=make('small','extensions-permissions',
+        'Native Add-on · Local folder scanning & media streaming (loopback only)');
+      detail.append(tag);
+      const actions=make('div','',undefined);
+      actions.style.cssText='display:flex;gap:6px;flex-wrap:wrap;align-items:center';
+      const addFolder=make('button','extensions-action','Add Folder');
+      const rescan=make('button','extensions-action','Rescan');
+      const openApp=make('button','extensions-action','Open Marmaladeum');
+      addFolder.type=rescan.type=openApp.type='button';
+      const run=async(command,payload)=>{
+        try{
+          const result=await api.command(command,payload);
+          if(result?.message)throw Error(result.message);
+          if(command==='media-library-choose-folder'&&result?.cancelled){say('Folder selection cancelled.');return;}
+          const catalog=await api.command('media-library-get');
+          if(catalog?.message)throw Error(catalog.message);
+          say('Marmaladeum Media Server: '+(catalog?.items?.length||0)+' videos indexed on this device.');
+        }catch(e){say('Media Server: '+String(e.message||e));}
+      };
+      addFolder.addEventListener('click',()=>void run('media-library-choose-folder',null));
+      rescan.addEventListener('click',()=>void run('media-library-rescan',null));
+      openApp.addEventListener('click',async()=>{
+        try{
+          const result=await api.command('new-url','https://marcusdhaynes.github.io/MarmaladePlayer/');
+          if(result?.message)throw Error(result.message);
+          close();
+        }catch(e){say('Could not open Marmaladeum: '+String(e.message||e));}
+      });
+      actions.append(addFolder,rescan,openApp);
+      detail.append(actions);
+    }
     outer.append(detail,toggle,remove);
     return outer;
   }
