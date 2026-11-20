@@ -16,10 +16,7 @@ fn token()->&'static str {
 fn allowed(origin:&str)->bool {
     origin=="https://marmaladeum.com" ||
     origin=="https://www.marmaladeum.com" ||
-    origin=="https://marcusdhaynes.github.io" ||
-    origin=="http://localhost" ||
-    origin.starts_with("http://localhost:") ||
-    origin=="http://127.0.0.1" || origin.starts_with("http://127.0.0.1:")
+    origin=="https://marcusdhaynes.github.io"
 }
 fn cors(origin:&str)->String {
     if allowed(origin){format!("Access-Control-Allow-Origin: {origin}\r\nVary: Origin\r\nAccess-Control-Allow-Private-Network: true\r\n")}
@@ -147,9 +144,7 @@ pub fn bridge_script()->String {
       const origin=location.origin;
       const permitted=origin==='https://marmaladeum.com'||
         origin==='https://www.marmaladeum.com'||
-        (origin==='https://marcusdhaynes.github.io'&&location.pathname.startsWith('/MarmaladePlayer/'))||
-        origin==='http://localhost'||origin.startsWith('http://localhost:')||
-        origin==='http://127.0.0.1'||origin.startsWith('http://127.0.0.1:');
+        (origin==='https://marcusdhaynes.github.io'&&location.pathname.startsWith('/MarmaladePlayer/'));
       if(!permitted)return;
       const base='http://127.0.0.1:18761';
       const key=__TOKEN__;
