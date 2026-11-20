@@ -25,7 +25,7 @@ test('passkeys are OS-owned and accessible from Logins while vault is locked',()
   const ui=source('ui/password-ui.js');
   const native=source('native/desktop/src-tauri/src/passkey_support.rs');
   const main=source('native/desktop/src-tauri/src/main.rs');
-  assert.match(html,/<section id="vaultPasskeys"/);
+  assert.match(html,/<details id="vaultPasskeys"/);
   assert.ok(html.indexOf('id="vaultPasskeys"')<html.indexOf('id="vaultAuthForm"'));
   for(const id of ['passkeyStatus','passkeyCheck','passkeyManage','passkeyTest']){
     assert.match(html,new RegExp('id="'+id+'"'));
