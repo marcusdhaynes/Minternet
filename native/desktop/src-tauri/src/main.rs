@@ -8311,9 +8311,16 @@ fn main() {
             }
             if let Ok(mut library)=app.state::<Mutex<media_library::MediaLibrary>>().lock(){
                 *library=media_library::MediaLibrary::load(app.handle());
-                library.rescan_all();
-                let _=library.save(app.handle());
             }
+            // Do not block browser startup while indexing large local drives.
+            // Saved catalog remains available immediately; refresh happens off-thread.
+            let scan_app=app.handle().clone();
+            std::thread::spawn(move||{
+                if let Ok(mut library)=scan_app.state::<Mutex<media_library::MediaLibrary>>().lock(){
+                    library.rescan_all();
+                    let _=library.save(&scan_app);
+                }
+            });
             let preferences=load_preferences(app.handle());
             if let Ok(mut saved)=app.state::<BrowserPreferenceState>().0.lock(){
                 *saved=preferences.clone();
