@@ -50,6 +50,7 @@ jobs:
           node --test ../../tests/startup-curtain.test.cjs
           node --check ../../ui/app.js
           node --check ../../ui/browser-settings.js
+          node --check ../../ui/media-server-ui.js
           node --check ../../ui/render-compat-ui.js
           node --test ../../tests/render-compat.test.cjs
           node --check ../../ui/tab-blank-zones.js
