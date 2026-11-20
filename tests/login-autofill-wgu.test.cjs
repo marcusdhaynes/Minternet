@@ -377,3 +377,49 @@ test('non-WGU or password reset pages never use the Sign On click fallback',()=>
   page.runSubmitTimers();
   assert.equal(page.form.submissions,0);
 });
+
+test('10-cycle WGU PingFederate regression: load, refresh, remount and auto sign-on',()=>{
+  for(let pass=0;pass<10;pass++){
+    const route=pass%2===0
+      ?'/pingfed/as/authorization.oauth2'
+      :'/pingfed/idp/SSO.saml2';
+    const page=fakePage({
+      origin:'https://access.wgu.edu',
+      route,accountName:pass%2===0?'pf.username':'pf.anon',
+      navType:pass%3===0?'reload':'navigate'
+    });
+    page.fill('https://access.wgu.edu',{autoSubmit:true});
+    assert.equal(page.user.value,'student-name','username cycle '+pass);
+    assert.equal(page.pw.value,'secret-login','password cycle '+pass);
+    assert.equal(page.getStatus().usernameFilled,true,'username status cycle '+pass);
+    assert.equal(page.getStatus().passwordFilled,true,'password status cycle '+pass);
+    page.runSubmitTimers();
+    assert.equal(page.form.submissions,1,'single sign-on cycle '+pass);
+    for(let retry=0;retry<10;retry++){
+      page.fill('https://access.wgu.edu',{autoSubmit:true});
+      page.runSubmitTimers();
+    }
+    assert.equal(page.form.submissions,1,'no duplicate sign-on cycle '+pass);
+  }
+});
+test('10-cycle WGU security regression: lookalikes and unrelated pages never receive credentials',()=>{
+  for(let pass=0;pass<10;pass++){
+    const domain=pass%2===0?'https://access.wgu.edu.evil.example':'https://other.example';
+    const page=fakePage({origin:domain,route:'/pingfed/as/authorization.oauth2'});
+    page.fill('https://access.wgu.edu',{autoSubmit:true});
+    page.runSubmitTimers();
+    assert.equal(page.user.value,'','username must stay empty cycle '+pass);
+    assert.equal(page.pw.value,'','password must stay empty cycle '+pass);
+    assert.equal(page.form.submissions,0,'no submission cycle '+pass);
+  }
+});
+test('manual Fill never closes Logins before native field verification completes',()=>{
+  const ui=fs.readFileSync(path.join(__dirname,'../ui/password-ui.js'),'utf8');
+  const start=ui.indexOf("fill.addEventListener('click',async()=>{");
+  const end=ui.indexOf("if(isWguOrigin(entry.origin))",start);
+  const handler=ui.slice(start,end);
+  assert.ok(start>=0&&end>start);
+  assert.ok(handler.indexOf("await call('vault-fill-status')")<
+    handler.lastIndexOf("close();"));
+  assert.match(handler,/screen.hidden=false;\s*close\(\)/);
+});
