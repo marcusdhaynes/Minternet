@@ -182,6 +182,133 @@
     window.minternetMediaDevices?.open?.();
   });
   mediaDevices.append(mediaOpen);
+  // Extension-owned settings are isolated under one expandable category.
+  // No browser-specific extension receives a permanent top-level Settings row.
+  const extensionSettings=section('Extensions');
+  extensionSettings.id='extensionSettingsList';
+  const extensionIntro=document.createElement('p');
+  extensionIntro.className='extension-settings-intro';
+  extensionIntro.textContent='Installed add-ons and their settings. Manage each add-on here; work with your media libraries in Marmaladeum.';
+  extensionSettings.append(extensionIntro);
+  const extensionCollection=document.createElement('div');
+  extensionCollection.id='extensionSettingsCollection';
+  extensionCollection.className='extension-settings-collection';
+  extensionSettings.append(extensionCollection);
+  const pluginRenderers=new Map();
+  const addExtensionRenderer=(key,render)=>{
+    if(typeof render==='function')pluginRenderers.set(key,render);
+    void refreshExtensionSettings();
+  };
+  function extensionDetails(label,className,parent){
+    const details=document.createElement('details');
+    details.className='extension-settings-entry '+className;
+    const summary=document.createElement('summary');
+    summary.textContent=label;
+    const body=document.createElement('div');
+    body.className='extension-settings-entry-body';
+    details.append(summary,body);
+    parent.append(details);
+    return {details,body};
+  }
+  function extensionNote(parent,text){
+    const p=document.createElement('p');p.className='extension-settings-note';
+    p.textContent=text;parent.append(p);return p;
+  }
+  function extensionButton(parent,text,fn){
+    const button=document.createElement('button');
+    button.type='button';button.className='extension-settings-button';
+    button.textContent=text;button.addEventListener('click',()=>void fn());
+    parent.append(button);return button;
+  }
+  let extensionRefreshSequence=0;
+  async function refreshExtensionSettings(){
+    const seq=++extensionRefreshSequence;
+    const previousOpen=new Set([...extensionCollection.querySelectorAll('details[open]')]
+      .map(el=>el.dataset.extensionKey||''));
+    try{
+      const result=await window.minternet?.command?.('extensions-list');
+      if(seq!==extensionRefreshSequence)return;
+      if(result?.message)throw Error(result.message);
+      extensionCollection.replaceChildren();
+      const all=(result?.extensions||[]).filter(x=>x&&x.name);
+      if(!all.length){
+        extensionNote(extensionCollection,'No extensions installed. Use the Extensions button in the browser toolbar to import one.');
+        return;
+      }
+      const groups=new Map();
+      for(const ext of all){
+        const group=ext.nativeMediaServer?'Marmaladeum':
+          (String(ext.settingsGroup||ext.name).trim()||'Other Extensions');
+        if(!groups.has(group))groups.set(group,[]);
+        groups.get(group).push(ext);
+      }
+      for(const [group,entries] of groups){
+        const holder=extensionDetails(group,'extension-settings-group',extensionCollection);
+        holder.details.dataset.extensionKey=group;
+        holder.details.open=previousOpen.has(group);
+        for(const ext of entries){
+          const label=ext.nativeMediaServer?'Media Library':ext.name;
+          const inner=extensionDetails(label,'extension-settings-subgroup',holder.body);
+          inner.details.dataset.extensionKey=group+'/'+ext.id;
+          inner.details.open=previousOpen.has(group+'/'+ext.id);
+          const meta=document.createElement('div');
+          meta.className='extension-settings-meta';
+          const stateTag=document.createElement('span');
+          stateTag.textContent=ext.enabled?'Enabled':'Disabled';
+          stateTag.dataset.state=ext.enabled?'enabled':'disabled';
+          const version=document.createElement('span');
+          version.textContent='Version '+(ext.version||'—');
+          meta.append(stateTag,version);
+          inner.body.append(meta);
+          if(ext.nativeMediaServer){
+            const heading=document.createElement('strong');
+            heading.className='extension-settings-subtitle';
+            heading.textContent='Persistent Local Library';
+            inner.body.append(heading);
+            extensionNote(inner.body,
+              'Marmaladeum controls libraries, folders, movies, and TV shows. This extension retains the folders and catalog on your computer, independently of browser folder permissions.');
+            const metric=document.createElement('div');
+            metric.className='extension-settings-metric';
+            metric.textContent=ext.enabled?'Checking local media catalog…':'Enable this extension and restart Minternet to connect.';
+            inner.body.append(metric);
+            if(ext.enabled){
+              window.minternet.command('media-library-get').then(catalog=>{
+                if(catalog?.message)throw Error(catalog.message);
+                const videos=catalog?.items?.length||0;
+                const folders=catalog?.folders?.length||0;
+                metric.textContent=videos+' indexed videos · '+folders+' registered folders';
+              }).catch(e=>{metric.textContent='Native media service unavailable: '+String(e?.message||e);});
+            }
+            const actions=document.createElement('div');
+            actions.className='extension-settings-actions';
+            extensionButton(actions,'Open Marmaladeum',async()=>{
+              const r=await window.minternet.command('new-url','https://marcusdhaynes.github.io/MarmaladePlayer/');
+              if(r?.message)metric.textContent='Could not open Marmaladeum: '+r.message;
+            });
+            extensionButton(actions,'Refresh Status',async()=>{
+              await refreshExtensionSettings();
+            });
+            inner.body.append(actions);
+          }else if(pluginRenderers.has(ext.name)){
+            pluginRenderers.get(ext.name)(inner.body,ext);
+          }else extensionNote(inner.body,
+            'No additional settings provided. Enable, disable, or remove this extension from the toolbar Extensions manager.');
+        }
+      }
+    }catch(e){
+      if(seq!==extensionRefreshSequence)return;
+      extensionCollection.replaceChildren();
+      extensionNote(extensionCollection,'Could not load extensions: '+String(e?.message||e));
+    }
+  }
+  window.minternetExtensionSettings={register:addExtensionRenderer,refresh:refreshExtensionSettings};
+  extensionSettings.closest('details')?.addEventListener('toggle',event=>{
+    if(event.target.open)void refreshExtensionSettings();
+  });
+  window.addEventListener('focus',()=>{
+    if(extensionSettings.closest('details')?.open)void refreshExtensionSettings();
+  });
+  void refreshExtensionSettings();
   const accounts=section('Accounts & Sync');
   move(accounts,'googleSettings');
   // The updater mounts once into this existing node. Keep it within the
