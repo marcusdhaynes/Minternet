@@ -4198,9 +4198,10 @@ fn schedule_wgu_login_autofill(app:&tauri::AppHandle){
     let owner=app.clone();
     std::thread::spawn(move||{
         loop{
-            std::thread::sleep(Duration::from_secs(3));
+            std::thread::sleep(Duration::from_millis(900));
             if owner.get_window("main").is_none(){break;}
-            if !vault_section_allowed(&owner,"logins"){continue;}
+            if !vault_section_allowed(&owner,"logins") &&
+               !vault_section_allowed(&owner,"identities"){continue;}
             let worker=owner.clone();
             let _=owner.run_on_main_thread(move||{
                 let id={
@@ -4213,10 +4214,31 @@ fn schedule_wgu_login_autofill(app:&tauri::AppHandle){
                 };
                 // A saved eligible credential is mandatory; this is not a
                 // generic form scraper and cannot fill another site's login.
-                let _=fill_saved_credential(&worker,id,false,None);
+                if vault_section_allowed(&worker,"logins"){
+                    let _=fill_saved_credential(&worker,id,false,None);
+                }
+                if vault_section_allowed(&worker,"identities"){
+                    let _=fill_unique_identity_automatically(&worker);
+                }
             });
         }
     });
+}
+
+// A single saved identity needs no picker. Multiple identities remain manual:
+// never guess which person's personal information belongs on a site.
+fn fill_unique_identity_automatically(app:&tauri::AppHandle)->Result<bool,String>{
+    if !vault_section_allowed(app,"identities"){return Ok(false);}
+    let selected={
+        let state=app.state::<Mutex<password_vault::Vault>>();
+        let vault=state.lock().map_err(|e|e.to_string())?;
+        let identities=vault.list_identities()?;
+        let Some(items)=identities.as_array()else{return Ok(false)};
+        if items.len()!=1{return Ok(false);}
+        items[0].get("id").and_then(Value::as_str).map(str::to_owned)
+    };
+    let Some(id)=selected else{return Ok(false)};
+    fill_identity(app,&id)
 }
 
 fn fill_saved_credential(app:&tauri::AppHandle,id:u32,manual:bool,username:Option<&str>)->Result<bool,String>{
