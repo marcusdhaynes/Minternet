@@ -128,48 +128,61 @@
       };
       let done=false,observer=null,delayed=0,submissionTimer=0;
       function queueSignOn(form,account,password){
-        if(!submitEnabled||!form||!account||!password||
-           submittedForms.has(form)||userTouched.has(account)||
+        const target=form||password;
+        if(!submitEnabled||!account||!password||submissionTimer||
+           submittedForms.has(target)||userTouched.has(account)||
            userTouched.has(password)||!marked.has(account)||
            !marked.has(password))return;
-        // Never automatically send credentials to a cross-origin form action,
-        // even if a WGU page or extension created one.
-        try{
-          const action=new URL(form.getAttribute('action')||location.href,location.href);
-          if(action.protocol!=='https:'||action.origin!==credential.origin)return;
-        }catch{return;}
-        const fieldsInForm=fields().filter(input=>input.form===form);
-        if(fieldsInForm.some(input=>input!==account&&input!==password&&
-            (invalidAccount(input)||token(input).includes('one-time-code'))))return;
+        if(form){
+          // Never auto-post an encrypted saved login across origins, even if
+          // a site or extension inserted an unrelated form.
+          try{
+            const action=new URL(form.getAttribute('action')||location.href,location.href);
+            if(action.protocol!=='https:'||action.origin!==credential.origin)return;
+          }catch{return;}
+        }
+        const challenge=fields().some(input=>
+          (!form||input.form===form)&&input!==account&&input!==password&&
+          (invalidAccount(input)||token(input).includes('one-time-code')));
+        if(challenge)return;
         let previous;
         try{previous=JSON.parse(sessionStorage.getItem('minternet.wgu.signon.last.v1')||'null');}catch{}
-        // An explicit browser Refresh is a new user-requested sign-on.
-        // It must autofill AND sign in, even immediately after an earlier
-        // attempt. Automatic redirects retain the cooldown to prevent
-        // invalid-password loops.
+        // Browser Refresh is a fresh user-requested sign-on; network
+        // redirects retain an eight-second retry guard against loops.
         const navType=window.performance?.getEntriesByType?.('navigation')?.[0]?.type;
         if(navType!=='reload'&&previous?.path===location.pathname &&
            Date.now()-Number(previous.at||0)<8000)return;
-        submittedForms.add(form); // No repeated submissions on native retries.
         submissionTimer=setTimeout(()=>{
           submissionTimer=0;
-          if(done||!form.isConnected&&form.isConnected!==undefined||
+          if(done||(form?.isConnected===false)||account.isConnected===false||
+             password.isConnected===false||
              account.value!==credential.username||
              password.value!==credential.password||userTouched.has(account)||
              userTouched.has(password))return;
+          // Prefer WGU's actual Sign On button so its event handlers and
+          // client-side validation run normally. Never use form.submit(),
+          // which bypasses submit events and HTML validity checks.
+          const buttons=[...(form||password.ownerDocument).querySelectorAll?.(
+            'button,input[type="submit"],input[type="button"]')||[]];
+          const signOn=buttons.find(button=>{
+            const label=(button.tagName==='INPUT'?button.value:button.textContent)||'';
+            return !button.disabled&&
+              /^(sign\s*on|sign\s*in|log\s*in)$/i.test(label.trim());
+          });
+          let issued=false;
           try{
-            sessionStorage.setItem('minternet.wgu.signon.last.v1',JSON.stringify({
-              path:location.pathname,at:Date.now()
-            }));
-          }catch{}
+            if(signOn&&typeof signOn.click==='function'){
+              signOn.click();issued=true;
+            }else if(form&&typeof form.requestSubmit==='function'){
+              form.requestSubmit();issued=true;
+            }
+          }catch{/* A failed WGU handler must remain visible; do not force-submit. */}
+          if(!issued)return;
+          submittedForms.add(target);
           status.submitted=true;
-          // Request a real user-equivalent submit event; do not bypass WGU
-          // handlers/validation or attempt to complete MFA challenges.
-          const submit=form.querySelector?.(
-            'button[type="submit"],input[type="submit"],button:not([type])');
-          if(submit&&!submit.disabled&&typeof submit.click==='function')
-            submit.click();
-          else form.requestSubmit?.();
+          try{sessionStorage.setItem('minternet.wgu.signon.last.v1',JSON.stringify({
+            path:location.pathname,at:Date.now()
+          }));}catch{}
         },180);
       }
       const watchOptions={childList:true,subtree:true,attributes:true,

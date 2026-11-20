@@ -14,10 +14,13 @@ function fakePage({origin='https://access.wgu.edu',route='/pingfed/idp/SSO.saml2
   class Form {
     constructor(){this.id='signinForm';this.className='';this.submissions=0;this.isConnected=true;}
     getAttribute(name){return name==='action'?route:null;}
+    querySelectorAll(){return [];}
     querySelector(){return null;}
     requestSubmit(){this.submissions++;}
   }
   const form=new Form(),events=[];
+  const signOnButton={tagName:'BUTTON',textContent:'Sign On',
+    disabled:false,click(){form.submissions++;}};
   class Input {
     constructor(type,name,value=''){
       this.tagName='INPUT';this.type=type;this.name=name;this.id='';
@@ -53,6 +56,7 @@ function fakePage({origin='https://access.wgu.edu',route='/pingfed/idp/SSO.saml2
     },
     querySelectorAll(sel){
       if(sel==='input'||sel==='input,textarea,select')return inputs;
+      if(sel==='button,input[type="submit"],input[type="button"]')return [signOnButton];
       return [];
     },
     addEventListener(){},removeEventListener(){},
@@ -356,4 +360,20 @@ test('explicit WGU refresh can sign in again, but immediate automatic redirect c
     navType:'reload',sessionStore:store});
   refresh.fill('https://access.wgu.edu',{autoSubmit:true});refresh.runSubmitTimers();
   assert.equal(refresh.form.submissions,1,'manual page refresh signs in again');
+});
+
+test('WGU Sign On button works even if the page uses no HTML form wrapper',()=>{
+  const page=fakePage({route:'/pingfed/as/authorization.oauth2'});
+  page.user.form=null;page.pw.form=null;
+  page.fill('https://access.wgu.edu',{autoSubmit:true});
+  page.runSubmitTimers();
+  assert.equal(page.form.submissions,1);
+  assert.equal(page.getStatus().submitted,true);
+});
+test('non-WGU or password reset pages never use the Sign On click fallback',()=>{
+  const page=fakePage({origin:'https://example.com',route:'/pingfed/as/authorization.oauth2'});
+  page.user.form=null;page.pw.form=null;
+  page.fill('https://example.com',{autoSubmit:true});
+  page.runSubmitTimers();
+  assert.equal(page.form.submissions,0);
 });
