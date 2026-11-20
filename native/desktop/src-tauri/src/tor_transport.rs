@@ -68,6 +68,19 @@ pub fn proxy_url(id:u32)->Result<tauri::Url,String>{
         .map_err(|e|e.to_string())
 }
 
+// For opt-in live security CI only: deliberately kill a SOCKS listener so
+// the subsequent recovery can be tested against an actual Tor client.
+pub fn interrupt_listener_for_smoke(id:u32)->Result<(),String>{
+    if !std::env::args().any(|arg|arg=="--minternet-tor-transport-smoke"){
+        return Err("Tor listener fault injection is restricted to CI smoke".into());
+    }
+    let proxy=proxies().lock().map_err(|e|e.to_string())?
+        .remove(&id).ok_or("No Tor listener to interrupt")?;
+    let _=proxy.shutdown.send(true);
+    proxy.task.abort();
+    Ok(())
+}
+
 pub fn release(app:&tauri::AppHandle,id:u32){
     let mut removed=false;
     if let Ok(mut state)=proxies().lock(){
