@@ -2456,3 +2456,30 @@ html.minternet-startup-armed .startup-curtain{
 }
 .bookmark-settings .extension-settings-button:hover{background:#473860;border-color:#947ac1}
 .bookmark-settings .extension-settings-button:focus-visible{outline:2px solid #c6acff;outline-offset:2px}
+
+.bookmark-settings .extension-settings-metric:has(>div){
+  display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;
+}
+.bookmark-settings .extension-settings-metric>div{
+  display:flex;flex-direction:column;align-items:center;gap:2px;
+  border-right:1px solid #ffffff1d;text-align:center;
+}
+.bookmark-settings .extension-settings-metric>div:last-child{border-right:0}
+.bookmark-settings .extension-settings-metric strong{
+  font-size:17px;font-weight:760;color:#f8eaff;font-variant-numeric:tabular-nums;
+}
+.bookmark-settings .extension-settings-metric small{color:#b7afd0;font-size:9px}
+.bookmark-settings .extension-settings-library-list{
+  display:grid;gap:4px;border-top:1px solid #ffffff15;padding-top:8px;
+}
+.bookmark-settings .extension-settings-library-list>strong{color:#dcd1f4;font-size:10px}
+.bookmark-settings .extension-settings-library-row{
+  display:flex;justify-content:space-between;align-items:center;gap:8px;
+  padding:7px 8px;border:1px solid #44405b;border-radius:6px;background:#25223a;
+}
+.bookmark-settings .extension-settings-library-row span{
+  font-size:10px;color:#f3ebff;min-width:0;overflow:hidden;text-overflow:ellipsis;
+}
+.bookmark-settings .extension-settings-library-row small{
+  font-size:9px;color:#bcb2d0;white-space:nowrap;
+}
