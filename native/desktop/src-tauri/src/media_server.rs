@@ -59,10 +59,15 @@ fn handle(mut stream:TcpStream,app:&tauri::AppHandle){
     let mut content_length=0usize;
     for line in lines {
         if line.is_empty(){break;}
-        if let Some(v)=line.strip_prefix("Origin: "){origin=v.trim();}
-        if let Some(v)=line.strip_prefix("Range: "){range=v.trim();}
-        if let Some(v)=line.strip_prefix("Content-Length: "){
-            content_length=v.trim().parse().unwrap_or(usize::MAX);
+        // Header names are case-insensitive per HTTP; browser fetch headers
+        // are commonly lower-case ("content-length"), unlike manual curl.
+        if let Some((name,value))=line.split_once(':'){
+            let value=value.trim();
+            if name.eq_ignore_ascii_case("origin"){origin=value;}
+            if name.eq_ignore_ascii_case("range"){range=value;}
+            if name.eq_ignore_ascii_case("content-length"){
+                content_length=value.parse().unwrap_or(usize::MAX);
+            }
         }
     }
     if method=="OPTIONS" {
@@ -171,6 +176,7 @@ fn handle(mut stream:TcpStream,app:&tauri::AppHandle){
                     v
                 }).collect::<Vec<_>>();
             json!({"id":collection.id,"name":collection.name,"kind":collection.kind,
+                "hiddenIds":collection.hidden_ids,
                 "folders":lib.folders.iter().filter(|f|ids.contains(&f.id))
                     .map(|f|json!({"id":f.id,"name":f.name})).collect::<Vec<_>>(),
                 "items":items,"lastScan":lib.last_scan})
