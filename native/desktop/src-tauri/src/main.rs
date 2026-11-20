@@ -3155,7 +3155,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
             .extensions_path(extensions::active_dir(app)?)
     }else{builder};
     let builder = builder
-        .initialization_script(media_server::bridge_script())
+        .initialization_script(if private || tor {String::new()} else {media_server::bridge_script()})
         .initialization_script(include_str!("../../../../ui/site-media-bridge.js"))
         .initialization_script(include_str!("../../../../ui/site-fullscreen-bridge.js"))
         .initialization_script(include_str!("../../../../ui/site-download-links.js"))
