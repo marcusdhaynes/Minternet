@@ -20,13 +20,20 @@ function fakePage({origin='https://access.wgu.edu',route='/pingfed/idp/SSO.saml2
       this.tagName='INPUT';this.type=type;this.name=name;this.id='';
       this.placeholder='';this.disabled=false;this.readOnly=false;
       this.labels=[];this.form=form;this.autocomplete='off';
-      this.value=value;this.events=[];
+      this.value=value;this.events=[];this.listeners=new Map();
     }
     getClientRects(){return [{}];}
     getBoundingClientRect(){return {left:100,bottom:180,width:200,height:40};}
     getAttribute(k){return k==='autocomplete'?this.autocomplete:null;}
     closest(){return null;}
-    dispatchEvent(event){this.events.push(event.type);events.push(event.type);return true;}
+    addEventListener(type,callback){
+      const list=this.listeners.get(type)||[];list.push(callback);this.listeners.set(type,list);
+    }
+    dispatchEvent(event){
+      this.events.push(event.type);events.push(event.type);
+      for(const callback of this.listeners.get(event.type)||[])callback(event);
+      return true;
+    }
     getRootNode(){return doc;}
   }
   Object.defineProperty(Input.prototype,'value',{
@@ -163,13 +170,23 @@ test('WGU form remount re-fills newly created fields without another prompt or n
   assert.equal(second.pw.value,'secret-login');
 });
 
-test('retries respect deliberately cleared fields and never refill the same input',()=>{
+test('retries respect a user deliberately clearing already-filled fields',()=>{
   const page=fakePage();
   page.fill();
   page.user.value='';page.pw.value='';
-  page.fill();
+  page.user.dispatchEvent({type:'input',isTrusted:true});
+  page.pw.dispatchEvent({type:'input',isTrusted:true});
+  for(let i=0;i<14;i++)page.fill();
   assert.equal(page.user.value,'');
   assert.equal(page.pw.value,'');
+});
+test('WGU SPA-cleared fields refill after a short cooldown without another user prompt',()=>{
+  const page=fakePage();
+  page.fill();
+  page.user.value='';page.pw.value='';
+  for(let i=0;i<15;i++)page.fill();
+  assert.equal(page.user.value,'student-name');
+  assert.equal(page.pw.value,'secret-login');
 });
 
 test('continuous login retry validates the current HTTPS origin and vault access',()=>{
