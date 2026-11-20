@@ -4855,13 +4855,19 @@ fn defer_private_first_navigation(app:&tauri::AppHandle,id:u32,
                         tab.view.as_deref()==Some(expected_label.as_str())&&
                         tab.url!=HOME).map(|tab|tab.url.clone()))
             };
-            {
+            let current_generation={
                 let state=handle.state::<PrivateLoginCopyState>();
                 if let Ok(mut saved)=state.0.lock(){
-                    saved.pending.remove(&id);
-                    if destination.is_some(){saved.seeded.insert(id);}
-                }
-            }
+                    if saved.pending.get(&id).copied()!=Some(generation){
+                        false
+                    }else{
+                        saved.pending.remove(&id);
+                        if destination.is_some(){saved.seeded.insert(id);}
+                        true
+                    }
+                }else{false}
+            };
+            if !current_generation{return;}
             if let Some(address)=destination{
                 if let Ok(url)=tauri::Url::parse(&address){
                     if let Some(view)=handle.get_webview(&expected_label){
