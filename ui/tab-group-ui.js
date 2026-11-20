@@ -288,7 +288,7 @@
     };
     const takeTab=(tab,active)=>{
       const signature=JSON.stringify([
-        tab.title,tab.url,tab.private,tab.pinned,tab.suspended,tab.loading,
+        tab.title,tab.url,tab.private,tab.tor,tab.pinned,tab.suspended,tab.loading,
         tab.audioPlaying,tab.audioMuted,tab.secretTab,tab.secretPending,
         tab.syncId,active,
         tab.secretTab?window.minternetSecretTabNames?.get(tab.id):''

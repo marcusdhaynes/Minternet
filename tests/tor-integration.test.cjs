@@ -67,8 +67,9 @@ test('10. Tor sessions remain excluded from synced and persistent regular sessio
 });
 test('11. Tor mode is clearly labelled and does not fetch favicons directly',()=>{
  assert.match(html,/Open New Tor Tab \(Tor-routed; not Tor Browser\)/);
- assert.match(app,/if\(tab\.tor && \/\^https\?/);
- assert.match(app,/tab-tor-mark/);
+ assert.match(app,/if\(tab\.tor\)\{/);
+ assert.match(app,/slot\.textContent='🧅'/);
+ assert.doesNotMatch(app,/mark\.className='tab-tor-mark'/);
  assert.match(app,/Tor-routed tab; not equivalent to Tor Browser/);
 });
 test('12. Tor microphone and camera access are denied while ordinary sites retain native prompts',()=>{
@@ -191,4 +192,20 @@ test('30. Runtime report distinguishes Tor routing from Tor Browser equivalence'
 
 test('31. Tor hardening runs inside all frames, not only the top-level document',()=>{
  assert.match(native,/initialization_script_for_all_frames\(include_str!\("\.\.\/\.\.\/\.\.\/\.\.\/ui\/tor-site-hardening\.js"\)\)/);
+});
+
+test('32. Tor tabs use the normal tab width and one onion glyph, including blank tabs',()=>{
+ const groups=source('ui/tab-group-ui.js');
+ const css=source('ui/styles.css');
+ const tor=app.slice(app.indexOf('function renderSiteIcon('),app.indexOf('// Split pane icons'));
+ assert.match(tor,/if\(tab\.tor\)\{/);
+ assert.ok(tor.indexOf('if(tab.tor)')<tor.indexOf('minternet-new-tab-icon'));
+ assert.match(groups,/tab\.private,tab\.tor,tab\.pinned/);
+ assert.match(css,/\.tab\.tor-tab:not\(\.pinned-tab\)/);
+ assert.match(css,/width:var\(--minternet-regular-tab-width\)!important/);
+});
+test('33. Address bar focus halo cannot flicker with site/chrome focus handoffs',()=>{
+ const css=source('ui/styles.css');
+ assert.match(css,/\.address-wrap:focus-within\s*\{[^}]*border-color: var\(--line\);/);
+ assert.doesNotMatch(css,/\.address-wrap:focus-within\s*\{[^}]*0 0 0 1px/);
 });

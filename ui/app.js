@@ -225,11 +225,14 @@ function renderSiteIcon(tab,slot){
   }
   slot.classList.remove('secret-tab-icon','private-eye');
   slot.removeAttribute('data-site-key');
-  if(tab.tor && /^https?:\/\//i.test(tab.url)){
-    // No direct-connection favicon discovery from trusted browser chrome.
-    slot.append(iconFallback('Tor'));
+  if(tab.tor){
+    // Tor uses one onion glyph for ALL states, including the empty tab.
+    // Never render the Minternet logo or attempt a direct favicon lookup.
+    slot.textContent='🧅';
+    slot.setAttribute('aria-label','Tor tab');
     return;
   }
+  slot.removeAttribute('aria-label');
   if(!tab.url||!/^https?:\/\//i.test(tab.url)){
     if(!tab.url||tab.url==='about:blank'){
       const image=document.createElement('img');
@@ -299,7 +302,10 @@ function buildTab(tab, active) {
     ?(window.minternetSecretTabNames?.get(tab.id)||'Secret Tab')
     :(tab.title || 'New Tab');
   choose.append(symbol, text);
-  if(tab.tor){const mark=document.createElement('span');mark.className='tab-tor-mark';mark.textContent='🧅';mark.setAttribute('aria-label','Tor-routed tab');choose.append(mark);}
+  if(tab.tor){
+    // The single onion glyph in .tab-symbol already communicates Tor mode.
+    choose.setAttribute('aria-label','Tor tab · '+tabTooltip(tab));
+  }
   else if(tab.private){const eye=document.createElement('span');eye.className='tab-private-eye';eye.innerHTML=PRIVATE_EYE;choose.append(eye);}
   const close = document.createElement('button');
   close.className = 'tab-close';
@@ -349,7 +355,7 @@ function render(data) {
       pendingNavigation=null;
     }
   }
-  const signature = data.tabs.map(t => [t.id,t.title,t.url,t.private,t.pinned,t.suspended,t.loading,t.audioPlaying,t.audioMuted,t.secretTab,t.secretPending]).join(';');
+  const signature = data.tabs.map(t => [t.id,t.title,t.url,t.private,t.tor,t.pinned,t.suspended,t.loading,t.audioPlaying,t.audioMuted,t.secretTab,t.secretPending]).join(';');
   if (window.minternetGroups?.renderTabs) {
     window.minternetGroups.renderTabs(data,tabs,buildTab);
     render.lastSignature = null;
