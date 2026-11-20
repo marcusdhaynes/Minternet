@@ -6823,6 +6823,21 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         "vault-status" => {
             let exists=password_vault::file(&app)?.exists();
             let section=value.as_str().unwrap_or("logins");
+            let password_required=lock_preferences::load(&app).required(section)?;
+            // The optional Windows password-prompt setting remains effective
+            // after an after-close timer revokes this section's access. This
+            // reauthorizes only settings-approved passwordless sections, never
+            // a section that still requires its master password.
+            if !password_required && !vault_section_allowed(&app,section){
+                let key_loaded=app.state::<Mutex<password_vault::Vault>>().lock()
+                    .map_err(|e|e.to_string())?.unlocked();
+                if key_loaded{
+                    app.state::<Mutex<lock_preferences::Access>>().lock()
+                        .map_err(|e|e.to_string())?.permit(section);
+                }else{
+                    unlock_permitted_sections_from_device(&app);
+                }
+            }
             let unlocked=app.state::<Mutex<password_vault::Vault>>().lock()
                 .map_err(|e|e.to_string())?.unlocked()
                 && vault_section_allowed(&app,section);
