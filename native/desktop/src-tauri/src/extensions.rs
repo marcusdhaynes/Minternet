@@ -54,6 +54,10 @@ fn metadata(dir:&Path,source:&str,enabled:bool,id:String)->Option<Value>{
         manifest.pointer("/minternet/nativeMediaServer")==Some(&Value::Bool(true));
     Some(json!({"id":id,"source":source,"name":name,"version":version,
         "nativeMediaServer":native_media,
+        "settingsGroup":manifest.pointer("/minternet/settingsGroup").and_then(Value::as_str)
+            .unwrap_or("").chars().take(60).collect::<String>(),
+        "settingsSection":manifest.pointer("/minternet/settingsSection").and_then(Value::as_str)
+            .unwrap_or("").chars().take(60).collect::<String>(),
         "enabled":enabled,"restartRequired":true,
         "permissions":manifest.get("permissions").and_then(Value::as_array)
             .map(|v|v.iter().filter_map(Value::as_str)
