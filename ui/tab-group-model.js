@@ -68,6 +68,29 @@
     state.assignments[String(tabId)]=id;
     return true;
   }
+  // Move or group all panes of a supertab as one atomic visual unit.
+  function assignMany(state,tabIds,id) {
+    if(!Array.isArray(tabIds)||!tabIds.length||
+       tabIds.some(tabId=>!Number.isSafeInteger(tabId)||tabId<1)||
+       new Set(tabIds).size!==tabIds.length||
+       (id!=null&&!get(state,id)))return false;
+    for(const tabId of tabIds)assign(state,tabId,id);
+    return true;
+  }
+  function moveBlockRelative(state,movingIds,targetId,after=false) {
+    if(!Array.isArray(movingIds)||!movingIds.length||
+       new Set(movingIds).size!==movingIds.length||
+       movingIds.includes(targetId)||!state.order.includes(targetId))return false;
+    const moving=new Set(movingIds);
+    const block=state.order.filter(id=>moving.has(id));
+    if(block.length!==moving.size)return false;
+    const next=state.order.filter(id=>!moving.has(id));
+    const target=next.indexOf(targetId);
+    if(target<0)return false;
+    next.splice(target+(after?1:0),0,...block);
+    state.order=next;
+    return true;
+  }
   function prune(state,tabIds) {
     const valid=new Set(tabIds.map(String));
     for(const key of Object.keys(state.assignments)) {
@@ -112,5 +135,6 @@
       others.find(t=>isVisibleTab(state,t.id))?.id ?? null;
   }
   return { colors, MAX_GROUPS, blank, hydrate, serialize, get, findTab, create, update, remove,
-    assign, prune, sortedTabs, insertAfter, moveRelative, tabsIn, isVisibleTab, visibleFallback };
+    assign, assignMany, prune, sortedTabs, insertAfter, moveRelative, moveBlockRelative,
+    tabsIn, isVisibleTab, visibleFallback };
 });
