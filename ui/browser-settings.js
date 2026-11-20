@@ -10,6 +10,7 @@
   const folder=$('downloadFolderPath'),saveFolder=$('downloadFolderSave');
   const reset=$('downloadFolderDefault'),browse=$('downloadFolderBrowse'),status=$('browserPreferencesStatus');
   const downloadMode=$('downloadMode');
+  const privateLoginSharing=$('privateLoginSharing');
   const tabLimit=$('tabLimit'),saveTabLimit=$('tabLimitSave');
   const miniplayerFade=$('miniplayerFadeSeconds'),miniplayerStatus=$('miniplayerFadeStatus');
   if(!home||!saveHome||!folder||!saveFolder||!reset||!status||!tabLimit||!saveTabLimit)return;
@@ -43,6 +44,7 @@
         home.value=result?.homepage||defaultHome;
         if(downloadMode)downloadMode.value=result?.downloadMode==='ask'?'ask':'automatic';
         if(newTabMode)newTabMode.value=result?.newTabMode==='website'?'website':'dashboard';
+        if(privateLoginSharing)privateLoginSharing.checked=result?.privateLoginSharing!==false;
         tabLimit.value=String(result?.tabLimit??0);
         if(miniplayerFade)miniplayerFade.value=String(result?.miniplayerFadeSeconds??5);
       } catch {
@@ -58,6 +60,7 @@
       home.value=settings.homepage||defaultHome;
       if(downloadMode)downloadMode.value=settings.downloadMode==='ask'?'ask':'automatic';
       if(newTabMode)newTabMode.value=settings.newTabMode==='website'?'website':'dashboard';
+      if(privateLoginSharing)privateLoginSharing.checked=settings.privateLoginSharing!==false;
       tabLimit.value=String(settings.tabLimit??0);
       if(miniplayerFade)miniplayerFade.value=String(settings.miniplayerFadeSeconds??5);
       folder.value=settings.usingSystemDownloads?'':settings.downloadFolder||'';
@@ -155,6 +158,20 @@
       report('Download behavior was not changed: '+String(error.message||error));
       await refresh();
     }finally{downloadMode.disabled=false;}
+  });
+  privateLoginSharing?.addEventListener('change',async()=>{
+    const enabled=privateLoginSharing.checked;
+    privateLoginSharing.disabled=true;
+    try{
+      const result=await invoke('private-login-sharing-set',enabled);
+      if(result?.ok!==true)throw Error('Private Tab login preference was not saved');
+      report(enabled
+        ?'New Private Tabs will inherit current signed-in sessions from regular tabs.'
+        :'New Private Tabs will start without importing regular-tab sessions.');
+    }catch(error){
+      report('Private Tab login preference was not changed: '+String(error.message||error));
+      await refresh();
+    }finally{privateLoginSharing.disabled=false;}
   });
   saveTabLimit.addEventListener('click',()=>void updateTabLimit());
   tabLimit.addEventListener('keydown',event=>{
