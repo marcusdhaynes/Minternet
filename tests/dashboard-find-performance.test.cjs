@@ -185,7 +185,8 @@ test('login autofill supports one-time password and delayed sign-in steps safely
   assert.match(script,/put\(username,credential\.username\)/);
   assert.match(script,/node\.shadowRoot/);
   assert.match(script,/frame\.defaultView\?\.location\.origin===credential\.origin/);
-  assert.match(script,/register\.test\(location\.pathname\)/);
+  assert.match(script,/register\.test\(location\.pathname/);
+  assert.match(script,/location\.hash/);
   assert.match(script,/credential\.password=''/);
   assert.match(native,/minternet-autofill\.invalid\/__retry/);
   assert.match(native,/duration_since\(\*last\)<Duration::from_millis\(700\)/);
