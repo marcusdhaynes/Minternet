@@ -219,7 +219,7 @@ test('continuous login retry validates the current HTTPS origin and vault access
   const main=fs.readFileSync(path.join(__dirname,'../native/desktop/src-tauri/src/main.rs'),'utf8');
   assert.match(main,/fn schedule_wgu_login_autofill/);
   assert.match(main,/password_vault::origin\(&tab\.url\)\.is_err\(\)/);
-  assert.match(main,/Duration::from_secs\(3\)/);
+  assert.match(main,/Duration::from_millis\(900\)/);
   assert.match(main,/vault_section_allowed\(&owner,"logins"\)/);
   assert.match(main,/schedule_wgu_login_autofill\(app\.handle\(\)\)/);
   assert.match(main,/vault\.matching_site\(&actual_origin,manual,username,source_origin\)/);
@@ -422,4 +422,17 @@ test('manual Fill never closes Logins before native field verification completes
   assert.ok(handler.indexOf("await call('vault-fill-status')")<
     handler.lastIndexOf("close();"));
   assert.match(handler,/screen.hidden=false;\s*close\(\)/);
+});
+
+
+test('native scheduler automatically fills a unique unlocked identity without a prompt',()=>{
+  const main=fs.readFileSync(path.join(__dirname,'../native/desktop/src-tauri/src/main.rs'),'utf8');
+  const start=main.indexOf('fn fill_unique_identity_automatically(');
+  const end=main.indexOf('fn fill_saved_credential(',start);
+  const code=main.slice(start,end);
+  assert.ok(start>0);
+  assert.match(code,/vault_section_allowed\(app,"identities"\)/);
+  assert.match(code,/items\.len\(\)!=1/);
+  assert.match(code,/fill_identity\(app,&id\)/);
+  assert.match(main,/fill_unique_identity_automatically\(&worker\)/);
 });
