@@ -2242,7 +2242,12 @@ fn finish_restored_chrome(app:&tauri::AppHandle,id:u32,expected_url:&str){
     // The restored active page must complete its deliberate startup reload
     // before its composited frame may be exposed. The visual check alone can
     // otherwise release a transient first-navigation frame.
-    if app.state::<StartupReloadPhase>().0.load(Ordering::Acquire)!=4{return;}
+    // Only the dedicated startup smoke requires a second navigation. During
+    // normal browsing the original, genuinely painted restored page is
+    // already sufficient; waiting for an extra reload can lock the curtain
+    // over healthy websites and cause repeated page interruptions.
+    if std::env::args().any(|arg|arg=="--minternet-last-active-smoke") &&
+        app.state::<StartupReloadPhase>().0.load(Ordering::Acquire)!=4{return;}
     let gate=app.state::<StartupPresentation>();
     let matched=gate.0.lock().ok().is_some_and(|mut state|{
         if !state.as_ref().is_some_and(|(active,url,shown)|
@@ -2291,6 +2296,23 @@ fn finish_restored_chrome(app:&tauri::AppHandle,id:u32,expected_url:&str){
     }
 }
 #[cfg(windows)]
+fn dismiss_restored_chrome_for_navigation(app:&tauri::AppHandle){
+    // User-initiated browsing must never be trapped behind a stale startup
+    // curtain. Dismiss only the temporary cover, not any tab or profile data.
+    let dismissed=app.state::<StartupPresentation>().0.lock()
+        .is_ok_and(|mut pending|pending.take().is_some());
+    if !dismissed{return;}
+    if let Ok(mut cache)=app.state::<Mutex<LayoutCache>>().lock(){
+        cache.overlay_open=false;cache.size_and_home=None;
+    }
+    if let Some(window)=app.get_window("main"){let _=window.show();}
+    refresh_layout(app);
+    if let Some(chrome)=app.get_webview("chrome"){
+        let _=chrome.eval("window.minternetStartup?.finish?.()");
+    }
+}
+
+#[cfg(windows)]
 fn align_restored_chrome_with_active_tab(app:&tauri::AppHandle){
     let active=app.state::<Mutex<Browser>>().lock().ok()
         .and_then(|b|b.active().map(|t|
@@ -2301,12 +2323,16 @@ fn align_restored_chrome_with_active_tab(app:&tauri::AppHandle){
         if let Some((id,url,_))=pending.as_mut(){
             match active{
                 Some((selected,next,private)) if next!=HOME && !private=>{
-                    // Redirects and SPA route changes must update the expected
-                    // URL. Switching to another tab starts a new reload lease.
+                    // The startup curtain belongs ONLY to the original
+                    // restored tab. Switching tabs must dismiss it instead
+                    // of attaching it to unrelated websites.
                     if *id!=selected{
-                        app.state::<StartupReloadPhase>().0.store(0,Ordering::Release);
+                        *pending=None;dismissed=true;
+                    }else{
+                        // Redirects on the original tab keep the paint target
+                        // current without applying the startup gate elsewhere.
+                        *url=next;
                     }
-                    *id=selected;*url=next;
                 },
                 _=>{*pending=None;dismissed=true;}
             }
@@ -2323,12 +2349,14 @@ fn align_restored_chrome_with_active_tab(app:&tauri::AppHandle){
     }
 }
 
-// Only the chosen restored normal tab gets the startup reload. Reload its
-// existing profile/controller after the first real navigation completes;
-// never reload background, private, Tor, or secret tabs on launch.
+// The startup smoke fixture deliberately tests an extra reload. Normal user
+// sessions instead reveal their first genuinely painted restored frame.
 #[cfg(windows)]
 fn startup_reload_on_page_event(app:&tauri::AppHandle,id:u32,
                                 started:bool,finished:bool){
+    // Production uses the first painted frame. Force-reload is reserved for
+    // the explicit restoration smoke fixture that validates that behavior.
+    if !std::env::args().any(|arg|arg=="--minternet-last-active-smoke"){return;}
     let selected=app.state::<StartupPresentation>().0.lock().ok()
         .is_some_and(|pending|pending.as_ref()
             .is_some_and(|(selected,_,_)|*selected==id));
@@ -5144,6 +5172,12 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         let _=std::fs::write(marker,format!("Tor WebView verification failed: {detail}"));
         return Ok(json!({"ok":true}));
     }
+    if name=="startup-status" {
+        #[cfg(windows)]
+        {return Ok(json!({"armed":app.state::<StartupPresentation>().armed()}));}
+        #[cfg(not(windows))]
+        {return Ok(json!({"armed":false}));}
+    }
     if name=="startup-present" {
         if value.get("curtainReady").and_then(Value::as_bool)!=Some(true){
             return Err("Startup curtain has not finished its local first paint".into());
@@ -5151,6 +5185,15 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         #[cfg(windows)]
         present_restored_chrome(&app)?;
         return Ok(json!({"ok":true}));
+    }
+    #[cfg(windows)]
+    if matches!(name.as_str(),
+        "navigate"|"activate"|"home"|"back"|"forward"|
+        "navigation-history-jump"|"new"|"new-private"|"new-background-url"|
+        "new-private-background-url"|"new-url"|"new-private-url"|
+        "close"|"close-tab"|"duplicate"|"reload-tab"|"tor"|"tor-reconnect"|
+        "tor-new-identity") {
+        dismiss_restored_chrome_for_navigation(&app);
     }
     if name=="tor-status" {
         #[cfg(any(windows,target_os="linux"))]

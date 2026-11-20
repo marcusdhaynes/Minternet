@@ -9,8 +9,9 @@
   const status=document.getElementById('startupCurtainStatus');
   const retry=document.getElementById('startupCurtainRetry');
   if (!curtain) return;
-  root.classList.add('minternet-startup-armed');
-  curtain.setAttribute('aria-hidden','false');
+  // The WebView2 initialization script can run again after chrome itself
+  // reloads. Its original true flag is NOT proof startup is still active.
+  // The native, one-use restoration lease is authoritative.
   let completed=false,requested=false;
   let failureTimer=null;
   function failure(){
@@ -57,6 +58,12 @@
       setTimeout(present,350);
     }
   }
-  setTimeout(present,80);
-  failureTimer=setTimeout(failure,12000);
+  void (async()=>{
+    const state=await window.minternet?.command('startup-status');
+    if(completed||state?.armed!==true)return;
+    root.classList.add('minternet-startup-armed');
+    curtain.setAttribute('aria-hidden','false');
+    setTimeout(present,80);
+    failureTimer=setTimeout(failure,12000);
+  })();
 })();

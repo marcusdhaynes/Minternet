@@ -10,7 +10,7 @@ const health=read('native/desktop/src-tauri/src/render_visual.rs');
 const ui=read('ui/startup-curtain.js');
 const html=read('ui/index.html');
 const css=read('ui/styles.css');
-function harness(armed=true){
+function harness(armed=true,nativeArmed=armed){
  const classes=new Set();
  const callbacks=[];
  const timers=new Map();
@@ -36,7 +36,10 @@ function harness(armed=true){
  };
  const window={
    __minternetStartupArmed:armed,
-   minternet:{command:async (name,value)=>{actions.push({name,value});return {ok:true}}}
+   minternet:{command:async (name,value)=>{
+     actions.push({name,value});
+     return name==='startup-status'?{armed:nativeArmed}:{ok:true};
+   }}
  };
  vm.runInNewContext(ui,{
    window,document,
@@ -53,18 +56,34 @@ test('only restored real desktop sessions activate the opaque curtain',()=>{
  assert.equal(h.classes.size,0);
  assert.equal(h.actions.length,0);
 });
+test('stale chrome initialization flag cannot re-arm a finished startup',async()=>{
+ const h=harness(true,false);
+ await Promise.resolve();await Promise.resolve();
+ assert.equal(h.classes.size,0);
+ assert.equal(h.timers.size,0);
+ assert.deepEqual(h.actions.map(x=>x.name),['startup-status']);
+});
+test('native startup restoration never follows ordinary tab switching or URL submission',()=>{
+ assert.match(main,/if \*id!=selected\{\s*\*pending=None;dismissed=true;/);
+ assert.match(main,/fn dismiss_restored_chrome_for_navigation/);
+ assert.match(main,/"navigate"\|"activate"\|"home"/);
+ assert.match(main,/if name=="startup-status"/);
+ assert.match(main,/if !std::env::args\(\).any\(\|arg\|arg=="--minternet-last-active-smoke"\)\{return;\}/);
+});
 test('trusted chrome can request startup display without waiting for invisible-window animation frames',async()=>{
  const h=harness();
+ await Promise.resolve();await Promise.resolve();
  assert.ok(h.classes.has('minternet-startup-armed'));
  assert.equal(h.nodes.startupCurtain.attributes['aria-hidden'],'false');
- assert.equal(h.actions.length,0);
+ assert.equal(h.actions.length,1);
+ assert.equal(h.actions[0].name,'startup-status');
  assert.equal(h.callbacks.length,0);
  assert.ok([...h.timers.values()].some(x=>x.delay===80));
  [...h.timers.values()].find(x=>x.delay===80).fn();
  await Promise.resolve();
- assert.equal(h.actions.length,1);
- assert.equal(h.actions[0].name,'startup-present');
- assert.equal(h.actions[0].value.curtainReady,true);
+ assert.equal(h.actions.length,2);
+ assert.equal(h.actions[1].name,'startup-present');
+ assert.equal(h.actions[1].value.curtainReady,true);
  assert.ok(h.classes.has('minternet-startup-armed'));
  h.window.minternetStartup.finish();
  assert.ok(!h.classes.has('minternet-startup-armed'));
@@ -72,8 +91,9 @@ test('trusted chrome can request startup display without waiting for invisible-w
 });
 test('startup retry leaves opaque curtain in place while reloading last page',async()=>{
  const h=harness();
+ await Promise.resolve();await Promise.resolve();
  await h.nodes.startupCurtainRetry.handlers.click();
- assert.equal(h.actions[0].name,'reload');
+ assert.equal(h.actions[1].name,'reload');
  assert.ok(h.classes.has('minternet-startup-armed'));
  assert.equal(h.nodes.startupCurtainRetry.disabled,false);
 });
