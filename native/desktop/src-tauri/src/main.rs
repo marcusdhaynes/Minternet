@@ -8526,10 +8526,12 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 let mut b=state.lock().map_err(|e|e.to_string())?;
                 let active=b.active_id;
                 b.tabs.iter_mut().filter(|t| t.id!=active)
-                    .filter_map(|t|t.view.take()).collect::<Vec<_>>()
+                    .filter_map(|t|t.view.take().map(|label|(t.id,label)))
+                    .collect::<Vec<_>>()
             };
             let mut n=0;
-            for label in candidates {
+            for (id,label) in candidates {
+                forget_private_login_copy(&app,id);
                 if let Some(view)=app.get_webview(&label) {
                     if view.close().is_ok() { n+=1; }
                 }
