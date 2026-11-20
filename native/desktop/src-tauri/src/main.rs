@@ -5072,6 +5072,42 @@ mod local_media_tests{
     }
 }
 
+// If Arti's SOCKS listener was lost, recreate it BEFORE navigating.
+// A WebView already configured with the former port must be closed and
+// reconstructed with the new Tor-only proxy. Never reuse it with direct
+// networking or let a website request the repair command.
+#[cfg(any(windows,target_os="linux"))]
+async fn restore_tor_proxy(app:&tauri::AppHandle,id:u32,force_check:bool)
+    ->Result<bool,String>{
+    let (is_tor,old_view)={
+        let store=app.state::<Mutex<Browser>>();
+        let browser=store.lock().map_err(|e|e.to_string())?;
+        let Some(tab)=browser.tabs.iter().find(|tab|tab.id==id)else{
+            return Err("Tor tab was closed".into());
+        };
+        (tab.tor,tab.view.clone())
+    };
+    if !is_tor{return Ok(false);}
+    let listener_alive=tor_transport::proxy_url(id).is_ok();
+    if listener_alive && !force_check{return Ok(false);}
+    tor_transport::prepare(id).await?;
+    if listener_alive{return Ok(false);}
+    // The former WebView2 controller contains an obsolete SOCKS port.
+    if let Some(ref label)=old_view{
+        if let Some(view)=app.get_webview(label){
+            view.close().map_err(|e|format!("Could not rebuild disconnected Tor view: {e}"))?;
+        }
+    }
+    {
+        let store=app.state::<Mutex<Browser>>();
+        let mut browser=store.lock().map_err(|e|e.to_string())?;
+        if let Some(tab)=browser.tabs.iter_mut().find(|tab|tab.id==id){
+            if tab.view==old_view{tab.view=None;}
+        }
+    }
+    Ok(true)
+}
+
 #[cfg(any(windows,target_os="linux"))]
 async fn prepare_new_tor_tab(app:&tauri::AppHandle,id:u32)->Result<(),String>{
     if let Err(error)=tor_transport::prepare(id).await {
@@ -5119,6 +5155,49 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         {return Ok(tor_transport::status());}
         #[cfg(not(any(windows,target_os="linux")))]
         {return Ok(json!({"embedded":false,"bootstrapped":false,"warning":"Tor tabs are not enabled on this platform"}));}
+    }
+    if name=="tor-reconnect" {
+        #[cfg(not(any(windows,target_os="linux")))]
+        {return Err("Tor is not supported on this platform".into());}
+        #[cfg(any(windows,target_os="linux"))]
+        {
+            let (id,url)={
+                let store=app.state::<Mutex<Browser>>();
+                let browser=store.lock().map_err(|e|e.to_string())?;
+                let tab=browser.active().ok_or("Open a Tor tab first")?;
+                if !tab.tor{return Err("Select a Tor tab to reconnect".into());}
+                (tab.id,tab.url.clone())
+            };
+            let rebuilt=restore_tor_proxy(&app,id,true).await?;
+            if rebuilt && url!=HOME{
+                let target=tauri::Url::parse(&url).map_err(|e|e.to_string())?;
+                if !tor_transport::safe_top_level(&target){
+                    return Err("Tor will not navigate to a local or IP-literal address".into());
+                }
+                navigate_tab(&app,id,Some(target),false)?;
+            }
+            notify(&app);
+            return Ok(json!({"ok":true,"tor":true,"reconstructed":rebuilt,
+                "status":tor_transport::status(),
+                "message":"Tor proxy is ready. A live Tor exit and browser anonymity have not yet been verified."}));
+        }
+    }
+    #[cfg(any(windows,target_os="linux"))]
+    if matches!(name.as_str(),
+        "navigate"|"activate"|"reload"|"reload-tab"|"back"|"forward"|
+        "navigation-history-jump"|"home"|"prepare-tab") {
+        let id={
+            let store=app.state::<Mutex<Browser>>();
+            let browser=store.lock().map_err(|e|e.to_string())?;
+            if matches!(name.as_str(),"activate"|"reload-tab"){
+                value.as_u64().map(|n|n as u32).unwrap_or(browser.active_id)
+            }else{browser.active_id}
+        };
+        if id!=0{
+            // Recover a missing listener before any page or history operation.
+            // A failed repair returns an error; no navigation can bypass Tor.
+            let _=restore_tor_proxy(&app,id,false).await?;
+        }
     }
     if name=="tor" {
         #[cfg(not(any(windows,target_os="linux")))]
