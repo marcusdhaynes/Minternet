@@ -69,8 +69,9 @@ test('all managers offer matching Title Case Seconds, Minutes, Hours, Days and N
 });
 test('zero seconds locks only the closed section immediately through native IPC',async()=>{
   const h=harness(),controller=h.window.minternetVaultAutoLock.forSection('logins');
-  const {unit}=labelFor(h,'logins');
+  const {amount,unit}=labelFor(h,'logins');
   unit.value='seconds';unit.change();
+  amount.value='0';amount.change();
   await controller.openManager();
   controller.setUnlocked(true);
   assert.equal(h.calls.length,0);
@@ -124,8 +125,9 @@ test('reopening before the deadline cancels an in-progress delay and does not lo
 });
 test('reopening waits for a previously-started native lock before returning',async()=>{
   const h=harness(),ctrl=h.window.minternetVaultAutoLock.forSection('logins');
-  const {unit}=labelFor(h,'logins');
+  const {amount,unit}=labelFor(h,'logins');
   unit.value='seconds';unit.change();
+  amount.value='0';amount.change();
   let finish;
   h.command(()=>new Promise(resolve=>{finish=resolve;}));
   await ctrl.openManager();ctrl.setUnlocked(true);
