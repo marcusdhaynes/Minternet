@@ -7304,6 +7304,40 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             let _=fill_saved_credential(&app,id,false,None);
             return Ok(json!({"ok":true}));
         }
+        "vault-autofill-check" => {
+            // A diagnostic for trusted chrome; no saved credentials leave Rust.
+            let (url,private)={
+                let store=app.state::<Mutex<Browser>>();
+                let browser=store.lock().map_err(|e|e.to_string())?;
+                let tab=browser.active().ok_or("Open a website first")?;
+                (tab.url.clone(),tab.private||tab.tor||tab.secret_id.is_some())
+            };
+            if private {
+                return Ok(json!({"ready":false,
+                    "reason":"Autofill is disabled in private, secret and Tor tabs."}));
+            }
+            if !vault_section_allowed(&app,"logins"){
+                return Ok(json!({"ready":false,
+                    "reason":"Logins is locked. Unlock it to allow autofill."}));
+            }
+            let origin=password_vault::origin(&url)?;
+            let (available,candidates)={
+                let store=app.state::<Mutex<password_vault::Vault>>();
+                let vault=store.lock().map_err(|e|e.to_string())?;
+                let matched=vault.matching_site(&origin,false,None,None).is_some();
+                let list=vault.list()?;
+                let count=list.as_array().map(|entries|entries.iter().filter(|entry|{
+                    let saved=entry.get("origin").and_then(Value::as_str).unwrap_or("");
+                    saved==origin||(password_vault::trusted_wgu_origin(saved)&&
+                        password_vault::trusted_wgu_origin(&origin))
+                }).count()).unwrap_or(0);
+                (matched,count)
+            };
+            let reason=if available{"Saved login available for this website."}
+                else if candidates==0{"No saved login matches this website."}
+                else{"Autofill selection is ambiguous or disabled for this website. Choose Use For WGU in Logins."};
+            return Ok(json!({"ready":available,"reason":reason}));
+        }
         "vault-fill-status" => {
             // Trusted chrome receives only booleans. Never expose a stored
             // password, username, or page form values through this diagnostic.
