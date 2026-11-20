@@ -53,6 +53,8 @@
   move(audio,'volumeHoldDelay','.auto-unload-setting');
   const miniplayer=section('Mini-player');
   move(miniplayer,'miniplayerSettings');
+  const privacy=section('Privacy');
+  move(privacy,'privateLoginSettings');
   const userData=section('User Data');
   move(userData,'identityManagerOpen');
   move(userData,'passwordManagerOpen');
