@@ -87,9 +87,9 @@ test('visual recovery diagnostics use valid parent module entrypoints',()=>{
  assert.match(visual,/super::white_smoke_stage\("preview-scheduled"\)/);
 });
 
-test('Windows only builds newest main commit and retains Rust compilation cache on late test failure',()=>{
+test('Windows completes running compilations and retains Rust cache on late test failure',()=>{
  assert.match(win,/group: minternet-windows-\$\{\{ github\.ref \}\}/);
- assert.match(win,/cancel-in-progress: true/);
+ assert.match(win,/cancel-in-progress: false/);
  assert.match(win,/cache-on-failure: true/);
 });
 test('visual recovery proof requires actual repaint and retained browser storage',()=>{
