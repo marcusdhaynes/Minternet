@@ -53,8 +53,6 @@
   move(audio,'volumeHoldDelay','.auto-unload-setting');
   const miniplayer=section('Mini-player');
   move(miniplayer,'miniplayerSettings');
-  const privacy=section('Privacy');
-  move(privacy,'privateLoginSettings');
   const userData=section('User Data');
   move(userData,'identityManagerOpen');
   move(userData,'passwordManagerOpen');
@@ -174,6 +172,7 @@
   move(imports,'importBookmarksFile','.bookmark-import-settings');
   move(imports,'importPasswords','.credential-import-settings');
   const privacy=section('Privacy & History');
+  move(privacy,'privateLoginSettings');
   move(privacy,'historyManagerOpen');
   const mediaDevices=section('Media Devices',privacy);
   const mediaOpen=document.createElement('button');
