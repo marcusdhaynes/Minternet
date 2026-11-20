@@ -66,7 +66,15 @@ fn handle(mut stream:TcpStream,app:&tauri::AppHandle){
         reply(&mut stream,"403 Forbidden","text/plain",b"Forbidden","",origin);return;
     }
     let state=app.state::<std::sync::Mutex<super::media_library::MediaLibrary>>();
-    let Ok(lib)=state.lock() else{return};
+    let Ok(mut lib)=state.lock() else{return};
+    if path=="/rescan" {
+        lib.rescan_all();
+        let saved=lib.save(app).is_ok();
+        let body=json!({"ok":saved,"count":lib.items.len(),"lastScan":lib.last_scan}).to_string();
+        reply(&mut stream,if saved{"200 OK"}else{"500 Internal Server Error"},
+            "application/json",body.as_bytes(),"",origin);
+        return;
+    }
     if path=="/catalog" {
         let items=lib.items.iter().enumerate().map(|(index,item)|{
             let mut v=serde_json::to_value(item).unwrap_or(Value::Null);
@@ -153,8 +161,14 @@ pub fn bridge_script()->String {
         if(!r.ok)throw Error('Minternet media server unavailable ('+r.status+')');
         return r.json();
       };
+      const rescan=async()=>{
+        const r=await fetch(base+'/rescan?key='+key,{cache:'no-store'});
+        if(!r.ok)throw Error('Local media rescan failed ('+r.status+')');
+        return getCatalog();
+      };
       window.MinternetMediaLibrary=Object.freeze({
         getCatalog,
+        rescan,
         addFolder:async()=>{
           const beforeRequest=getCatalog();
           window.open('https://minternet-media.invalid/__add','_blank');
