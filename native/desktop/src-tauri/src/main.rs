@@ -4937,11 +4937,7 @@ fn navigate_tab(app: &tauri::AppHandle, id: u32, url: Option<tauri::Url>, append
         }
     } else if let Some(label) = existing {
         if let Some(view) = app.get_webview(&label) { let _ = view.close(); }
-        if private {
-            if let Ok(mut copy)=app.state::<PrivateLoginCopyState>().0.lock(){
-                copy.seeded.remove(&id);
-            }
-        }
+        if private {forget_private_login_copy(app,id);}
         let state = app.state::<Mutex<Browser>>();
         if let Ok(mut b) = state.lock() {
             if let Some(tab) = b.tabs.iter_mut().find(|t| t.id == id) { tab.view = None; }
@@ -5120,6 +5116,7 @@ fn check_idle_tabs(app:&tauri::AppHandle, minutes:u64) -> Result<(),String>{
                 result
             };
             if let Some(label)=released {
+                forget_private_login_copy(&handle,id);
                 // Never close the very WebView2 controller from inside its
                 // ExecuteScript completion callback: defer teardown to a
                 // later UI-loop turn to avoid COM reentrancy/use-after-close.
@@ -8423,6 +8420,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 (label,was_active,tab.url.clone())
             };
             if name=="unload-tab" {
+                forget_private_login_copy(&app,id);
                 {
                     let state=app.state::<SplitState>();
                     let mut split=state.0.lock().map_err(|e|e.to_string())?;
@@ -8513,6 +8511,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 t.at = 0;
                 (t.id, old, t.url.clone())
             };
+            forget_private_login_copy(&app,id);
             if let Some(old)=old {
                 if let Some(view)=app.get_webview(&old) { let _=view.close(); }
             }
