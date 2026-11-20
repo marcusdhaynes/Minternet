@@ -46,9 +46,11 @@
 //! shells need the equivalent Kotlin/Swift module; the JSON schema below is
 //! the shared contract.
 
-use std::{fs, path::{Path, PathBuf}, time::{SystemTime, UNIX_EPOCH}};
+use std::{fs, path::{Path, PathBuf}, time::{SystemTime, UNIX_EPOCH}, collections::BTreeMap};
+use serde_json::Value;
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
+use rand::RngCore;
 
 pub const VIDEO_EXTENSIONS: &[&str] = &[
     "3g2", "3gp", "asf", "avi", "divx", "f4v", "flv", "m1v", "m2ts", "m4v",
@@ -84,12 +86,28 @@ pub struct LibraryItem {
     pub year: Option<u32>,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all="camelCase")]
+pub struct LibraryCollection {
+    pub id:String,
+    pub name:String,
+    pub kind:String,
+    #[serde(default)]
+    pub folder_ids:Vec<String>,
+    #[serde(default)]
+    pub hidden_ids:Vec<String>,
+}
+
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MediaLibrary {
     pub folders: Vec<LibraryFolder>,
     pub items: Vec<LibraryItem>,
     pub last_scan: u64,
+    #[serde(default)]
+    pub collections:Vec<LibraryCollection>,
+    #[serde(default)]
+    pub overrides:BTreeMap<String,Value>,
 }
 
 pub fn file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -170,7 +188,18 @@ impl MediaLibrary {
     pub fn load(app: &tauri::AppHandle) -> Self {
         let Ok(path) = file(app) else { return Self::default() };
         let Ok(data) = fs::read(path) else { return Self::default() };
-        serde_json::from_slice::<Self>(&data).unwrap_or_default()
+        let mut result=serde_json::from_slice::<Self>(&data).unwrap_or_default();
+        // Migrate the original single-library format without dropping its
+        // registered native folders or requiring another user permission.
+        if result.collections.is_empty() && !result.folders.is_empty(){
+            result.collections.push(LibraryCollection{
+                id:"minternet-media".into(),name:"Media Library".into(),
+                kind:"mixed".into(),
+                folder_ids:result.folders.iter().map(|f|f.id.clone()).collect(),
+                hidden_ids:Vec::new(),
+            });
+        }
+        result
     }
 
     pub fn save(&self, app: &tauri::AppHandle) -> Result<(), String> {
@@ -199,26 +228,100 @@ impl MediaLibrary {
         self.last_scan = now_secs();
     }
 
-    pub fn add_folder(&mut self, path: &str) -> Result<LibraryFolder, String> {
-        let p = Path::new(path);
-        if !p.is_dir() { return Err("That folder does not exist on this device".into()); }
-        if self.folders.iter().any(|f| f.path == path) {
-            return Err("That folder is already in the library".into());
+    pub fn create_or_update_collection(&mut self, id:Option<&str>,
+        name:&str,kind:&str)->Result<String,String>{
+        let name=name.trim();
+        if name.is_empty()||name.chars().count()>80{return Err("Library name must contain 1–80 characters".into());}
+        if !matches!(kind,"movie"|"tv"|"mixed"){return Err("Choose a valid library type".into());}
+        if self.collections.iter().any(|c|c.name.eq_ignore_ascii_case(name)&&Some(c.id.as_str())!=id){
+            return Err("A library with this name already exists".into());
         }
-        let folder = LibraryFolder {
-            id: format!("mf{}-{}", now_secs(), self.folders.len()),
-            path: path.to_string(),
-            name: p.file_name().map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "Video Folder".into()),
+        if let Some(id)=id {
+            let existing=self.collections.iter_mut().find(|c|c.id==id)
+                .ok_or("Library was not found")?;
+            existing.name=name.into();existing.kind=kind.into();
+            return Ok(existing.id.clone());
+        }
+        // Stable opaque identifier; IDs are never paths or user data.
+        let mut bytes=[0u8;16];
+        rand::rngs::OsRng.fill_bytes(&mut bytes);
+        let id=format!("ml{}",bytes.iter().map(|b|format!("{b:02x}")).collect::<String>());
+        self.collections.push(LibraryCollection{
+            id:id.clone(),name:name.into(),kind:kind.into(),
+            folder_ids:Vec::new(),hidden_ids:Vec::new()
+        });
+        Ok(id)
+    }
+    pub fn add_folder_to(&mut self, path:&str, library_id:&str)->Result<LibraryFolder,String>{
+        if !self.collections.iter().any(|l|l.id==library_id){
+            return Err("Create a library in Marmaladeum first".into());
+        }
+        let canonical=Path::new(path).canonicalize().map_err(|e|e.to_string())?;
+        if !canonical.is_dir(){return Err("Choose an existing media folder".into());}
+        if let Some(existing)=self.folders.iter().find(|f|Path::new(&f.path)==canonical){
+            return Err(format!("Folder is already registered: {}",existing.name));
+        }
+        let mut bytes=[0u8;16];
+        rand::rngs::OsRng.fill_bytes(&mut bytes);
+        let folder=LibraryFolder {
+            id:format!("mf{}",bytes.iter().map(|b|format!("{b:02x}")).collect::<String>()),
+            path:canonical.to_string_lossy().into_owned(),
+            name:canonical.file_name().map(|n|n.to_string_lossy().into_owned())
+                .unwrap_or_else(||"Video Folder".into()),
         };
         self.folders.push(folder.clone());
+        if let Some(l)=self.collections.iter_mut().find(|l|l.id==library_id){
+            l.folder_ids.push(folder.id.clone());
+        }
         self.rescan_all();
         Ok(folder)
     }
-
-    pub fn remove_folder(&mut self, folder_id: &str) {
-        self.folders.retain(|f| f.id != folder_id);
-        self.items.retain(|i| i.folder_id != folder_id);
+    pub fn remove_folder(&mut self,folder_id:&str){
+        self.folders.retain(|f|f.id!=folder_id);
+        self.items.retain(|i|i.folder_id!=folder_id);
+        self.overrides.retain(|id,_|!id.starts_with(&format!("{folder_id}|")));
+        for l in &mut self.collections{l.folder_ids.retain(|f|f!=folder_id);}
+    }
+    pub fn remove_collection(&mut self,id:&str)->Result<(),String>{
+        let collection=self.collections.iter().find(|c|c.id==id)
+            .ok_or("Library not found")?;
+        let folders=collection.folder_ids.clone();
+        self.collections.retain(|c|c.id!=id);
+        for folder_id in folders {
+            if !self.collections.iter().any(|c|c.folder_ids.contains(&folder_id)){
+                self.remove_folder(&folder_id);
+            }
+        }
+        Ok(())
+    }
+    pub fn update_item(&mut self,library_id:&str,item_id:&str,changes:Value)->Result<(),String>{
+        let collection=self.collections.iter_mut().find(|c|c.id==library_id)
+            .ok_or("Library not found")?;
+        let item=self.items.iter().find(|i|i.id==item_id)
+            .ok_or("Video not found")?;
+        if !collection.folder_ids.contains(&item.folder_id){
+            return Err("This video does not belong to the selected library".into());
+        }
+        let obj=changes.as_object().ok_or("Invalid media changes")?;
+        let allowed_fields=["title","year","type","show","season","episode",
+            "poster","overview","favorite","watched","watchlist","playlists",
+            "collections","runtimeSec","metadataSource","customized","analyzedAt"];
+        if let Some(hidden)=obj.get("hidden").and_then(Value::as_bool){
+            if hidden {
+                if !collection.hidden_ids.contains(&item_id.to_string()){
+                    collection.hidden_ids.push(item_id.into());
+                }
+            }else{collection.hidden_ids.retain(|id|id!=item_id);}
+        }
+        let saved=self.overrides.entry(item_id.into()).or_insert_with(||Value::Object(Default::default()));
+        if let Some(target)=saved.as_object_mut(){
+            for (k,v) in obj {
+                if allowed_fields.contains(&k.as_str()){
+                    target.insert(k.clone(),v.clone());
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -234,7 +337,15 @@ pub fn action(app: &tauri::AppHandle, name: &str, value: &serde_json::Value)
         "media-library-add-folder" => {
             let path = value.get("path").and_then(|v| v.as_str())
                 .ok_or("Choose a folder first")?;
-            let folder = lib.add_folder(path)?;
+            let library_id=value.get("libraryId").and_then(Value::as_str)
+                .unwrap_or("minternet-media");
+            if lib.collections.is_empty() {
+                lib.collections.push(LibraryCollection{
+                    id:"minternet-media".into(),name:"Media Library".into(),kind:"mixed".into(),
+                    folder_ids:Vec::new(),hidden_ids:Vec::new()
+                });
+            }
+            let folder = lib.add_folder_to(path,library_id)?;
             lib.save(app)?;
             Ok(serde_json::json!({"ok": true, "folder": folder,
                 "count": lib.items.iter().filter(|i| i.folder_id == folder.id).count()}))
@@ -244,6 +355,28 @@ pub fn action(app: &tauri::AppHandle, name: &str, value: &serde_json::Value)
             lib.remove_folder(id);
             lib.save(app)?;
             Ok(serde_json::json!({"ok": true}))
+        }
+        "media-library-library-save" => {
+            let id=value.get("id").and_then(Value::as_str);
+            let name=value.get("name").and_then(Value::as_str).ok_or("Library name required")?;
+            let kind=value.get("kind").and_then(Value::as_str).unwrap_or("movie");
+            let id=lib.create_or_update_collection(id,name,kind)?;
+            lib.save(app)?;
+            Ok(serde_json::json!({"ok":true,"id":id}))
+        }
+        "media-library-library-delete" => {
+            let id=value.get("id").and_then(Value::as_str).ok_or("Library ID required")?;
+            lib.remove_collection(id)?;
+            lib.save(app)?;
+            Ok(serde_json::json!({"ok":true}))
+        }
+        "media-library-item-update" => {
+            let library_id=value.get("libraryId").and_then(Value::as_str).ok_or("Library ID required")?;
+            let item_id=value.get("itemId").and_then(Value::as_str).ok_or("Video ID required")?;
+            let changes=value.get("changes").cloned().ok_or("Changes required")?;
+            lib.update_item(library_id,item_id,changes)?;
+            lib.save(app)?;
+            Ok(serde_json::json!({"ok":true}))
         }
         "media-library-rescan" => {
             lib.rescan_all();
@@ -260,6 +393,19 @@ mod tests {
     use super::*;
     use std::io::Write;
 
+    #[test]
+    fn named_libraries_keep_media_overrides_and_folder_membership(){
+        let mut state=MediaLibrary::default();
+        let id=state.create_or_update_collection(None,"Films","movie").unwrap();
+        let shows=state.create_or_update_collection(None,"Series","tv").unwrap();
+        assert_ne!(id,shows);
+        assert_eq!(state.collections.len(),2);
+        state.create_or_update_collection(Some(&id),"Movies","mixed").unwrap();
+        assert_eq!(state.collections[0].name,"Movies");
+        assert!(state.create_or_update_collection(None,"Movies","movie").is_err());
+        state.remove_collection(&id).unwrap();
+        assert_eq!(state.collections.len(),1);
+    }
     #[test]
     fn scan_finds_root_and_nested_videos_only() {
         let dir = std::env::temp_dir().join(format!("minternet-ml-test-{}", now_secs()));
