@@ -58,7 +58,7 @@ test('only restored real desktop sessions activate the opaque curtain',()=>{
 });
 test('stale chrome initialization flag cannot re-arm a finished startup',async()=>{
  const h=harness(true,false);
- await Promise.resolve();await Promise.resolve();
+ await new Promise(setImmediate);
  assert.equal(h.classes.size,0);
  assert.equal(h.timers.size,0);
  assert.deepEqual(h.actions.map(x=>x.name),['startup-status']);
@@ -72,7 +72,7 @@ test('native startup restoration never follows ordinary tab switching or URL sub
 });
 test('trusted chrome can request startup display without waiting for invisible-window animation frames',async()=>{
  const h=harness();
- await Promise.resolve();await Promise.resolve();
+ await new Promise(setImmediate);
  assert.ok(h.classes.has('minternet-startup-armed'));
  assert.equal(h.nodes.startupCurtain.attributes['aria-hidden'],'false');
  assert.equal(h.actions.length,1);
@@ -91,7 +91,7 @@ test('trusted chrome can request startup display without waiting for invisible-w
 });
 test('startup retry leaves opaque curtain in place while reloading last page',async()=>{
  const h=harness();
- await Promise.resolve();await Promise.resolve();
+ await new Promise(setImmediate);
  await h.nodes.startupCurtainRetry.handlers.click();
  assert.equal(h.actions[1].name,'reload');
  assert.ok(h.classes.has('minternet-startup-armed'));
