@@ -56,6 +56,10 @@ fn proxies() -> &'static Mutex<HashMap<u32,TabProxy>> {
     PROXIES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+pub fn network_ready()->bool{
+    CLIENT.get().is_some_and(|client|client.bootstrap_status().ready_for_traffic())
+}
+
 pub fn proxy_url(id:u32)->Result<tauri::Url,String>{
     let state=proxies().lock().map_err(|e|e.to_string())?;
     let proxy=state.get(&id).filter(|proxy|!proxy.task.is_finished())
