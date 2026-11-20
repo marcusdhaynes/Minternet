@@ -179,18 +179,45 @@ test('continuous login retry validates the current HTTPS origin and vault access
   assert.match(main,/Duration::from_secs\(3\)/);
   assert.match(main,/vault_section_allowed\(&owner,"logins"\)/);
   assert.match(main,/schedule_wgu_login_autofill\(app\.handle\(\)\)/);
-  assert.match(main,/vault\.matching\("https:\/\/my\.wgu\.edu",false,None\)/);
+  assert.match(main,/vault\.matching_site\(&actual_origin,manual,username,source_origin\)/);
 });
 
 test('WGU login uses direct matching or portal fallback without a popup',()=>{
   const main=fs.readFileSync(path.join(__dirname,'../native/desktop/src-tauri/src/main.rs'),'utf8');
-  const start=main.indexOf('fn fill_saved_credential(');
+  const start=main.indexOf('fn fill_saved_credential_from(');
   const end=main.indexOf('const IDENTITY_FILL_JS',start);
   const fill=main.slice(start,end);
-  assert.match(fill,/vault\.matching\(&actual_origin,manual,username\)/);
-  assert.match(fill,/vault\.matching\("https:\/\/my\.wgu\.edu",false,None\)/);
+  assert.match(fill,/vault\.matching_site\(&actual_origin,manual,username,source_origin\)/);
   assert.match(fill,/view\.eval\(&script\)/);
   assert.doesNotMatch(fill,/vault-associate-login|chrome-overlay|window\.confirm/);
+});
+test('WGU family matching is limited to secure WGU DNS suffixes',()=>{
+  const vault=file('password_vault.rs');
+  assert.match(vault,/host=="wgu.edu" \|\| host.ends_with\("\.wgu.edu"\)/);
+  assert.match(vault,/url.scheme\(\)!="https"/);
+  assert.match(vault,/pub fn matching_site/);
+  assert.match(vault,/choices.len\(\)==1/);
+  assert.match(vault,/entry.origin==destination/);
+});
+test('login saving releases the vault lock before attempting autofill',()=>{
+  const main=fs.readFileSync(path.join(__dirname,'../native/desktop/src-tauri/src/main.rs'),'utf8');
+  const start=main.indexOf('"vault-put" => {');
+  const end=main.indexOf('"vault-remove" => {',start);
+  const segment=main.slice(start,end);
+  assert.match(segment,/\}\s*\/\/ Release the vault mutex before any autofill attempt/);
+  assert.match(segment,/fill_saved_credential\(&app,active,false,None\)/);
+  assert.match(segment,/"vault-edit"/);
+  assert.match(segment,/vault.edit_login/);
+});
+test('saved logins have Edit actions and password-preserving native update',()=>{
+  const ui=fs.readFileSync(path.join(__dirname,'../ui/password-ui.js'),'utf8');
+  const html=fs.readFileSync(path.join(__dirname,'../ui/index.html'),'utf8');
+  assert.match(ui,/editLogin\(entry\)/);
+  assert.match(ui,/'vault-edit'/);
+  assert.match(ui,/oldOrigin:editing.origin/);
+  assert.match(html,/id="vaultEditCancel"/);
+  assert.match(html,/id="vaultPasswordHint"/);
+  assert.match(html,/<details id="vaultPasskeys"/);
 });
 test('no repeated WGU password prompt when optional Windows auto unlock is enabled',()=>{
   const main=fs.readFileSync(path.join(__dirname,'../native/desktop/src-tauri/src/main.rs'),'utf8');
