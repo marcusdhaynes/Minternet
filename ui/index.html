@@ -512,28 +512,30 @@
     <div class="vault-backdrop" id="vaultBackdrop"></div>
     <aside class="vault-panel">
       <div class="vault-head"><strong>Logins</strong><button type="button" id="vaultLock" title="Lock vault">Lock</button><button type="button" id="vaultClose" aria-label="Close logins manager">×</button></div>
-      <section id="vaultPasskeys" class="vault-passkeys" aria-label="Passkey Settings">
-        <div class="vault-list-head">⚿ Passkeys</div>
-        <p>Passkeys are created by websites and stored in Windows Hello or your selected passkey provider, never in Minternet's password vault. Use the site's own account settings to register a new passkey.</p>
+      <details id="vaultPasskeys" class="vault-passkeys" aria-label="Passkey Settings">
+        <summary>⚿ Passkeys <small>Windows Hello / Provider</small></summary>
+        <p>Passkeys stay with Windows Hello or your passkey provider. Register them on the website.</p>
         <div class="vault-passkey-actions">
           <button type="button" id="passkeyCheck">Check Compatibility</button>
           <button type="button" id="passkeyManage">Manage In Windows</button>
           <button type="button" id="passkeyTest">Test WebAuthn</button>
         </div>
         <p id="passkeyStatus" role="status" aria-live="polite">Compatibility has not been checked on this device.</p>
-      </section>
-      <p class="vault-info">Encrypted on this device. Your master password is required after restarting Minternet. Never enter it on a website.</p>
+      </details>
+      <p class="vault-info">Encrypted on this device. Autofill works while Logins is unlocked, or when Windows automatic unlock is enabled in Settings.</p>
       <form id="vaultAuthForm" class="vault-auth" autocomplete="off">
         <label>Master Password<input id="vaultMaster" type="password" autocomplete="off" minlength="12" required></label>
         <button type="submit" id="vaultAuthButton">Unlock</button>
       </form>
       <div id="vaultUnlocked" hidden>
+        <div class="vault-entry-form-head"><strong id="vaultEntryTitle">Add Login</strong><button type="button" id="vaultEditCancel" hidden>Cancel Edit</button></div>
         <form id="vaultEntryForm" class="vault-auth" autocomplete="off">
           <label>HTTPS Website<input id="vaultOrigin" type="url" placeholder="https://example.com" required></label>
           <label>Username / Email<input id="vaultUsername" autocomplete="off" maxlength="320"></label>
-          <label>Password<div class="vault-password-row"><input id="vaultPassword" type="password" autocomplete="new-password" required maxlength="4096"><button id="vaultShowPassword" type="button" aria-label="Show or hide password" title="Show or Hide">◉</button><button id="vaultGeneratePassword" type="button">Generate</button></div></label>
-          <label class="vault-checkbox"><input type="checkbox" id="vaultAutofill" checked> Autofill on this HTTPS site</label>
-          <button type="submit">Save Credential</button>
+          <label>Password<div class="vault-password-row"><input id="vaultPassword" type="password" autocomplete="new-password" required maxlength="4096" placeholder="Password"><button id="vaultShowPassword" type="button" aria-label="Show or hide password" title="Show or Hide">◉</button><button id="vaultGeneratePassword" type="button">Generate</button></div></label>
+          <small id="vaultPasswordHint" class="vault-edit-hint" hidden>Leave blank to keep the saved password.</small>
+          <label class="vault-checkbox"><input type="checkbox" id="vaultAutofill" checked> Autofill Automatically</label>
+          <button id="vaultSaveButton" type="submit">Save Login</button>
         </form>
         <div class="vault-list-head">Saved Logins</div>
         <input id="vaultSearch" class="manager-search" type="search" placeholder="Search logins, websites, or usernames…" aria-label="Search Logins" autocomplete="off" spellcheck="false">
