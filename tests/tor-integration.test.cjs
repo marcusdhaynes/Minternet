@@ -209,3 +209,26 @@ test('33. Address bar focus halo cannot flicker with site/chrome focus handoffs'
  assert.match(css,/\.address-wrap:focus-within\s*\{[^}]*border-color: var\(--line\);/);
  assert.doesNotMatch(css,/\.address-wrap:focus-within\s*\{[^}]*0 0 0 1px/);
 });
+
+test('34. Lost SOCKS listeners are recreated on navigation without direct fallback',()=>{
+ assert.match(native,/async fn restore_tor_proxy\(/);
+ assert.match(native,/let listener_alive=tor_transport::proxy_url\(id\).is_ok\(\)/);
+ assert.match(native,/tor_transport::network_ready\(\)/);
+ assert.match(native,/tor_transport::prepare\(id\).await\?/);
+ assert.match(native,/if tab.view==old_view\{tab.view=None;\}/);
+ assert.match(native,/restore_tor_proxy\(&app,id,false\).await\?/);
+ assert.match(native,/"navigate"\|"activate"\|"reload"/);
+ assert.match(native,/if name=="tor-reconnect"/);
+ assert.match(app,/action:'tor-reconnect',requiresTor:true/);
+ assert.match(transport,/static PREPARE_GATE:/);
+ assert.match(transport,/client\.bootstrap\(\)/);
+ assert.match(transport,/Tor proxy not ready: navigation blocked/);
+});
+test('35. Real transport smoke injects a stopped Tor listener and checks recovery',()=>{
+ const probe=source('native/desktop/src-tauri/src/tor_live_probe.rs');
+ assert.match(transport,/fn interrupt_listener_for_smoke\(/);
+ assert.match(transport,/--minternet-tor-transport-smoke/);
+ assert.match(probe,/interrupt_listener_for_smoke\(SMOKE_ID\)/);
+ assert.match(probe,/Tor SOCKS listener restored after injected failure/);
+ assert.match(probe,/socks_deny_local\(recovered.port\(\)/);
+});
