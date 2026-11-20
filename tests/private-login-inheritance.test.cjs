@@ -23,7 +23,7 @@ test('Private login sharing is a real persisted toggle in Privacy settings',()=>
  assert.match(html,/id="privateLoginSharing" checked/);
  assert.match(settings,/privateLoginSharing\.checked=settings\.privateLoginSharing!==false/);
  assert.match(settings,/invoke\('private-login-sharing-set',enabled\)/);
- assert.match(categories,/const privacy=section\('Privacy'\)/);
+ assert.match(categories,/const privacy=section\('Privacy & History'\)/);
  assert.match(categories,/move\(privacy,'privateLoginSettings'\)/);
 });
 
