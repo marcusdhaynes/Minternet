@@ -118,7 +118,11 @@
         // Native accepted the injection, but that is NOT proof the fields
         // were filled. Reveal the webpage before checking both real values.
         const startingSite=activeSite();
-        close();
+        // Keep the section's native access lease alive until the form has
+        // actually confirmed both values. Closing previously triggered an
+        // immediate lock before the verification command returned.
+        screen.hidden=true;
+        void call('chrome-overlay',false).catch(()=>{});
         window.minternetToast?.('Filling saved login…');
         let confirmed=false,redirected=false;
         for(let attempt=0;attempt<12;attempt++){
@@ -140,8 +144,10 @@
         }
         if(!confirmed&&!redirected){
           window.minternetToast?.(
-            'Fill was requested but the fields were not confirmed. Check that Logins is unlocked and retry.');
+            'Fill was not confirmed. Check the saved WGU login and unlock status.');
         }
+        screen.hidden=false;
+        close(); // Apply the chosen auto-lock AFTER the verification.
       });
       if(isWguOrigin(entry.origin)){
         const wguDefault=document.createElement('button');
@@ -188,6 +194,10 @@
     report('');
     await refresh();
     if(!unlocked)report('Autofill paused: unlock Logins or enable automatic unlock in Settings.');
+    else if(isWguOrigin(activeSite())){
+      const diagnostic=await invoke('vault-autofill-check');
+      if(diagnostic&&!diagnostic.ready)report(diagnostic.reason);
+    }
     (unlocked?$('vaultUsername'):$('vaultMaster')).focus();
   }
   function close(){
