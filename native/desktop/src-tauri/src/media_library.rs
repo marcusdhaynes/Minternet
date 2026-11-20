@@ -403,6 +403,20 @@ mod tests {
     use std::io::Write;
 
     #[test]
+    fn temporarily_missing_drive_preserves_known_video_cards(){
+        let dir=std::env::temp_dir().join(format!("minternet-unmounted-test-{}-{}",std::process::id(),now_secs()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("Retained.mp4"),b"video").unwrap();
+        let folder=LibraryFolder{id:"cached-folder".into(),path:dir.to_string_lossy().into_owned(),name:"Drive".into()};
+        let mut catalog=MediaLibrary::default();
+        catalog.folders.push(folder);
+        catalog.rescan_all();
+        assert_eq!(catalog.items.len(),1);
+        fs::remove_dir_all(&dir).unwrap();
+        catalog.rescan_all();
+        assert_eq!(catalog.items.len(),1,"unavailable drives must not erase saved catalog");
+    }
+    #[test]
     fn named_libraries_keep_media_overrides_and_folder_membership(){
         let mut state=MediaLibrary::default();
         let id=state.create_or_update_collection(None,"Films","movie").unwrap();
