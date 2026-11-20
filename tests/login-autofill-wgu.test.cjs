@@ -214,7 +214,7 @@ test('WGU family matching is limited to secure WGU DNS suffixes',()=>{
   assert.match(vault,/url.scheme\(\)!="https"/);
   assert.match(vault,/pub fn matching_site/);
   assert.match(vault,/choices.len\(\)==1/);
-  assert.match(vault,/entry.origin==destination/);
+  assert.match(vault,/e.origin==destination/);
 });
 test('login saving releases the vault lock before attempting autofill',()=>{
   const main=fs.readFileSync(path.join(__dirname,'../native/desktop/src-tauri/src/main.rs'),'utf8');
