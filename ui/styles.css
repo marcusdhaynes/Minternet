@@ -2236,17 +2236,28 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, body *::-webkit-scrollbar { di
 .bookmark-settings .updates-live-foot a{color:#ccbaee;text-decoration:underline}
 .bookmark-settings .updates-live-refresh{font-size:8px;color:#827e9c}
 
-/* Passkey controls are part of Logins, but never require unlocking the
-   password vault (keys are owned and managed by the OS/passkey provider). */
-.vault-passkeys{border:1px solid #48445f;background:#211f32;border-radius:8px;
-  padding:10px;margin:8px 0 12px;display:flex;flex-direction:column;gap:7px}
-.vault-passkeys .vault-list-head{margin:0;font-weight:650}
-.vault-passkeys p{margin:0;color:#bdb6d0;font-size:11px;line-height:1.45;overflow-wrap:anywhere}
-.vault-passkey-actions{display:flex;gap:6px;flex-wrap:wrap}
-.vault-passkey-actions button{font:inherit;font-size:10px;line-height:1.2;cursor:pointer;
-  padding:7px 8px;color:#f5f0ff;background:#342c4b;border:1px solid #6b5c91;border-radius:5px}
+/* The passkey panel is a compact, collapsed disclosure by default. */
+.vault-passkeys{border:1px solid #48445f;background:#211f32;border-radius:6px;
+  padding:0;margin:5px 0 7px;}
+.vault-passkeys summary{display:flex;align-items:center;gap:5px;cursor:pointer;
+  padding:5px 7px;font-size:10px;color:#eee6ff;list-style:none}
+.vault-passkeys summary::-webkit-details-marker{display:none}
+.vault-passkeys summary::after{content:'▸';font-size:10px;margin-left:auto;color:#b1a2d0}
+.vault-passkeys[open] summary::after{content:'▾'}
+.vault-passkeys summary small{font-size:8px;color:#a39bbc}
+.vault-passkeys p{margin:0 7px 6px;color:#bdb6d0;font-size:9px;line-height:1.3;overflow-wrap:anywhere}
+.vault-passkey-actions{display:flex;gap:3px;flex-wrap:wrap;margin:0 7px 5px}
+.vault-passkey-actions button{font:inherit;font-size:9px;line-height:1.1;cursor:pointer;
+  padding:4px 5px;color:#f5f0ff;background:#342c4b;border:1px solid #6b5c91;border-radius:4px}
 .vault-passkey-actions button:hover{background:#493960}
 .vault-passkeys #passkeyStatus{color:#d0c5e7}
+.vault-entry-form-head{display:flex;justify-content:space-between;align-items:center;
+  margin:7px 0 5px;font-size:10px}
+.vault-entry-form-head button{font-size:9px;color:#e5d5ff;background:#302843;
+  border:1px solid #78639a;border-radius:4px;padding:3px 6px;cursor:pointer}
+.vault-entry-form-head button[hidden],.vault-edit-hint[hidden]{display:none!important}
+.vault-edit-hint{font-size:9px;color:#baaed1}
+.vault-edit{color:#dfd0ff!important}
 
 /* Split panes merge into one extremely condensed supertab. No duplicate
    title text, spare icon margins, or hidden close-button width. */
