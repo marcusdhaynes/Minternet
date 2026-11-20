@@ -314,7 +314,8 @@ impl MediaLibrary {
         let obj=changes.as_object().ok_or("Invalid media changes")?;
         let allowed_fields=["title","year","type","show","season","episode",
             "poster","overview","favorite","watched","watchlist","playlists",
-            "collections","runtimeSec","metadataSource","customized","analyzedAt"];
+            "collections","runtimeSec","metadataSource","customized","analyzedAt",
+            "posterCustomized"];
         if let Some(hidden)=obj.get("hidden").and_then(Value::as_bool){
             if hidden {
                 if !collection.hidden_ids.contains(&item_id.to_string()){
