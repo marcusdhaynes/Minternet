@@ -65,3 +65,35 @@ login controls. The master password is not recoverable; losing it makes saved
 credentials inaccessible. Passwords should not be entrusted to this preview
 as their only copy. Remote web pages receive no Tauri capabilities, and
 credentials are never written to browser chrome localStorage.
+
+## Local Media Server add-on (desktop source preview)
+
+Minternet's native desktop source now includes a local media server for Marmaladeum:
+`native/desktop/src-tauri/src/media_library.rs` stores chosen folder paths and indexes
+videos recursively, while `media_server.rs` offers a token-protected HTTP Range
+stream on **127.0.0.1:18761 only**. This is an integrated native add-on, not
+a standalone Chrome/Firefox extension. Video bytes remain on the machine.
+
+In desktop Minternet, open **Settings → Local Media Server → Add Media Folder**,
+select a Movies/TV folder once, then open
+`https://marcusdhaynes.github.io/MarmaladePlayer/` in a regular Minternet tab.
+Marmaladeum's Media Library imports the native catalog. Adding a folder from
+Marmaladeum's `+ Add Folder` button also requests Minternet's native picker.
+Folders are stored by path instead of relying on temporary web page permissions,
+so browser permission expiration does not require repicking the folder. An
+unplugged drive retains its registration and can be rescanned when reattached.
+
+**Security:** The loopback endpoint uses a fresh per-process random secret
+and supports only registered video files. The bridge initializes on specified
+Marmaladeum addresses, not arbitrary websites, and is disabled in private/Tor
+tabs. **Caution:** other pages on the same GitHub Pages origin are not isolated
+by repository path; use the dedicated `marmaladeum.com` origin for stronger
+origin separation when that domain serves the app. This is intentionally
+not a LAN-accessible media server. It does not offer Plex accounts, transcoding,
+remote streaming, media metadata agents, or DLNA.
+
+**Verification status:** changes are committed in source but do not imply a
+successful native compile, release, hardware playback, or security audit.
+Windows/macOS/Linux integration is targeted; Android/iOS native equivalents
+are not implemented. On macOS or other sandboxed installations, operating-system
+folder permissions may still require additional authorization.
