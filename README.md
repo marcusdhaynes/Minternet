@@ -66,34 +66,31 @@ credentials inaccessible. Passwords should not be entrusted to this preview
 as their only copy. Remote web pages receive no Tauri capabilities, and
 credentials are never written to browser chrome localStorage.
 
-## Local Media Server add-on (desktop source preview)
+## Marmaladeum Media Server — importable Minternet extension
 
-Minternet's native desktop source now includes a local media server for Marmaladeum:
-`native/desktop/src-tauri/src/media_library.rs` stores chosen folder paths and indexes
-videos recursively, while `media_server.rs` offers a token-protected HTTP Range
-stream on **127.0.0.1:18761 only**. This is an integrated native add-on, not
-a standalone Chrome/Firefox extension. Video bytes remain on the machine.
+Install **Marmaladeum-Media-Server-v1.1.0.mext** using
+**Extensions → Minternet → Import**, then restart a compatible Windows
+Minternet EXE. The installed extension activates Minternet's native local
+media-server host; an .mext alone cannot supply missing native code to an old
+browser version.
 
-In desktop Minternet, open **Settings → Local Media Server → Add Media Folder**,
-select a Movies/TV folder once, then open
-`https://marcusdhaynes.github.io/MarmaladePlayer/` in a regular Minternet tab.
-Marmaladeum's Media Library imports the native catalog. Adding a folder from
-Marmaladeum's `+ Add Folder` button also requests Minternet's native picker.
-Folders are stored by path instead of relying on temporary web page permissions,
-so browser permission expiration does not require repicking the folder. An
-unplugged drive retains its registration and can be rescanned when reattached.
+**All library changes take place in Marmaladeum**, not browser Settings:
+open Marmaladeum inside Minternet, enable its Media Library, create and name
+a Movies/TV/Other library, then select **Add Folder** in Marmaladeum. The
+Minternet-native folder picker scans the selected folder and its descendants;
+saved folder paths and library metadata remain on this device across restarts.
 
-**Security:** The loopback endpoint uses a fresh per-process random secret
-and supports only registered video files. The bridge initializes on specified
-Marmaladeum addresses, not arbitrary websites, and is disabled in private/Tor
-tabs. **Caution:** other pages on the same GitHub Pages origin are not isolated
-by repository path; use the dedicated `marmaladeum.com` origin for stronger
-origin separation when that domain serves the app. This is intentionally
-not a LAN-accessible media server. It does not offer Plex accounts, transcoding,
-remote streaming, media metadata agents, or DLNA.
+Settings displays **Extensions → Marmaladeum → Media Library**, with read-only
+connection/catalog summaries and **Open Marmaladeum**. Every installed extension
+gets its own nested settings accordion using the same generic structure.
+All videos remain local; the native host serves registered media over
+token-protected loopback HTTP Range requests.
 
-**Verification status:** changes are committed in source but do not imply a
-successful native compile, release, hardware playback, or security audit.
-Windows/macOS/Linux integration is targeted; Android/iOS native equivalents
-are not implemented. On macOS or other sandboxed installations, operating-system
-folder permissions may still require additional authorization.
+Supported installer today: **Windows native WebView2**. Chrome/Firefox files
+are not a substitute for Minternet's native folder access. Unsupported codecs
+still require decoding or transcoding not provided by this extension.
+Actual successful EXE installation and real video playback still require
+end-to-end verification.
+
+See [Marmaladeum Media Server details](docs/MARMALADEUM-MEDIA-SERVER.md)
+for setup, security and remaining limitations.
