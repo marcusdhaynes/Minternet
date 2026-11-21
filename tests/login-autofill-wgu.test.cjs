@@ -11,16 +11,20 @@ const probeSource=file('login_form_context.js');
 function fakePage({origin='https://access.wgu.edu',route='/pingfed/idp/SSO.saml2',
   username='',password='',accountName='pf.anon',extra=[],
   rememberLabel='',rememberName='rememberMe',rememberChecked=false,usernameOutsideForm=false,
+  passwordStep=true,usernameStepButton='Next',
   navType='navigate',sessionStore=null}={}){
   class Form {
     constructor(){this.id='signinForm';this.className='';this.submissions=0;this.isConnected=true;}
     getAttribute(name){return name==='action'?route:null;}
-    querySelectorAll(){return [];}
+    querySelectorAll(sel){
+      if(sel==='button,input[type="submit"],input[type="button"]')return [signOnButton];
+      return [];
+    }
     querySelector(){return null;}
     requestSubmit(){this.submissions++;}
   }
   const form=new Form(),events=[];
-  const signOnButton={tagName:'BUTTON',textContent:'Sign On',
+  const signOnButton={tagName:'BUTTON',textContent:passwordStep?'Sign On':usernameStepButton,
     disabled:false,click(){form.submissions++;}};
   class Input {
     constructor(type,name,value=''){
@@ -55,7 +59,7 @@ function fakePage({origin='https://access.wgu.edu',route='/pingfed/idp/SSO.saml2
     remember.parentElement={textContent:rememberLabel};
   }
   const extraInputs=extra.map(([type,name])=>new Input(type,name));
-  const inputs=[user,...extraInputs,pw,...(remember?[remember]:[])];
+  const inputs=[user,...extraInputs,...(passwordStep?[pw]:[]),...(remember?[remember]:[])];
   const doc={
     documentElement:{},title:'Sign On',
     hasFocus(){return true;},querySelector(selector){
@@ -495,5 +499,32 @@ test('WGU full-portal 10x check: remember, origin, fields and single submit',()=
     page.runSubmitTimers();
     assert.equal(page.remember.checked,true,`remember ${cycle}`);
     assert.equal(page.form.submissions,1,`submit ${cycle}`);
+  }
+});
+
+test('WGU username-first flow automatically advances once to its password page',()=>{
+  const page=fakePage({route:'/pingfed/as/authorization.oauth2',passwordStep:false,
+    usernameStepButton:'Next'});
+  page.fill('https://access.wgu.edu',{autoSubmit:true});
+  assert.equal(page.user.value,'student-name');
+  page.runSubmitTimers();
+  assert.equal(page.form.submissions,1);
+  for(let round=0;round<10;round++){
+    page.fill('https://access.wgu.edu',{autoSubmit:true});page.runSubmitTimers();
+  }
+  assert.equal(page.form.submissions,1);
+});
+test('username-first login never bypasses MFA, reset, another site or user input',()=>{
+  const cases=[
+    {route:'/pingfed/as/authorization.oauth2',origin:'https://other.example'},
+    {route:'/pingfed/as/authorization.oauth2',extra:[['text','verification_code']]},
+    {route:'/reset-password'},
+    {route:'/pingfed/as/authorization.oauth2',username:'different-user'}
+  ];
+  for(const options of cases){
+    const page=fakePage({...options,passwordStep:false,usernameStepButton:'Next'});
+    page.fill(options.origin||'https://access.wgu.edu',{autoSubmit:true});
+    page.runSubmitTimers();
+    assert.equal(page.form.submissions,0,JSON.stringify(options));
   }
 });
