@@ -228,6 +228,43 @@
           }));}catch{}
         },180);
       }
+      const usernameSteps=window.__minternetWguUsernameSteps||new WeakSet();
+      window.__minternetWguUsernameSteps=usernameSteps;
+      let usernameStepTimer=0;
+      function advanceWguUsernameStep(username,inputs){
+        if(!submitEnabled||usernameStepTimer||usernameSteps.has(username)||
+           username.value!==credential.username||userTouched.has(username)||
+           inputs.some(el=>el.type==='password'||invalidAccount(el)))return;
+        const form=username.form;
+        if(form){
+          try{
+            const action=new URL(form.getAttribute('action')||location.href,location.href);
+            if(action.protocol!=='https:'||action.origin!==credential.origin)return;
+          }catch{return;}
+        }
+        const buttons=[...(form||username.ownerDocument).querySelectorAll?.(
+          'button,input[type="submit"],input[type="button"]')||[]];
+        const next=buttons.find(button=>{
+          const label=(button.tagName==='INPUT'?button.value:button.textContent)||'';
+          return !button.disabled&&/^(next|continue|sign\\s*on)$/i.test(label.trim());
+        });
+        if(!next)return;
+        let previous;
+        try{previous=JSON.parse(sessionStorage.getItem('minternet.wgu.username.last.v1')||'null');}catch{}
+        if(previous?.path===location.pathname&&Date.now()-Number(previous.at||0)<8000)return;
+        usernameStepTimer=setTimeout(()=>{
+          usernameStepTimer=0;
+          if(done||username.value!==credential.username||
+             username.isConnected===false||userTouched.has(username))return;
+          try{
+            usernameSteps.add(username);
+            next.click();
+            sessionStorage.setItem('minternet.wgu.username.last.v1',JSON.stringify({
+              path:location.pathname,at:Date.now()
+            }));
+          }catch{}
+        },180);
+      }
       const watchOptions={childList:true,subtree:true,attributes:true,
         attributeFilter:['type','autocomplete','style','class']};
       const stop=()=>{
@@ -241,6 +278,7 @@
         window.removeEventListener('hashchange',attempt);
         if(delayed)clearTimeout(delayed);
         if(submissionTimer)clearTimeout(submissionTimer);
+        if(usernameStepTimer)clearTimeout(usernameStepTimer);
         // Avoid retaining the password in a long-lived page closure.
         credential.password='';
         if(window.__minternetLoginJob?.stop===stop)
@@ -294,8 +332,12 @@
              // A sole email input may be step one even on a neutral URL.
              (accountInputs.length===1&&
                (el.type==='email'||token(el).includes('email')))));
-        if(username&&!dangerousForm(username) && !username.value){
-          put(username,credential.username);
+        if(username&&!dangerousForm(username)){
+          if(!username.value)put(username,credential.username);
+          if(username.value===credential.username){
+            status.usernameFilled=true;
+            advanceWguUsernameStep(username,inputs);
+          }
         }
         // Retain the bounded observer until the password step mounts.
         return false;
