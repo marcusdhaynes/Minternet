@@ -3,15 +3,24 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  # Rebuild the public status snapshot when a real Windows run changes phase.
+  # Polling a static JSON file cannot otherwise report Initiating/Building/Ready.
+  workflow_run:
+    workflows: ["Minternet Windows portable single EXE (under 50 MB)"]
+    types: [requested, in_progress, completed]
+    branches: [main]
+  # Recover from dropped workflow_run events or a failed Pages deployment.
+  schedule:
+    - cron: '*/5 * * * *'
 permissions:
   contents: read
   actions: read
   pages: write
   id-token: write
-# Each SHA gets its own durable Web preview artifact; only current main
-# may replace the live Pages site, preventing out-of-order deploy regressions.
+# Never let a backlog of old source previews hold up the current status.
+# Finished previews remain archived; pending refreshes coalesce.
 concurrency:
-  group: pages-${{ github.sha }}
+  group: minternet-pages-live-refresh
   cancel-in-progress: false
 jobs:
   deploy:
@@ -57,7 +66,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
-          import json,os,re,urllib.request
+          import json,os,re,time,urllib.request
           from pathlib import Path
           repo=os.environ['GITHUB_REPOSITORY']
           head=os.environ['GITHUB_SHA']
@@ -70,8 +79,13 @@ jobs:
                   return json.load(response)
           run=None
           try:
-              runs=get('actions/workflows/native-windows.yml/runs?branch=main&per_page=8')
-              run=next((r for r in runs.get('workflow_runs',[]) if r.get('head_branch')=='main'),None)
+              runs=get('actions/workflows/native-windows.yml/runs?branch=main&per_page=20')
+              all_runs=[r for r in runs.get('workflow_runs',[]) if r.get('head_branch')=='main']
+              # A prior failed/cancelled commit must not masquerade as the
+              # current source's ongoing build.
+              run=next((r for r in all_runs if r.get('head_sha')==head),None)
+              if run is None and all_runs:
+                  run=all_runs[0]
           except Exception as ex:
               print('Build state temporarily unavailable:',type(ex).__name__)
           chosen=None
@@ -106,7 +120,7 @@ jobs:
                       })
               if len(releases)<100:break
           current={
-            'schema':1,'sourceSha':head,'workflowRun':os.environ['GITHUB_RUN_ID'],
+            'schema':1,'generatedAt':int(time.time()),'sourceSha':head,'workflowRun':os.environ['GITHUB_RUN_ID'],
             'release':chosen[1] if chosen else None,
             'windowsRun':({k:run.get(k) for k in ('head_sha','run_number','status','conclusion','html_url')}
                          if run else None)
