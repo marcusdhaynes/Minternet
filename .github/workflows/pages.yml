@@ -53,7 +53,7 @@ jobs:
           touch site/.nojekyll
       - name: Publish rate-limit-safe, verified update status feed
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: \${{ github.token }}
         run: |
           python3 - <<'PY'
           import json,os,re,urllib.request
@@ -74,36 +74,7 @@ jobs:
           except Exception as ex:
               print('Build state temporarily unavailable:',type(ex).__name__)
           chosen=None
-          pattern=re.compile(r'^v(\d+)\.(\d+)\.(\d+)-build\.(\d+)-g[0-9a-f]{8}
-        uses: actions/configure-pages@v5
-      - name: Upload site
-        uses: actions/upload-pages-artifact@v4
-        with:
-          path: site
-      - name: Archive this commit's web preview
-        uses: actions/upload-artifact@v4
-        with:
-          name: minternet-web-preview-${{ github.sha }}
-          path: site/
-          if-no-files-found: error
-          retention-days: 90
-      - name: Check whether this is still the current main revision
-        id: current
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          latest=$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq '.commit.sha')
-          if [ "$latest" = "$GITHUB_SHA" ]; then
-            echo "deploy=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "deploy=false" >> "$GITHUB_OUTPUT"
-            echo "Archived this revision; skipping stale Pages deployment." >> "$GITHUB_STEP_SUMMARY"
-          fi
-      - name: Deploy site
-        if: steps.current.outputs.deploy == 'true'
-        id: deployment
-        uses: actions/deploy-pages@v4
-)
+          pattern=re.compile(r'^v(\d+)\.(\d+)\.(\d+)-build\.(\d+)-g[0-9a-f]{8}$')
           for page in range(1,11):
               try: releases=get('releases?per_page=100&page='+str(page))
               except Exception as ex:
@@ -130,7 +101,7 @@ jobs:
                         'url':entry.get('html_url',''),
                         'downloadUrl':exe['browser_download_url'],
                         'checksumUrl':sums['browser_download_url'],
-                        'notes':entry.get('body','')[:2000]
+                        'notes':(entry.get('body') or '')[:2000]
                       })
               if len(releases)<100:break
           current={
