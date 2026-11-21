@@ -2540,3 +2540,104 @@ html.minternet-startup-armed .startup-curtain{
   opacity:0;
   pointer-events:none;
 }
+
+/* Bookmark folder artwork: opt-in dimensionality, preserving the plain
+   original emoji and every custom image until the user enables a feature.
+   All visual layers are clipped to the folder icon, not a bulky square. */
+.bookmark-folder-vector{display:none;position:relative;width:18px;height:18px;isolation:isolate;}
+.bookmark-folder-vector::before,
+.bookmark-folder-vector::after{content:"";position:absolute;display:block;box-sizing:border-box;}
+.bookmark-folder-vector::before{
+  left:1px;top:1px;width:10px;height:7px;
+  border-radius:3px 3px 0 0;
+  background:var(--minternet-folder-art-color,#eabf61);
+  box-shadow:inset 0 1px #ffffff80;
+}
+.bookmark-folder-vector::after{
+  left:0;right:0;top:5px;bottom:1px;
+  border-radius:3px 3px 3px 3px;
+  background:var(--minternet-folder-art-color,#eabf61);
+  box-shadow:inset 0 1px #ffffff63,inset 0 -1px #35250c44,0 1px 1px #060b18a0;
+  z-index:1;
+}
+.bookmark-folder-sheen{
+  position:absolute;display:block;pointer-events:none;z-index:2;
+  left:1px;right:1px;top:6px;height:7px;border-radius:3px 3px 60% 60%;
+  opacity:0;background:linear-gradient(180deg,#fff9,#fff0);
+}
+:root.minternet-folder-style-active .bookmark-bar .bookmark-item[data-bookmark-kind="folder"] .bookmark-folder-native,
+:root.minternet-folder-style-active .bookmark-folder-style-preview .bookmark-folder-native{
+  display:none;
+}
+:root.minternet-folder-style-active .bookmark-bar .bookmark-item[data-bookmark-kind="folder"] .bookmark-folder-vector,
+:root.minternet-folder-style-active .bookmark-folder-style-preview .bookmark-folder-vector{
+  display:block;
+}
+:root.minternet-folder-style-bevel .bookmark-folder-vector::after{
+  box-shadow:inset 1px 2px 1px #ffffffbe,inset -2px -3px 2px #211e3699,
+    inset 0 0 0 1px #ffffff69,0 2px 3px #000b;
+  transform:translateY(-.4px);
+}
+:root.minternet-folder-style-gloss .bookmark-folder-sheen{opacity:1;}
+:root.minternet-folder-style-gloss .bookmark-folder-vector::after{
+  background-image:linear-gradient(150deg,#fff8 0%,#fff0 38%,#16112c2f 92%);
+}
+:root.minternet-folder-style-glass .bookmark-folder-vector::after{
+  background-image:linear-gradient(138deg,#ffffffad 0%,#ffffff23 31%,
+    #ffffff08 58%,#201a425e 100%);
+  border:1px solid #ffffff94;
+  box-shadow:inset 1px 1px #fff8,inset -2px -2px #10152c6e,0 1px 4px #000a;
+  backdrop-filter:blur(2px);
+}
+:root.minternet-folder-style-glass .bookmark-folder-sheen{opacity:.83;}
+:root.minternet-folder-style-bevel .bookmark-bar .bookmark-folder-custom{
+  box-shadow:inset 1px 1px #ffffff82,inset -1px -2px #14182d9a,0 2px 3px #0008!important;
+  border-radius:4px!important;
+}
+:root.minternet-folder-style-gloss .bookmark-bar .bookmark-folder-custom::before,
+:root.minternet-folder-style-glass .bookmark-bar .bookmark-folder-custom::before{
+  content:"";position:absolute;inset:1px 2px 50%;border-radius:4px 4px 60% 60%;
+  background:linear-gradient(180deg,#ffffffa6,#ffffff00);
+  z-index:3;pointer-events:none;
+}
+:root.minternet-folder-style-tint .bookmark-bar .bookmark-folder-custom::after{
+  content:"";position:absolute;inset:1px;
+  background:var(--minternet-folder-art-color,#b99cff);
+  mix-blend-mode:color;opacity:.85;border-radius:3px;
+  pointer-events:none;z-index:2;
+}
+:root.minternet-folder-style-active .bookmark-bar .bookmark-emoji.bookmark-folder-custom{
+  position:relative;
+}
+
+/* Native Settings → Appearance: one compact row and a circular color swatch. */
+.bookmark-folder-appearance{padding:9px 12px;border-top:1px solid #39445e;display:grid;gap:8px;}
+.bookmark-folder-appearance-heading{display:flex;align-items:center;justify-content:space-between;gap:6px;}
+.bookmark-folder-appearance-heading > span:first-child{display:grid;gap:3px;min-width:0;}
+.bookmark-folder-appearance-heading strong{font-size:11px;color:#ecebff;}
+.bookmark-folder-appearance-heading small{font-size:9px;color:#8998ba;}
+.bookmark-folder-style-preview{display:grid;place-items:center;width:22px;height:22px;flex:none;font-size:15px;}
+.bookmark-folder-style-controls{display:flex;align-items:center;gap:7px;flex-wrap:wrap;}
+.bookmark-folder-style-controls > label:not(.bookmark-folder-color-dot){
+  display:flex;gap:3px;align-items:center;font-size:10px;color:#dbe1f3;white-space:nowrap;
+  cursor:pointer;
+}
+.bookmark-folder-style-controls input[type="checkbox"]{
+  width:12px;height:12px;margin:0;accent-color:#b6a3ff;cursor:pointer;
+}
+.bookmark-folder-color-dot{display:grid;place-items:center;cursor:pointer;line-height:0;margin-left:1px;}
+.bookmark-folder-color-dot input[type="color"]{
+  display:block;appearance:none;-webkit-appearance:none;
+  width:22px;height:22px;min-width:22px;padding:0;
+  border:2px solid #d9d1ff;border-radius:50%;overflow:hidden;
+  box-shadow:0 0 0 1px #172037,0 1px 4px #0009;
+  cursor:pointer;background:transparent;
+}
+.bookmark-folder-color-dot input::-webkit-color-swatch-wrapper{padding:0;}
+.bookmark-folder-color-dot input::-webkit-color-swatch{border:0;border-radius:50%;}
+.bookmark-folder-color-dot input::-moz-color-swatch{border:0;border-radius:50%;}
+.bookmark-folder-style-reset{
+  border:0;background:transparent;color:#b6b5d4;cursor:pointer;
+  width:18px;height:22px;padding:0;font-size:17px;line-height:1;
+}
+.bookmark-folder-style-reset:hover{color:#fff;}
