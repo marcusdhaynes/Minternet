@@ -10,7 +10,7 @@ const probeSource=file('login_form_context.js');
 
 function fakePage({origin='https://access.wgu.edu',route='/pingfed/idp/SSO.saml2',
   username='',password='',accountName='pf.anon',extra=[],
-  rememberLabel='',rememberChecked=false,usernameOutsideForm=false,
+  rememberLabel='',rememberName='rememberMe',rememberChecked=false,usernameOutsideForm=false,
   navType='navigate',sessionStore=null}={}){
   class Form {
     constructor(){this.id='signinForm';this.className='';this.submissions=0;this.isConnected=true;}
@@ -48,7 +48,7 @@ function fakePage({origin='https://access.wgu.edu',route='/pingfed/idp/SSO.saml2
   });
   const user=new Input('text',accountName,username),pw=new Input('password','pf.pass',password);
   if(usernameOutsideForm)user.form=null;
-  const remember=rememberLabel?new Input('checkbox','rememberMe'):null;
+  const remember=rememberLabel?new Input('checkbox',rememberName):null;
   if(remember){
     remember.checked=rememberChecked;
     remember.labels=[{textContent:rememberLabel}];
@@ -462,7 +462,8 @@ test('WGU PingFederate remembers the login and submits through Sign On only once
 
 test('WGU unmarked checkbox and login autofill without submission are untouched',()=>{
   for(const label of ['Agree to terms','Newsletter','Two-factor verification']){
-    const page=fakePage({route:'/pingfed/as/authorization.oauth2',rememberLabel:label});
+    const page=fakePage({route:'/pingfed/as/authorization.oauth2',
+      rememberLabel:label,rememberName:'termsOrNewsletter'});
     page.fill('https://access.wgu.edu',{autoSubmit:true});page.runSubmitTimers();
     assert.equal(page.remember.checked,false,label);
   }
