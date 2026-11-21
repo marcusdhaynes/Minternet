@@ -1,0 +1,67 @@
+name: Minternet Queue Recovery
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '*/15 * * * *'
+permissions:
+  actions: write
+  contents: read
+# A rapid sequence of pushes needs one cleanup run, not a second backlog.
+concurrency:
+  group: minternet-queue-recovery
+  cancel-in-progress: true
+jobs:
+  drain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Remove obsolete unstarted push runs and request the latest Windows build
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          main_sha="$(gh api "repos/$repo/branches/main" --jq '.commit.sha')"
+          [[ "$main_sha" =~ ^[0-9a-f]{40}$ ]]
+          echo "Keeping current main: $main_sha" >> "$GITHUB_STEP_SUMMARY"
+          cancelled=0
+          # Cancel only superseded, unstarted PUSH runs on main. Preserve every
+          # running job, manually requested build, release archival and current SHA.
+          for status in queued waiting pending requested; do
+            for page in 1 2 3 4 5; do
+              payload="$(gh api "repos/$repo/actions/runs?branch=main&status=$status&per_page=100&page=$page")"
+              count="$(jq '.workflow_runs|length' <<< "$payload")"
+              mapfile -t stale < <(jq -r --arg sha "$main_sha" '
+                .workflow_runs[] | select(.event=="push" and .head_branch=="main"
+                  and .head_sha!=$sha and
+                  (.status=="queued" or .status=="waiting" or
+                   .status=="pending" or .status=="requested")) | .id' <<< "$payload")
+              for run_id in "${stale[@]}"; do
+                if gh api -X POST "repos/$repo/actions/runs/$run_id/cancel" >/dev/null 2>&1; then
+                  echo "Cancelled obsolete queued run $run_id" >> "$GITHUB_STEP_SUMMARY"
+                  cancelled=$((cancelled+1))
+                else
+                  echo "::warning::Unable to cancel $run_id; it may have started or finished."
+                fi
+              done
+              (( count < 100 )) && break
+            done
+          done
+          echo "Obsolete queued runs canceled: $cancelled" >> "$GITHUB_STEP_SUMMARY"
+          # A cleanup push should already queue native-windows.yml. If an
+          # earlier queue policy swallowed that event, dispatch the latest SHA.
+          runs="$(gh api "repos/$repo/actions/workflows/native-windows.yml/runs?branch=main&per_page=100")"
+          matching="$(jq --arg sha "$main_sha" '
+            [.workflow_runs[] | select(.head_sha==$sha and
+              (.status=="queued" or .status=="waiting" or
+               .status=="in_progress" or .status=="requested" or
+               .status=="pending" or .conclusion=="success"))] | length' <<< "$runs")"
+          if (( matching == 0 )); then
+            gh api -X POST "repos/$repo/actions/workflows/native-windows.yml/dispatches" -f ref=main
+            echo "Requested an up-to-date Windows build for $main_sha" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Found $matching current-main Windows build request(s)." >> "$GITHUB_STEP_SUMMARY"
+          fi
