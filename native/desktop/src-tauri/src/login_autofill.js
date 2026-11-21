@@ -331,7 +331,11 @@
                (el.form?.id||'')+' '+(el.form?.className||''))||
              // A sole email input may be step one even on a neutral URL.
              (accountInputs.length===1&&
-               (el.type==='email'||token(el).includes('email')))));
+               (el.type==='email'||token(el).includes('email')))))||
+          // WGU's PingFederate username-first template can name its one
+          // visible account field pf.anon with autocomplete="off". Only
+          // allow this unlabelled fallback on verified WGU sign-on routes.
+          (submitEnabled&&accountInputs.length===1?accountInputs[0]:null);
         if(username&&!dangerousForm(username)){
           if(!username.value)put(username,credential.username);
           if(username.value===credential.username){
