@@ -9,8 +9,6 @@ mod secret_bookmarks;
 mod media_devices;
 mod site_fullscreen;
 mod site_video_resume;
-mod media_library;
-mod media_server;
 #[cfg(windows)]
 mod native_surface;
 mod site_context_menu;
@@ -3231,9 +3229,6 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
             .extensions_path(extensions::active_dir(app)?)
     }else{builder};
     let builder = builder
-        .initialization_script(if private || tor || !extensions::media_server_enabled(app) {
-            String::new()
-        } else {media_server::bridge_script()})
         .initialization_script(include_str!("../../../../ui/site-media-bridge.js"))
         .initialization_script(include_str!("../../../../ui/site-fullscreen-bridge.js"))
         .initialization_script(include_str!("../../../../ui/site-download-links.js"))
@@ -3397,60 +3392,9 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
             }
         })
         .on_new_window(move |url, _features| {
-            if url.scheme()=="https" && url.host_str()==Some("minternet-media.invalid")
-                && url.path()=="/__add" {
-                // Sites can only request media folders from a pre-approved origin.
-                // The native picker never accepts web-provided filesystem paths.
-                let allowed=for_popup.state::<Mutex<Browser>>().lock().ok()
-                    .and_then(|browser|browser.tabs.iter().find(|tab|tab.id==id)
-                        .map(|tab|(tab.url.clone(),tab.private,tab.tor)))
-                    .is_some_and(|(page,private_tab,tor_tab)|{
-                        !private_tab&&!tor_tab&&(
-                            page.starts_with("https://marmaladeum.com/")||
-                            page=="https://marmaladeum.com"||
-                            page.starts_with("https://www.marmaladeum.com/")||
-                            page=="https://www.marmaladeum.com"||
-                            page.starts_with("https://marcusdhaynes.github.io/MarmaladePlayer/")
-                        )
-                    });
-                if allowed && extensions::media_server_enabled(&for_popup) {
-                    let library_id=url.query_pairs().find(|(k,_)|k=="libraryId")
-                        .map(|(_,v)|v.to_string()).unwrap_or_default();
-                    let proposed_name=url.query_pairs().find(|(k,_)|k=="name")
-                        .map(|(_,v)|v.to_string()).unwrap_or_default();
-                    let kind=url.query_pairs().find(|(k,_)|k=="kind")
-                        .map(|(_,v)|v.to_string()).unwrap_or_else(||"movie".into());
-                    let request_id=url.query_pairs().find(|(k,_)|k=="requestId")
-                        .map(|(_,v)|v.to_string()).unwrap_or_default();
-                    media_server::begin_picker(&request_id);
-                    let app=for_popup.clone();
-                    std::thread::spawn(move||{
-                        let picked=app.dialog().file()
-                            .set_title("Choose Marmaladeum Media Folder")
-                            .blocking_pick_folder();
-                        let Some(folder)=picked else{
-                            media_server::finish_picker(&request_id,"cancelled","No folder chosen");
-                            return;
-                        };
-                        let result=(||->Result<(),String>{
-                            let path=folder.into_path().map_err(|e|e.to_string())?;
-                            let state=app.state::<Mutex<media_library::MediaLibrary>>();
-                            let mut library=state.lock().map_err(|e|e.to_string())?;
-                            let target=if library_id.is_empty(){
-                                library.create_or_update_collection(None,&proposed_name,&kind)?
-                            }else if library.collections.iter().any(|l|l.id==library_id){
-                                library_id
-                            }else{return Err("Selected media library was not found".into())};
-                            library.add_folder_to(&path.to_string_lossy(),&target)?;
-                            library.save(&app)?;
-                            Ok(())
-                        })();
-                        match result{
-                            Ok(())=>media_server::finish_picker(&request_id,"success","Folder indexed"),
-                            Err(error)=>media_server::finish_picker(&request_id,"error",&error),
-                        }
-                    });
-                }
+            // The retired Marmaladeum-only media-server endpoint is never
+            // navigated. Local Media Player remains a separate feature.
+            if url.host_str()==Some("minternet-media.invalid"){
                 return NewWindowResponse::Deny;
             }
             if url.as_str()=="https://minternet-find.invalid/__open" {
@@ -5754,29 +5698,10 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         schedule_surface_restore(&app);
         return Ok(json!({"ok":true}));
     }
-    if matches!(name.as_str(),"media-library-get"|"media-library-add-folder"|"media-library-remove-folder"|"media-library-rescan"|"media-library-library-save"|"media-library-library-delete"|"media-library-item-update"|"media-library-choose-folder")
-        && !extensions::media_server_enabled(&app){
-        return Err("Install and enable Marmaladeum Media Server.mext in Minternet Extensions, then restart.".into());
-    }
-    if matches!(name.as_str(),"media-library-get"|"media-library-add-folder"|"media-library-remove-folder"|"media-library-rescan"|"media-library-library-save"|"media-library-library-delete"|"media-library-item-update"){
-        return media_library::action(&app,&name,&value);
-    }
-    if name=="media-library-choose-folder" {
-        let chosen=tauri::async_runtime::spawn_blocking({
-            let handle=app.clone();
-            move||{
-                let picker=handle.dialog().file().set_title("Add Media Folder");
-                if let Some(main)=handle.get_window("main"){
-                    picker.set_parent(&main).blocking_pick_folder()
-                }else{picker.blocking_pick_folder()}
-            }
-        }).await.map_err(|e|format!("Folder picker failed: {e}"))?;
-        if let Some(folder)=chosen {
-            let path=folder.into_path().map_err(|e|e.to_string())?;
-            let result=media_library::action(&app,"media-library-add-folder",&json!({"path":path.to_string_lossy()}))?;
-            return Ok(result);
-        }
-        return Ok(json!({"ok":false,"cancelled":true}));
+    // Media Library storage belongs to the independently installed
+    // Marmalade WebExtension, never the Minternet browser executable.
+    if name.starts_with("media-library-"){
+        return Err("Marmaladeum media libraries are managed by the standalone browser extension.".into());
     }
     if matches!(name.as_str(),"site-media-get"|"site-media-set"|"site-media-revoke"){
         let (id,url,private)={
@@ -8725,7 +8650,6 @@ fn main() {
         .manage(FindBarState(Mutex::new(false)))
         .manage(LocalMediaSelection::default())
         .manage(LocalMediaPath::default())
-        .manage(Mutex::new(media_library::MediaLibrary::default()))
         .invoke_handler(tauri::generate_handler![browser_action, browser_snapshot])
         .setup(|app| {
             // Before any WebView2 controller is initialized, select the
@@ -8744,25 +8668,6 @@ fn main() {
                 let _=std::fs::remove_file(folder.join("privacy-shield.v1.json"));
             }
             media_devices::load(app.handle());
-            // Only start the native engine after the user installs and enables
-            // the Marmaladeum Media Server .mext add-on. Restart applies changes.
-            if extensions::media_server_enabled(app.handle()){
-                if let Err(error)=media_server::start(app.handle().clone()){
-                    eprintln!("Marmaladeum Media Server add-on unavailable: {error}");
-                }
-            }
-            if let Ok(mut library)=app.state::<Mutex<media_library::MediaLibrary>>().lock(){
-                *library=media_library::MediaLibrary::load(app.handle());
-            }
-            // Do not block browser startup while indexing large local drives.
-            // Saved catalog remains available immediately; refresh happens off-thread.
-            let scan_app=app.handle().clone();
-            std::thread::spawn(move||{
-                if let Ok(mut library)=scan_app.state::<Mutex<media_library::MediaLibrary>>().lock(){
-                    library.rescan_all();
-                    let _=library.save(&scan_app);
-                }
-            });
             let preferences=load_preferences(app.handle());
             if let Ok(mut saved)=app.state::<BrowserPreferenceState>().0.lock(){
                 *saved=preferences.clone();
