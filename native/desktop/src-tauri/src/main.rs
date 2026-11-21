@@ -3117,6 +3117,64 @@ fn refresh_browser_favicon(app:&tauri::AppHandle,id:u32,label:&str){
     });
 }
 
+// A bounded recovery for blank HTTPS OAuth popup documents. A real account
+// chooser, error, challenge or dynamically hydrated page is never reloaded.
+// This retains the same WebView2 controller and window.opener relationship,
+// unlike creating a second standalone popup or replacing the provider URL.
+const AUTH_POPUP_BLANK_PROBE:&str=include_str!("../../../../ui/auth-popup-blank-probe.js");
+const AUTH_POPUP_UNAVAILABLE:&str=include_str!("../../../../ui/auth-popup-unavailable.js");
+fn schedule_auth_popup_blank_check(
+    app:tauri::AppHandle,label:String,expected_url:String,
+    attempts:std::sync::Arc<std::sync::atomic::AtomicU8>
+){
+    if attempts.load(Ordering::Relaxed)>=2{return;}
+    std::thread::spawn(move||{
+        std::thread::sleep(Duration::from_millis(1100));
+        let handle=app.clone();
+        let _=app.run_on_main_thread(move||{
+            let Some(view)=handle.get_webview(&label) else{return};
+            // Never disturb an OAuth redirect that progressed while waiting.
+            if view.url().ok().as_ref().map(|u|u.as_str())!=Some(expected_url.as_str()){
+                return;
+            }
+            let retry_owner=handle.clone();
+            let retry_label=label.clone();
+            let retry_url=expected_url.clone();
+            let recovery=attempts.clone();
+            let _=view.eval_with_callback(AUTH_POPUP_BLANK_PROBE,move |result|{
+                if result.trim()!="true"{return;}
+                let count=match recovery.fetch_update(
+                    Ordering::SeqCst,Ordering::SeqCst,
+                    |n|if n<2{Some(n+1)}else{None}
+                ){
+                    Ok(value)=>value,
+                    Err(_)=>return
+                };
+                // WebView2 navigation must not be initiated reentrantly from
+                // the script-completion callback; queue a later UI-loop turn.
+                let owner=retry_owner.clone();
+                let label=retry_label.clone();
+                let url=retry_url.clone();
+                std::thread::spawn(move||{
+                    std::thread::sleep(Duration::from_millis(65));
+                    let handle=owner.clone();
+                    let _=owner.run_on_main_thread(move||{
+                        let Some(popup)=handle.get_webview(&label) else{return};
+                        if popup.url().ok().as_ref().map(|u|u.as_str())!=Some(url.as_str()){
+                            return;
+                        }
+                        if count==0{
+                            let _=popup.reload();
+                        }else{
+                            let _=popup.eval(AUTH_POPUP_UNAVAILABLE);
+                        }
+                    });
+                });
+            });
+        });
+    });
+}
+
 fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: bool) -> Result<(), String> {
     let Some(window) = app.get_window("main") else { return Err("Missing window".into()) };
     let label = format!("tab-{id}");
@@ -3455,14 +3513,20 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                 // permissions constrained to an HTTPS authentication window.
                 static AUTH_POPUP_COUNTER: AtomicU64=AtomicU64::new(0);
                 let serial=AUTH_POPUP_COUNTER.fetch_add(1,Ordering::Relaxed);
+                let recovery_app=for_popup.clone();
+                let recovery_attempts=std::sync::Arc::new(
+                    std::sync::atomic::AtomicU8::new(0));
                 let builder=tauri::WebviewWindowBuilder::new(
                     &for_popup,format!("auth-{id}-{serial}"),
+                    // WebView2 must own the initial popup navigation. Loading
+                    // the requested URL here would break window.opener.
                     WebviewUrl::External(tauri::Url::parse("about:blank")
                         .expect("built-in blank URL"))
                 )
                 .title("Minternet — Sign In")
                 .min_inner_size(380.0,320.0)
                 .inner_size(800.0,700.0)
+                .background_color(tauri::webview::Color(17,24,39,255))
                 .window_features(_features)
                 .on_navigation(|target|{
                     target.as_str()=="about:blank" ||
@@ -3487,6 +3551,17 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                             let _=window.set_title(&format!(
                                 "Minternet Sign In — https://{host}"));
                         }
+                    }
+                    // On WebView2 runtime versions affected by blank OAuth
+                    // windows, try one narrowly scoped refresh after the real
+                    // HTTPS document has finished. Never refresh an active
+                    // form, challenge, callback, or populated account picker.
+                    if matches!(event.event(),PageLoadEvent::Finished)
+                        && event.url().scheme()=="https"{
+                        schedule_auth_popup_blank_check(
+                            recovery_app.clone(),window.label().to_string(),
+                            event.url().as_str().to_string(),
+                            recovery_attempts.clone());
                     }
                     // Verify *cross-window messaging*, not merely the presence
                     // of a popup. Only active under the explicit CI smoke flag.
