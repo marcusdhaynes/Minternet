@@ -412,7 +412,7 @@
   function verifiedFeedRelease(value){
     if(!value||typeof value!=='object')return null;
     const tag=String(value.tag||'');
-    if(!/^v\\d+\\.\\d+\\.\\d+-build\\.\\d+-g[0-9a-f]{8}$/.test(tag)||
+    if(!/^v\d+\.\d+\.\d+-build\.\d+-g[0-9a-f]{8}$/.test(tag)||
        value.version!==tag.slice(1)||!versionParts(value.version)||
        !/^[0-9a-f]{40}$/i.test(String(value.sourceSha||'')))return null;
     const prefix='https://github.com/'+REPO+'/releases/download/'+tag+'/';
