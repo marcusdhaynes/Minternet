@@ -17,6 +17,23 @@ windows cannot issue Tauri commands from untrusted website content. Other
 new-window requests remain in Minternet tabs. No browser user-agent spoofing,
 credential scraping, OAuth token extraction, or cookie copy is performed.
 
+**Blank popup mitigation (November 21, 2026):** After a managed HTTPS
+authentication popup finishes loading, Minternet performs a read-only DOM
+check. An actually empty page is retried once using the *same* WebView2
+window, leaving its `window.opener` and profile intact. If a second completed
+load is still empty, it shows Retry and Close controls rather than silently
+leaving a white popup. A working account chooser, MFA challenge, sign-in form
+or provider error is never force-reloaded; URL redirects invalidate a
+pending probe. The check does not inspect login values, OAuth tokens or
+cookie contents. The provider's own successful `window.close()` remains the
+normal way to dismiss the popup after completing OAuth.
+
+This mitigates one class of WebView2 blank pages; it does **not** prove
+Google OAuth support or guarantee every GPU/compositor-related white frame
+will be detected. Native sign-in must be manually accepted against real
+providers and real configured OAuth clients. Never spoof a browser user agent
+to evade the provider's embedded-browser policy.
+
 **Important limitation:** Google and some other identity providers can reject
 embedded webviews under their OAuth security policies. Preserving an opener
 fixes one class of login failures, but cannot override a provider restriction.
