@@ -10,7 +10,6 @@ on:
       - "Native Minternet macOS and Linux (under 50 MB)"
       - "Native Minternet Android APK (< 50 MB)"
       - "Native Minternet iOS simulator build (under 50 MB)"
-      - "Publish Minternet UI preview"
     types: [completed]
   workflow_dispatch:
     inputs:

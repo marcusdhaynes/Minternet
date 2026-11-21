@@ -3,13 +3,9 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-  # Rebuild the public status snapshot when a real Windows run changes phase.
-  # Polling a static JSON file cannot otherwise report Initiating/Building/Ready.
-  workflow_run:
-    workflows: ["Minternet Windows portable single EXE (under 50 MB)"]
-    types: [requested, in_progress, completed]
-    branches: [main]
-  # Recover from dropped workflow_run events or a failed Pages deployment.
+  # Windows release publication dispatches this workflow explicitly.
+  # Avoid triggering a new Pages+archive fan-out for every Actions phase.
+  # Recover missed dispatches or failed Pages deployments on the watchdog.
   schedule:
     - cron: '*/15 * * * *'
 permissions:
