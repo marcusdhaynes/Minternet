@@ -15,6 +15,7 @@
   const FEED='https://marcusdhaynes.github.io/Minternet/update-feed.json';
   const POLL_KEY='minternet.updates.interval-seconds.v1';
   const DEFAULT_POLL_SECONDS=5;
+  const MAX_FEED_AGE_SECONDS=600; // status snapshots must not appear live forever
   const MIN_POLL_SECONDS=5,MAX_POLL_SECONDS=3600;
   const WINDOWS_RUNS='/actions/workflows/native-windows.yml/runs?branch=main&per_page=5';
   let pipeline={kind:'unknown',title:'Checking Build Status',detail:'Waiting for GitHub Actions…'};
@@ -445,7 +446,12 @@
         if(feed.release && !release)throw Error('Update feed release was not verified');
         const latestRun=feed.windowsRun&&typeof feed.windowsRun==='object'
           ?feed.windowsRun:null;
-        const signature=JSON.stringify([feed.sourceSha,
+        const generatedAt=Number(feed.generatedAt);
+        const feedAgeSeconds=Math.floor(Date.now()/1000)-generatedAt;
+        const stale=!Number.isSafeInteger(generatedAt)||
+          !Number.isFinite(feedAgeSeconds)||feedAgeSeconds>MAX_FEED_AGE_SECONDS||
+          feedAgeSeconds< -120;
+        const signature=JSON.stringify([stale,feed.sourceSha,
           latestRun?.head_sha,latestRun?.status,latestRun?.conclusion,
           latestRun?.run_number,release?.version]);
         lastFeedPollAt=Date.now();
@@ -458,6 +464,10 @@
           if(newer)readyFromPipeline=release;
         }
         pipeline=classifyPipelineRun(latestRun,feed.sourceSha);
+        if(stale&&!newer){
+          pipeline={...pipeline,kind:'unavailable',title:'Status Feed Delayed',
+            detail:'GitHub build status snapshot is outdated. Open View Build for live GitHub status.'};
+        }
         if(newer){
           pipeline={...pipeline,kind:'ready',title:'Update Ready',
             detail:'A published Windows EXE and checksum are available.'};
@@ -481,6 +491,11 @@
           lastStatus={kind:'unpublished',
             message:'No published Windows build is available in the update feed.'};
         }
+        if(stale&&!newer&&lastStatus){
+          lastStatus={...lastStatus,kind:'verification-unknown',
+            message:'Build status feed is outdated; the newest source/build state is unverified. '+
+              'The last published verified release remains available.'};
+        }
         if(el)renderSection(el,displayedRelease,
           lastStatus?.message||'Checking update status…');
         if(newer&&!isDismissed(release.version))mountRibbon(release);
@@ -488,12 +503,13 @@
       }catch(error){
         // A failed feed must never mean "up to date". Keep any previously
         // verified release and allow the manual GitHub API check to work.
-        if(!lastFeedSignature){
-          pipeline={kind:'unavailable',title:'Live Status Unavailable',
-            detail:'Fast update feed unavailable. Use Check for Updates.'};
-          if(el)renderSection(el,displayedRelease,
-            lastStatus?.message||'Fast update feed unavailable. Try a manual check.');
-        }
+        // Do not preserve a previously queued/initiating state indefinitely
+        // when the source of live information has become unreachable.
+        lastFeedSignature='';
+        pipeline={kind:'unavailable',title:'Live Status Unavailable',
+          detail:'Fast status feed unavailable. Use Check for Updates for a direct GitHub check.'};
+        if(el)renderSection(el,displayedRelease,
+          'Live build status could not be refreshed; published release data may be older.');
         return null;
       }finally{clearTimeout(timeout);}
     })().finally(()=>{pollInFlight=null;});
