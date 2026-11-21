@@ -10,6 +10,7 @@ const probeSource=file('login_form_context.js');
 
 function fakePage({origin='https://access.wgu.edu',route='/pingfed/idp/SSO.saml2',
   username='',password='',accountName='pf.anon',extra=[],
+  rememberLabel='',rememberChecked=false,usernameOutsideForm=false,
   navType='navigate',sessionStore=null}={}){
   class Form {
     constructor(){this.id='signinForm';this.className='';this.submissions=0;this.isConnected=true;}
@@ -46,8 +47,15 @@ function fakePage({origin='https://access.wgu.edu',route='/pingfed/idp/SSO.saml2
     get(){return this._value||'';},set(value){this._value=String(value);}
   });
   const user=new Input('text',accountName,username),pw=new Input('password','pf.pass',password);
+  if(usernameOutsideForm)user.form=null;
+  const remember=rememberLabel?new Input('checkbox','rememberMe'):null;
+  if(remember){
+    remember.checked=rememberChecked;
+    remember.labels=[{textContent:rememberLabel}];
+    remember.parentElement={textContent:rememberLabel};
+  }
   const extraInputs=extra.map(([type,name])=>new Input(type,name));
-  const inputs=[user,...extraInputs,pw];
+  const inputs=[user,...extraInputs,pw,...(remember?[remember]:[])];
   const doc={
     documentElement:{},title:'Sign On',
     hasFocus(){return true;},querySelector(selector){
@@ -56,6 +64,7 @@ function fakePage({origin='https://access.wgu.edu',route='/pingfed/idp/SSO.saml2
     },
     querySelectorAll(sel){
       if(sel==='input'||sel==='input,textarea,select')return inputs;
+      if(sel==='input[type="checkbox"]')return inputs.filter(input=>input.type==='checkbox');
       if(sel==='button,input[type="submit"],input[type="button"]')return [signOnButton];
       return [];
     },
@@ -118,7 +127,7 @@ function fakePage({origin='https://access.wgu.edu',route='/pingfed/idp/SSO.saml2
       timers.delete(id);entry.fn();
     }
   }
-  return {user,pw,inputs,events,fill,inspect,doc,form,replaceLoginFields,
+  return {user,pw,remember,inputs,events,fill,inspect,doc,form,replaceLoginFields,
     runSubmitTimers,getStatus:()=>view.__minternetLoginStatus};
 }
 
@@ -435,4 +444,55 @@ test('native scheduler automatically fills a unique unlocked identity without a 
   assert.match(code,/items\.len\(\)!=1/);
   assert.match(code,/fill_identity\(app,&id\)/);
   assert.match(main,/fill_unique_identity_automatically\(&worker\)/);
+});
+
+test('WGU PingFederate remembers the login and submits through Sign On only once',()=>{
+  const page=fakePage({route:'/pingfed/as/authorization.oauth2',
+    rememberLabel:'Remember me'});
+  page.fill('https://access.wgu.edu',{autoSubmit:true});
+  assert.equal(page.remember.checked,false,'checkbox changes at submission, not before');
+  page.runSubmitTimers();
+  assert.equal(page.remember.checked,true);
+  assert.deepEqual(page.remember.events,['input','change']);
+  assert.equal(page.form.submissions,1);
+  assert.equal(page.getStatus().rememberChecked,true);
+  for(let n=0;n<10;n++){page.fill('https://access.wgu.edu',{autoSubmit:true});page.runSubmitTimers();}
+  assert.equal(page.form.submissions,1);
+});
+
+test('WGU unmarked checkbox and login autofill without submission are untouched',()=>{
+  for(const label of ['Agree to terms','Newsletter','Two-factor verification']){
+    const page=fakePage({route:'/pingfed/as/authorization.oauth2',rememberLabel:label});
+    page.fill('https://access.wgu.edu',{autoSubmit:true});page.runSubmitTimers();
+    assert.equal(page.remember.checked,false,label);
+  }
+  const manual=fakePage({route:'/pingfed/as/authorization.oauth2',rememberLabel:'Remember me'});
+  manual.fill('https://access.wgu.edu',{autoSubmit:false});manual.runSubmitTimers();
+  assert.equal(manual.remember.checked,false);
+  assert.equal(manual.form.submissions,0);
+});
+
+test('WGU SSO matches one username field even when split out of the password form',()=>{
+  const page=fakePage({route:'/pingfed/as/authorization.oauth2',usernameOutsideForm:true,
+    rememberLabel:'Keep me signed in'});
+  page.fill('https://access.wgu.edu',{autoSubmit:true});
+  assert.equal(page.user.value,'student-name');
+  assert.equal(page.pw.value,'secret-login');
+  page.runSubmitTimers();
+  assert.equal(page.remember.checked,true);
+  assert.equal(page.form.submissions,1);
+});
+
+test('WGU full-portal 10x check: remember, origin, fields and single submit',()=>{
+  for(let cycle=0;cycle<10;cycle++){
+    const page=fakePage({origin:'https://access.wgu.edu',
+      route:cycle%2?'/pingfed/idp/SSO.saml2':'/pingfed/as/authorization.oauth2',
+      usernameOutsideForm:cycle%3===0,rememberLabel:'Remember this device'});
+    page.fill('https://access.wgu.edu',{autoSubmit:true});
+    assert.equal(page.user.value,'student-name',`username ${cycle}`);
+    assert.equal(page.pw.value,'secret-login',`password ${cycle}`);
+    page.runSubmitTimers();
+    assert.equal(page.remember.checked,true,`remember ${cycle}`);
+    assert.equal(page.form.submissions,1,`submit ${cycle}`);
+  }
 });
