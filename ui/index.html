@@ -18,6 +18,7 @@
   <script src="./tab-blank-zones.js" defer></script>
   <script src="./app.js" defer></script>
   <script src="./site-names.js" defer></script>
+  <script src="./bookmark-folder-appearance.js" defer></script>
   <script src="./bookmark-ui.js" defer></script>
   <script src="./secret-bookmarks.js" defer></script>
   <script src="./tab-group-ui.js" defer></script>
@@ -264,6 +265,25 @@
             <small>On by default. Copy existing regular-tab login cookies into newly opened Private Tabs without saving Private Tab history or copying their new cookies back. Turn off to open future Private Tabs signed out. Some sites require additional sign-in steps.</small></span>
           <input type="checkbox" id="privateLoginSharing" checked aria-label="Retain active sign-ins in new Private Tabs">
         </label>
+      </section>
+      <section id="bookmarkFolderAppearance" class="bookmark-folder-appearance" aria-label="Bookmark Bar Folder Icons">
+        <div class="bookmark-folder-appearance-heading">
+          <span><strong>Bookmark Folder Icons</strong><small>Customize folders on the Bookmark Bar</small></span>
+          <span class="bookmark-folder-style-preview bookmark-emoji bookmark-folder-default" aria-hidden="true">
+            <span class="bookmark-folder-native">📁</span>
+            <span class="bookmark-folder-vector"><span class="bookmark-folder-sheen"></span></span>
+          </span>
+        </div>
+        <div class="bookmark-folder-style-controls">
+          <label title="Raised, dimensional folder edges"><input id="bookmarkFolderBevel" type="checkbox">Bevel</label>
+          <label title="Bright curved highlight on the folder"><input id="bookmarkFolderGloss" type="checkbox">Gloss</label>
+          <label title="Translucent glass effect"><input id="bookmarkFolderGlass" type="checkbox">Glass</label>
+          <label title="Tint the folder with your selected color"><input id="bookmarkFolderTintEnabled" type="checkbox">Tint</label>
+          <label class="bookmark-folder-color-dot" title="Folder Tint Color" for="bookmarkFolderTintColor">
+            <input id="bookmarkFolderTintColor" type="color" value="#b99cff" aria-label="Bookmark Folder Tint Color">
+          </label>
+          <button id="bookmarkFolderAppearanceReset" class="bookmark-folder-style-reset" type="button" title="Reset Bookmark Folder Appearance" aria-label="Reset Bookmark Folder Appearance">↺</button>
+        </div>
       </section>
       <small id="browserPreferencesStatus" class="browser-preferences-status" aria-live="polite" hidden></small>
       <section class="render-compat-settings" aria-label="WebView2 Rendering">
