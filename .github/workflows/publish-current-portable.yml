@@ -43,8 +43,9 @@ jobs:
           # on future hourly checks while Actions artifacts remain available.
           for entry in "native-windows.yml" "native-unix.yml" "native-android.yml" "native-ios.yml" "pages.yml"; do
             mapfile -t runs < <(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$entry" \
-              --branch main --limit 100 --json databaseId,conclusion \
-              | jq -r '[.[] | select(.conclusion=="success") | .databaseId] | .[]')
+              --branch main --limit 100 --json databaseId,conclusion,event \
+              | jq -r --arg entry "$entry" '[.[] | select(.conclusion=="success") |
+                select($entry!="pages.yml" or .event=="push") | .databaseId] | .[]')
             for run_id in "${runs[@]}"; do
               # Drafts are intentionally absent from the tag endpoint. A
               # missing/unfinished release must be queued for recovery, not
@@ -86,7 +87,9 @@ jobs:
       (github.event_name == 'workflow_dispatch' ||
        (github.event.workflow_run.conclusion == 'success' &&
         github.event.workflow_run.head_repository.full_name == github.repository &&
-        github.event.workflow_run.head_branch == 'main'))
+        github.event.workflow_run.head_branch == 'main' &&
+        (github.event.workflow_run.name != 'Publish Minternet UI preview' ||
+         github.event.workflow_run.event == 'push')))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
