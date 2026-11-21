@@ -6,8 +6,8 @@ const path=require('node:path');
 const vm=require('node:vm');
 const read=p=>fs.readFileSync(path.join(__dirname,'..',p),'utf8');
 
-function harness(){
-  const saved=new Map(),timers=new Map(),calls=[];
+function harness(previousSettings=new Map()){
+  const saved=new Map(previousSettings),timers=new Map(),calls=[];
   let next=1,now=0,onCommand=async()=>({ok:true});
   const createElement=tag=>({
     tag,children:[],handlers:new Map(),value:'',hidden:false,
@@ -208,4 +208,86 @@ test('three native manager surfaces use the shared selector and lock on close',(
   const utility=read('ui/vault-auto-lock.js');
   assert.match(utility,/window\.minternet\?\.command\('vault-lock',section\)/);
   assert.doesNotMatch(utility,/localStorage\.setItem\([^,]+,\s*JSON\.stringify\((?:password|secret|credentials)/);
+});
+
+test('simple Auto-Lock toggles independently persist across browser restarts',async()=>{
+  const h=harness(),api=h.window.minternetVaultAutoLock;
+  const identity=labelFor(h,'identities');
+  const login=labelFor(h,'logins');
+  const payment=labelFor(h,'payments');
+  assert.equal(api.getEnabled('identities'),true);
+  assert.equal(api.getEnabled('logins'),false);
+  assert.equal(api.getEnabled('payments'),true);
+  api.setEnabled('identities',false);
+  api.setEnabled('payments',false);
+  assert.equal(identity.unit.value,'never');
+  assert.equal(payment.unit.value,'never');
+  assert.equal(login.unit.value,'never');
+  assert.equal(api.getEnabled('identities'),false);
+  assert.equal(api.getEnabled('payments'),false);
+  assert.equal(api.getEnabled('logins'),false);
+  assert.equal(JSON.parse(h.saved.get('minternet.identities-close-lock.v1')).unit,'never');
+  assert.equal(JSON.parse(h.saved.get('minternet.payments-close-lock.v1')).unit,'never');
+  assert.equal(h.saved.has('minternet.logins-close-lock.v1'),false);
+  const next=harness(h.saved),fresh=next.window.minternetVaultAutoLock;
+  assert.equal(fresh.getEnabled('identities'),false);
+  assert.equal(fresh.getEnabled('payments'),false);
+  assert.equal(fresh.getEnabled('logins'),false);
+  const ctrl=fresh.forSection('identities');
+  await ctrl.openManager();ctrl.setUnlocked(true);ctrl.closeManager(true);
+  next.advance(86400000*365);await next.flush();
+  assert.equal(next.calls.length,0,'off must never schedule an automatic native lock');
+});
+
+test('re-enabling restores each section previous delay, without affecting others',async()=>{
+  const h=harness(),api=h.window.minternetVaultAutoLock;
+  const identity=labelFor(h,'identities');
+  const payment=labelFor(h,'payments');
+  identity.amount.value='3';identity.unit.value='minutes';identity.unit.change();
+  payment.amount.value='2';payment.unit.value='hours';payment.unit.change();
+  api.setEnabled('identities',false);
+  api.setEnabled('payments',false);
+  assert.equal(api.setEnabled('identities',true),true);
+  assert.equal(identity.unit.value,'minutes');
+  assert.equal(identity.amount.value,'3');
+  assert.equal(api.getEnabled('payments'),false);
+  assert.equal(api.setEnabled('payments',true),true);
+  assert.equal(payment.unit.value,'hours');
+  assert.equal(payment.amount.value,'2');
+  assert.equal(api.getEnabled('logins'),false);
+  api.setEnabled('logins',true);
+  const login=labelFor(h,'logins');
+  assert.equal(login.unit.value,'minutes');
+  assert.equal(login.amount.value,'5');
+});
+
+test('turning Auto-Lock off cancels already queued timeout and Settings stays synchronized',async()=>{
+  const h=harness(),api=h.window.minternetVaultAutoLock;
+  const observed=[];
+  api.onChange((section,enabled)=>observed.push([section,enabled]));
+  const ctrl=api.forSection('payments');
+  const {amount,unit}=labelFor(h,'payments');
+  amount.value='4';unit.value='seconds';unit.change();
+  await ctrl.openManager();ctrl.setUnlocked(true);ctrl.closeManager(true);
+  assert.equal(h.timers.size,1);
+  api.setEnabled('payments',false);
+  assert.equal(h.timers.size,0);
+  assert.equal(unit.value,'never');
+  h.advance(9000);await h.flush();
+  assert.equal(h.calls.length,0);
+  unit.value='minutes';unit.change();
+  assert.equal(api.getEnabled('payments'),true);
+  assert.deepEqual(observed.map(x=>[x[0],x[1]]),
+    [['payments',true],['payments',false],['payments',true]]);
+});
+
+test('Settings has three independent, accessible persistent Auto-Lock toggles',()=>{
+  const settings=read('ui/settings-sections.js');
+  const css=read('ui/styles.css');
+  assert.match(settings,/section\('Auto-Lock',userData\)/);
+  assert.match(settings,/\['identities','Identities'\],\['logins','Logins'\],\['payments','Payments'\]/);
+  assert.match(settings,/toggle\.id='autoLockEnabled-'\+key/);
+  assert.match(settings,/autoLock\?\.setEnabled\(key,toggle\.checked\)/);
+  assert.match(settings,/autoLock\?\.onChange/);
+  assert.match(css,/\.auto-lock-preference-row input\[type="checkbox"\]:checked/);
 });
