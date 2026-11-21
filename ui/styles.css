@@ -2641,3 +2641,12 @@ html.minternet-startup-armed .startup-curtain{
   width:18px;height:22px;padding:0;font-size:17px;line-height:1;
 }
 .bookmark-folder-style-reset:hover{color:#fff;}
+
+/* Preserve tab audio mute access until the pointer reaches the right edge:
+   close X then replaces the audio affordance without expanding tab width. */
+.tabs .tab:not(.pinned-tab):not(.split-supertab):hover:not(.tab-close-near):not(:focus-within) .tab-close{
+  opacity:0!important;visibility:hidden!important;pointer-events:none!important;
+}
+.tabs .tab:not(.pinned-tab):not(.split-supertab):hover:not(.tab-close-near):not(:focus-within) .tab-audio{
+  opacity:1!important;pointer-events:auto!important;
+}
