@@ -2666,3 +2666,36 @@ html.minternet-startup-armed .startup-curtain{
 .bookmark-settings .updates-poll-setting input:focus-visible{
   outline:1px solid #b49bf3;outline-offset:1px;
 }
+
+/* Separate persistent vault auto-lock toggles. */
+.auto-lock-preference-row{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  min-height:30px;margin:2px 0;padding:5px 9px;
+  border:1px solid var(--border,rgba(160,175,205,.16));border-radius:7px;
+  color:#e5e8f7;font-size:11px;cursor:pointer;
+}
+.auto-lock-preference-row input[type="checkbox"]{
+  appearance:none;-webkit-appearance:none;position:relative;
+  flex:0 0 28px;width:28px;height:16px;
+  border:1px solid #7e849f;border-radius:999px;
+  background:#353a51;cursor:pointer;
+  transition:background .14s ease,border-color .14s ease;
+}
+.auto-lock-preference-row input[type="checkbox"]::after{
+  content:"";position:absolute;top:2px;left:2px;
+  width:10px;height:10px;border-radius:50%;background:#d7d7e8;
+  transition:transform .14s ease,background .14s ease;
+}
+.auto-lock-preference-row input[type="checkbox"]:checked{
+  background:#7560ba;border-color:#b49ded;
+}
+.auto-lock-preference-row input[type="checkbox"]:checked::after{
+  transform:translateX(12px);background:#fff;
+}
+.auto-lock-preference-row input[type="checkbox"]:focus-visible{
+  outline:2px solid #d1c2ff;outline-offset:2px;
+}
+@media(prefers-reduced-motion:reduce){
+  .auto-lock-preference-row input[type="checkbox"],
+  .auto-lock-preference-row input[type="checkbox"]::after{transition:none;}
+}
