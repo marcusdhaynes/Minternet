@@ -26,20 +26,6 @@ pub fn any_enabled(app:&AppHandle)->bool{
         e.path().is_dir()&&e.path().join("manifest.json").is_file()))
         .unwrap_or(false)
 }
-// Native media-server access is an explicit opt-in capability of a user-imported
-// Minternet .mext extension. Ordinary Chrome/Firefox imports cannot activate it.
-pub fn media_server_enabled(app:&AppHandle)->bool{
-    let Ok(root)=active_dir(app) else{return false};
-    let Ok(entries)=fs::read_dir(root) else{return false};
-    entries.flatten().any(|entry|{
-        let name=entry.file_name().to_string_lossy().to_string();
-        if !name.starts_with("minternet-") || !entry.path().is_dir(){return false;}
-        let Ok(bytes)=fs::read(entry.path().join("manifest.json")) else{return false};
-        let Ok(manifest)=serde_json::from_slice::<Value>(&bytes) else{return false};
-        manifest.pointer("/minternet/nativeMediaServer")==Some(&Value::Bool(true))
-            && manifest.get("manifest_version").and_then(Value::as_u64)==Some(3)
-    })
-}
 pub fn isolated_site_dir(app:&AppHandle)->Result<PathBuf,String>{
     Ok(app.path().app_local_data_dir().map_err(|e|e.to_string())?
         .join("extension-sites"))
@@ -50,8 +36,9 @@ fn metadata(dir:&Path,source:&str,enabled:bool,id:String)->Option<Value>{
     let manifest:Value=serde_json::from_slice(&fs::read(dir.join("manifest.json")).ok()?).ok()?;
     let name=manifest.get("name")?.as_str()?.chars().take(120).collect::<String>();
     let version=manifest.get("version")?.as_str()?.chars().take(50).collect::<String>();
-    let native_media=source=="minternet" &&
-        manifest.pointer("/minternet/nativeMediaServer")==Some(&Value::Bool(true));
+    // Retired: media library retention is provided only by standalone
+    // browser extensions, never by native Minternet capabilities.
+    let native_media=false;
     Some(json!({"id":id,"source":source,"name":name,"version":version,
         "nativeMediaServer":native_media,
         "settingsGroup":manifest.pointer("/minternet/settingsGroup").and_then(Value::as_str)
