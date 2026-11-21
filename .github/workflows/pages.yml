@@ -11,7 +11,7 @@ on:
     branches: [main]
   # Recover from dropped workflow_run events or a failed Pages deployment.
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/15 * * * *'
 permissions:
   contents: read
   actions: read
@@ -136,6 +136,9 @@ jobs:
         with:
           path: site
       - name: Archive this commit's web preview
+        # Status-refresh and watchdog runs must not produce duplicate source
+        # archives or spur the cross-platform rollback archiver into action.
+        if: github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
           name: minternet-web-preview-${{ github.sha }}
