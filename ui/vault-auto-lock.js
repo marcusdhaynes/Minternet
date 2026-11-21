@@ -81,7 +81,9 @@
     async function lock(){
       if(locking)return locking;
       stop();
-      if(opened||!unlocked)return false;
+      // A timer may fire just as the user turns Auto-Lock off. Honor the
+      // latest persistent preference before attempting native revocation.
+      if(opened||!unlocked||preference.unit==='never')return false;
       locking=(async()=>{
         try{
           const response=await window.minternet?.command('vault-lock',section);
@@ -97,7 +99,7 @@
         locking=null;
         // If IPC was temporarily unavailable, keep the vault closed in the
         // UI and retry the native revocation instead of silently giving up.
-        if(!success&&!opened&&unlocked){
+        if(!success&&!opened&&unlocked&&preference.unit!=='never'){
           timer=setTimeout(()=>{void lock();},2000);
         }
       }
