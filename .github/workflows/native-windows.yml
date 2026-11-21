@@ -7,6 +7,7 @@ on:
 permissions:
   contents: write
   issues: write
+  actions: write
 # An active Windows compile must finish even if another commit arrives.
 # GitHub keeps at most one pending run in this group, coalescing rapid pushes
 # while ensuring expensive builds do not get perpetually cancelled.
@@ -962,6 +963,10 @@ jobs:
             throw "GitHub did not confirm the published release tag, source SHA and required assets."
           }
           "PASS: authenticated release-by-tag API confirms public release $tag, exact commit, portable EXE and SHA-256 sums." >> $env:GITHUB_STEP_SUMMARY
+          # GITHUB_TOKEN release events do not trigger new workflows. Request
+          # Pages to refresh the public update feed for frequent client polls.
+          gh workflow run pages.yml --ref main --repo "$env:GITHUB_REPOSITORY"
+          if ($LASTEXITCODE -ne 0) { Write-Host 'Live update feed will refresh on the next Pages deployment.' }
 
       - name: Post Windows build result to verification ledger
         if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
