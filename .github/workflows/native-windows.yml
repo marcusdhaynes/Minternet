@@ -8,14 +8,10 @@ permissions:
   contents: write
   issues: write
   actions: write
-# Preserve already running builds and queue incoming commits without
-# auto-cancelling earlier pending runs. The gate below skips obsolete SHAs
-# before reserving a costly Windows runner, so a burst of pushes results in
-# one useful build of the latest main revision.
-concurrency:
-  group: minternet-windows-${{ github.ref }}
-  cancel-in-progress: false
-  queue: max
+# Let freshness checks run immediately, regardless of previous Windows builds.
+# Only the expensive portable job is serialized. New source updates replace
+# OBSOLETE pending packaging jobs, but never cancel an active compilation.
+# A distinct job concurrency group avoids inheriting the old serialized queue.
 jobs:
   freshness:
     if: github.ref == 'refs/heads/main'
@@ -41,6 +37,9 @@ jobs:
   portable:
     needs: freshness
     if: needs.freshness.outputs.build == 'true'
+    concurrency:
+      group: minternet-windows-portable-main-v2
+      cancel-in-progress: false
     outputs:
       version_label: ${{ steps.package.outputs.version_label }}
       exe_name: ${{ steps.package.outputs.exe_name }}
