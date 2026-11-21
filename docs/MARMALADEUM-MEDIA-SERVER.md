@@ -16,7 +16,9 @@ A browser extension retains the catalog independently of website storage. Files 
 
 ## Rollback
 
-The former native implementation is preserved on the GitHub backup branch:
-backup/media-server-before-extension-extraction-2026-11-21
+The former native implementation is recoverable from the pre-extraction commit:
+9ef64162c7a10dc1776e12338f1044d3a834b9c8
+
+The repository's keep-only-main branch policy automatically removes temporary backup branches, so use the immutable historical commit instead. The removed Rust files remain in Git history and can be restored without reintroducing the native server into current builds.
 
 Do not reintroduce native Marmaladeum-only code into Minternet's browser core. Future library improvements belong in the shared browser extension.
