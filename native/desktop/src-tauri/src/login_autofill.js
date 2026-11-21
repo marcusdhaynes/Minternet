@@ -140,8 +140,13 @@
       window.__minternetRememberUserChanged=rememberUserChanged;
       function checkRemember(form,password){
         if(!submitEnabled)return;
-        const doc=password.ownerDocument||document;
-        const boxes=[...doc.querySelectorAll('input[type="checkbox"]')].filter(box=>
+        // Reuse the same accessible roots as the username/password fields
+        // so an opt-in Remember checkbox inside a same-origin iframe or open
+        // shadow root is not missed.
+        const boxes=roots().flatMap(root=>{
+          try{return [...root.querySelectorAll('input[type="checkbox"]')];}
+          catch{return [];}
+        }).filter(box=>
           !box.disabled&&!box.readOnly&&!rememberUserChanged.has(box)&&
           (!form||box.form===form||!box.form));
         for(const box of boxes){
@@ -266,7 +271,8 @@
         },180);
       }
       const watchOptions={childList:true,subtree:true,attributes:true,
-        attributeFilter:['type','autocomplete','style','class']};
+        attributeFilter:['type','autocomplete','style','class','disabled',
+          'readonly','name','placeholder','aria-label','checked']};
       const stop=()=>{
         done=true;
         if(observer)observer.disconnect();
