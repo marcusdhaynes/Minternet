@@ -51,6 +51,98 @@ jobs:
           }, indent=2))
           PY
           touch site/.nojekyll
+      - name: Publish rate-limit-safe, verified update status feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json,os,re,urllib.request
+          from pathlib import Path
+          repo=os.environ['GITHUB_REPOSITORY']
+          head=os.environ['GITHUB_SHA']
+          token=os.environ['GH_TOKEN']
+          def get(endpoint):
+              req=urllib.request.Request('https://api.github.com/repos/'+repo+'/'+endpoint,
+                  headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json',
+                           'User-Agent':'Minternet-verified-update-feed'})
+              with urllib.request.urlopen(req,timeout=25) as response:
+                  return json.load(response)
+          run=None
+          try:
+              runs=get('actions/workflows/native-windows.yml/runs?branch=main&per_page=8')
+              run=next((r for r in runs.get('workflow_runs',[]) if r.get('head_branch')=='main'),None)
+          except Exception as ex:
+              print('Build state temporarily unavailable:',type(ex).__name__)
+          chosen=None
+          pattern=re.compile(r'^v(\d+)\.(\d+)\.(\d+)-build\.(\d+)-g[0-9a-f]{8}
+        uses: actions/configure-pages@v5
+      - name: Upload site
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+      - name: Archive this commit's web preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: minternet-web-preview-${{ github.sha }}
+          path: site/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Check whether this is still the current main revision
+        id: current
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq '.commit.sha')
+          if [ "$latest" = "$GITHUB_SHA" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            echo "Archived this revision; skipping stale Pages deployment." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Deploy site
+        if: steps.current.outputs.deploy == 'true'
+        id: deployment
+        uses: actions/deploy-pages@v4
+)
+          for page in range(1,11):
+              try: releases=get('releases?per_page=100&page='+str(page))
+              except Exception as ex:
+                  print('Release feed scan unavailable:',type(ex).__name__)
+                  break
+              for entry in releases:
+                  tag=entry.get('tag_name','')
+                  found=pattern.fullmatch(tag)
+                  if not found or entry.get('draft') or entry.get('prerelease'):continue
+                  expected='Minternet-Windows-Portable-'+tag+'.exe'
+                  assets={a.get('name'):a for a in entry.get('assets',[])}
+                  exe=assets.get(expected)
+                  sums=assets.get('SHA256SUMS.txt')
+                  if not exe or not sums or not 100000<=exe.get('size',0)<50000000 or sums.get('size',0)<=0:
+                      continue
+                  prefix='https://github.com/'+repo+'/releases/download/'+tag+'/'
+                  if exe.get('browser_download_url')!=prefix+expected or sums.get('browser_download_url')!=prefix+'SHA256SUMS.txt':
+                      continue
+                  key=tuple(map(int,found.groups()))
+                  if chosen is None or key>chosen[0]:
+                      chosen=(key,{
+                        'version':tag[1:],'tag':tag,
+                        'sourceSha':entry.get('target_commitish',''),
+                        'url':entry.get('html_url',''),
+                        'downloadUrl':exe['browser_download_url'],
+                        'checksumUrl':sums['browser_download_url'],
+                        'notes':entry.get('body','')[:2000]
+                      })
+              if len(releases)<100:break
+          current={
+            'schema':1,'sourceSha':head,'workflowRun':os.environ['GITHUB_RUN_ID'],
+            'release':chosen[1] if chosen else None,
+            'windowsRun':({k:run.get(k) for k in ('head_sha','run_number','status','conclusion','html_url')}
+                         if run else None)
+          }
+          Path('site/update-feed.json').write_text(json.dumps(current,separators=(',',':')))
+          print('Generated update-feed.json for',head[:8],
+                'release',current['release']['tag'] if current['release'] else 'none')
+          PY
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Upload site
