@@ -117,9 +117,18 @@
         // Autocomplete attributes and labels are reliable when present.
         const named=candidates.find(userCandidate);
         if(named)return named;
-        // Common enterprise SSO forms (including WGU/PingFederate) have one
-        // unlabeled-in-markup username field plus one password field.
-        return candidates.length===1?candidates[0]:null;
+        if(candidates.length===1)return candidates[0];
+        // Some PingFederate/SPA login templates render the username outside
+        // the password's HTML form. Only permit a single unambiguous account
+        // field across the visible document; never choose a random text input.
+        if(password.form){
+          const others=inputs.filter(el=>el!==password &&
+            ['text','email'].includes(el.type)&&!invalidAccount(el));
+          const matches=others.filter(userCandidate);
+          if(matches.length===1)return matches[0];
+          if(others.length===1)return others[0];
+        }
+        return null;
       };
       const dangerousForm=el=>{
         const form=el?.form;
@@ -127,12 +136,45 @@
           register.test([form.getAttribute('action')||'',form.id,form.className].join(' '));
       };
       let done=false,observer=null,delayed=0,submissionTimer=0;
+      const rememberUserChanged=window.__minternetRememberUserChanged||new WeakSet();
+      window.__minternetRememberUserChanged=rememberUserChanged;
+      function checkRemember(form,password){
+        if(!submitEnabled)return;
+        const doc=password.ownerDocument||document;
+        const boxes=[...doc.querySelectorAll('input[type="checkbox"]')].filter(box=>
+          !box.disabled&&!box.readOnly&&!rememberUserChanged.has(box)&&
+          (!form||box.form===form||!box.form));
+        for(const box of boxes){
+          const name=hint(box)+' '+(
+            box.parentElement?.textContent||'')+' '+
+            (box.closest('label')?.textContent||'');
+          if(!/(?:remember(?:\\s+(?:me|my|this|username|login|sign.?in|device|account))?|keep\\s+me\\s+signed\\s+in|stay\\s+signed\\s+in|trust\\s+this\\s+device)/i.test(name)||
+             /(?:do\\s+not|don.t|never|forgot|terms|agree|consent|unsubscribe)/i.test(name))
+            continue;
+          if(box.checked)continue;
+          // A direct checked setter plus synthetic input/change is recognized
+          // by ordinary and React-backed checkboxes without clicking a label
+          // that might submit the form unexpectedly.
+          const win=box.ownerDocument?.defaultView||window;
+          const setter=Object.getOwnPropertyDescriptor(
+            win.HTMLInputElement?.prototype||HTMLInputElement.prototype,'checked')?.set;
+          if(setter)setter.call(box,true);else box.checked=true;
+          const EventType=win.Event||Event;
+          box.dispatchEvent(new EventType('input',{bubbles:true,composed:true}));
+          box.dispatchEvent(new EventType('change',{bubbles:true,composed:true}));
+          box.addEventListener?.('change',event=>{
+            if(event.isTrusted)rememberUserChanged.add(box);
+          });
+          status.rememberChecked=true;
+        }
+      }
       function queueSignOn(form,account,password){
         const target=form||password;
         if(!submitEnabled||!account||!password||submissionTimer||
            submittedForms.has(target)||userTouched.has(account)||
-           userTouched.has(password)||!marked.has(account)||
-           !marked.has(password))return;
+           userTouched.has(password)||
+           account.value!==credential.username||
+           password.value!==credential.password)return;
         if(form){
           // Never auto-post an encrypted saved login across origins, even if
           // a site or extension inserted an unrelated form.
@@ -162,6 +204,7 @@
           // Prefer WGU's actual Sign On button so its event handlers and
           // client-side validation run normally. Never use form.submit(),
           // which bypasses submit events and HTML validity checks.
+          checkRemember(form,password);
           const buttons=[...(form||password.ownerDocument).querySelectorAll?.(
             'button,input[type="submit"],input[type="button"]')||[]];
           const signOn=buttons.find(button=>{
