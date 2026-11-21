@@ -409,23 +409,131 @@
     displayedRelease=preferredRelease(info);
     renderSection(el,displayedRelease,lastStatus?.message||'Unable to verify update status.');
   }
-  async function refreshVisiblePipeline(el){
-    if(!el||document.visibilityState==='hidden')return;
-    if(typeof el.getClientRects==='function'&&el.getClientRects().length===0)return;
-    await refreshPipelineStatus();
-    displayedRelease=preferredRelease(displayedRelease);
-    renderSection(el,displayedRelease,lastStatus?.message||'Unable to verify update status.');
-    if(readyFromPipeline&&!isDismissed(readyFromPipeline.version))mountRibbon(readyFromPipeline);
+  function verifiedFeedRelease(value){
+    if(!value||typeof value!=='object')return null;
+    const tag=String(value.tag||'');
+    if(!/^v\\d+\\.\\d+\\.\\d+-build\\.\\d+-g[0-9a-f]{8}$/.test(tag)||
+       value.version!==tag.slice(1)||!versionParts(value.version)||
+       !/^[0-9a-f]{40}$/i.test(String(value.sourceSha||'')))return null;
+    const prefix='https://github.com/'+REPO+'/releases/download/'+tag+'/';
+    const executable='Minternet-Windows-Portable-'+tag+'.exe';
+    if(value.downloadUrl!==prefix+executable ||
+       value.checksumUrl!==prefix+'SHA256SUMS.txt')return null;
+    return {
+      version:value.version,tag,notes:String(value.notes||'').slice(0,2000),
+      url:String(value.url||RELEASES),downloadUrl:value.downloadUrl,
+      sourceSha:value.sourceSha
+    };
+  }
+  // Frequent checks use a tiny static Pages feed; an installed EXE is still
+  // verified against GitHub Releases and SHA256SUMS by the native updater.
+  // This keeps 5s polling viable without exhausting GitHub's 60/hour API cap.
+  async function refreshLiveFeed(el){
+    if(pollInFlight)return pollInFlight;
+    pollInFlight=(async()=>{
+      const controller=new AbortController();
+      const timeout=setTimeout(()=>controller.abort(),REQUEST_TIMEOUT);
+      try{
+        const response=await fetch(FEED,{cache:'no-store',signal:controller.signal});
+        if(!response.ok)throw Error('Update feed HTTP '+response.status);
+        const feed=await response.json();
+        if(feed?.schema!==1||
+           !/^[0-9a-f]{40}$/i.test(String(feed.sourceSha||''))){
+          throw Error('Unrecognized update feed');
+        }
+        const release=verifiedFeedRelease(feed.release);
+        if(feed.release && !release)throw Error('Update feed release was not verified');
+        const latestRun=feed.windowsRun&&typeof feed.windowsRun==='object'
+          ?feed.windowsRun:null;
+        const signature=JSON.stringify([feed.sourceSha,
+          latestRun?.head_sha,latestRun?.status,latestRun?.conclusion,
+          latestRun?.run_number,release?.version]);
+        lastFeedPollAt=Date.now();
+        if(signature===lastFeedSignature)return release;
+        lastFeedSignature=signature;
+        const newer=release&&isNewer(release.version,installed);
+        if(release){
+          saveCache(release);
+          displayedRelease=preferredRelease(release);
+          if(newer)readyFromPipeline=release;
+        }
+        pipeline=classifyPipelineRun(latestRun,feed.sourceSha);
+        if(newer){
+          pipeline={...pipeline,kind:'ready',title:'Update Ready',
+            detail:'A published Windows EXE and checksum are available.'};
+          lastStatus={kind:'verified',releaseVersion:release.version,
+            sourceSha:feed.sourceSha,
+            message:'New verified Minternet update available: v'+release.version+'.'};
+        }else if(release){
+          const sourcePending=feed.sourceSha.toLowerCase()!==
+            String(release.sourceSha).toLowerCase();
+          if(!sourcePending && pipeline.kind==='publishing'){
+            pipeline={...pipeline,kind:'current',title:'Up To Date',
+              detail:'This published Windows build is already installed.'};
+          }
+          lastStatus={kind:sourcePending?'pending':'verified',
+            releaseVersion:release.version,sourceSha:feed.sourceSha,
+            message:sourcePending
+              ?'New Minternet source is pending its verified Windows release. '+
+                'v'+release.version+' is the newest published update.'
+              :'Up to date — latest published Windows release: v'+release.version+'.'};
+        }else if(!lastStatus){
+          lastStatus={kind:'unpublished',
+            message:'No published Windows build is available in the update feed.'};
+        }
+        if(el)renderSection(el,displayedRelease,
+          lastStatus?.message||'Checking update status…');
+        if(newer&&!isDismissed(release.version))mountRibbon(release);
+        return release;
+      }catch(error){
+        // A failed feed must never mean "up to date". Keep any previously
+        // verified release and allow the manual GitHub API check to work.
+        if(!lastFeedSignature){
+          pipeline={kind:'unavailable',title:'Live Status Unavailable',
+            detail:'Fast update feed unavailable. Use Check for Updates.'};
+          if(el)renderSection(el,displayedRelease,
+            lastStatus?.message||'Fast update feed unavailable. Try a manual check.');
+        }
+        return null;
+      }finally{clearTimeout(timeout);}
+    })().finally(()=>{pollInFlight=null;});
+    return pollInFlight;
+  }
+  function scheduleNextPoll(){
+    if(pollTimer!==null)clearTimeout(pollTimer);
+    if(!pollingStarted)return;
+    pollTimer=setTimeout(()=>{
+      pollTimer=null;
+      const el=$('updatesSection');
+      // Keep checking even when Settings is closed; the ribbon should show
+      // new verified releases without requiring the user to reopen Settings.
+      void refreshLiveFeed(el).finally(scheduleNextPoll);
+    },pollSeconds*1000);
+  }
+  function setPollSeconds(seconds){
+    pollSeconds=normalizePollSeconds(seconds);
+    try{localStorage.setItem(POLL_KEY,String(pollSeconds));}catch{}
+    scheduleNextPoll();
+    const el=$('updatesSection');
+    if(el)renderSection(el,displayedRelease,
+      lastStatus?.message||'Automatic update checks configured.');
+    return pollSeconds;
   }
   function startPipelinePolling(el){
     if(pollingStarted||!window.__TAURI__)return;
     pollingStarted=true;
     const disclosure=el.closest?.('details');
     disclosure?.addEventListener('toggle',()=>{
-      if(disclosure.open)void refreshVisiblePipeline(el);
+      if(disclosure.open)void refreshLiveFeed(el);
     });
-    if(typeof setInterval==='function')
-      setInterval(()=>void refreshVisiblePipeline(el),LIVE_REFRESH_MS);
+    window.addEventListener?.('storage',event=>{
+      if(event.key!==POLL_KEY)return;
+      pollSeconds=storedPollSeconds();
+      scheduleNextPoll();
+      renderSection(el,displayedRelease,
+        lastStatus?.message||'Checking update status…');
+    });
+    scheduleNextPoll();
   }
   function mountRibbon(info){
     if($('museUpdateRibbon')||!info||info.cached)return;
@@ -456,6 +564,9 @@
   window.MuseUpdates={
     get CURRENT_VERSION(){return installed;},isNewer,checkForUpdate,applyUpdate,mountSection,mountRibbon,
     classifyPipelineRun,expectedTagForRun,verifiedReleaseForRun,refreshPipelineStatus,
+    verifiedFeedRelease,refreshLiveFeed,setPollSeconds,startPipelinePolling,
+    get updateCheckSeconds(){return pollSeconds;},
+    get lastFeedPollAt(){return lastFeedPollAt;},
     get livePipeline(){return pipeline;},
     get lastStatus(){return lastStatus;}
   };
