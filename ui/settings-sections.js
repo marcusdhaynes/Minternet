@@ -40,6 +40,7 @@
   const appearance=section('Appearance');
   move(appearance,'renderCompatibilityMode','.render-compat-settings');
   move(appearance,'groupTabWidth','.tab-layout-settings');
+  move(appearance,'bookmarkFolderAppearance');
   move(appearance,'zoomLevel','.zoom-setting-row');
   const tabs=section('Tabs & Performance');
   move(tabs,'tabLimit','.browser-path-setting');
