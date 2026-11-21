@@ -2490,3 +2490,53 @@ html.minternet-startup-armed .startup-curtain{
 .bookmark-settings .extension-settings-library-row small{
   font-size:9px;color:#bcb2d0;white-space:nowrap;
 }
+
+/* Tab X containment: icon-only tabs can be as narrow as 32px while their
+   favicon, audio affordance and X used to exceed the flex width. Anchor X
+   INSIDE the actual border box instead of letting flex push it outside. */
+.tabs .tab:not(.pinned-tab):not(.split-supertab){
+  position:relative;
+  box-sizing:border-box!important;
+  overflow:hidden;
+  isolation:isolate;
+}
+.tabs .tab:not(.pinned-tab):not(.split-supertab) .tab-choose{
+  min-width:0!important;
+  max-width:calc(100% - 13px);
+  overflow:hidden;
+  box-sizing:border-box;
+}
+.tabs .tab:not(.pinned-tab):not(.split-supertab) .tab-close{
+  position:absolute!important;
+  flex:none!important;
+  box-sizing:border-box!important;
+  display:grid!important;
+  place-items:center;
+  right:1px!important;
+  top:2px!important;
+  width:12px!important;
+  max-width:12px!important;
+  height:15px!important;
+  margin:0!important;
+  padding:0!important;
+  line-height:1!important;
+  z-index:3;
+  overflow:hidden;
+}
+.tabs .tab:not(.pinned-tab):not(.split-supertab) .tab-audio{
+  position:absolute!important;
+  flex:none!important;
+  right:1px!important;
+  top:2px!important;
+  width:12px!important;
+  max-width:12px!important;
+  height:15px!important;
+  z-index:2;
+  overflow:hidden;
+}
+.tabs .tab:not(.pinned-tab):not(.split-supertab):hover .tab-audio,
+.tabs .tab:not(.pinned-tab):not(.split-supertab).tab-close-near .tab-audio,
+.tabs .tab:not(.pinned-tab):not(.split-supertab):focus-within .tab-audio{
+  opacity:0;
+  pointer-events:none;
+}
