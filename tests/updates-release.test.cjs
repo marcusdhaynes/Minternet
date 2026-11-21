@@ -227,3 +227,39 @@ test('Ready requires verified Windows EXE, checksum and matching successful buil
   assert.equal(h.updates.verifiedReleaseForRun(run,{...valid,assets:valid.assets.slice(0,1)},tag),null);
   assert.equal(h.updates.verifiedReleaseForRun({...run,conclusion:'failure'},valid,tag),null);
 });
+
+test('stale static build feed cannot continue claiming Update Initiating indefinitely',async()=>{
+  const head='a'.repeat(40);
+  const run={head_sha:head,head_branch:'main',run_number:1352,status:'queued',
+    conclusion:null,html_url:'https://github.com/marcusdhaynes/Minternet/actions/runs/44960000000'};
+  const h=harness(()=>response(200,{schema:1,sourceSha:head,
+    generatedAt:Math.floor(Date.now()/1000)-7200,release:null,windowsRun:run}),
+    '0.3.0-build.1282-g7dffbad7');
+  await h.updates.refreshLiveFeed();
+  assert.equal(h.updates.livePipeline.title,'Status Feed Delayed');
+  assert.equal(h.updates.lastStatus.kind,'verification-unknown');
+});
+test('fresh Pages snapshot can report a real currently building Windows job',async()=>{
+  const head='b'.repeat(40);
+  const h=harness(()=>response(200,{schema:1,sourceSha:head,
+    generatedAt:Math.floor(Date.now()/1000),release:null,
+    windowsRun:{head_sha:head,head_branch:'main',run_number:1353,
+      status:'in_progress',conclusion:null}}));
+  await h.updates.refreshLiveFeed();
+  assert.equal(h.updates.livePipeline.title,'Update Building');
+});
+test('a failed status-feed refresh clears a previously visible queued phase',async()=>{
+  const head='c'.repeat(40);
+  let attempts=0;
+  const h=harness(()=>{
+    attempts++;
+    return attempts===1?response(200,{schema:1,sourceSha:head,
+      generatedAt:Math.floor(Date.now()/1000),release:null,
+      windowsRun:{head_sha:head,run_number:1354,status:'queued'}})
+      :response(503,{message:'temporarily offline'});
+  });
+  await h.updates.refreshLiveFeed();
+  assert.equal(h.updates.livePipeline.title,'Update Initiating');
+  await h.updates.refreshLiveFeed();
+  assert.equal(h.updates.livePipeline.title,'Live Status Unavailable');
+});
