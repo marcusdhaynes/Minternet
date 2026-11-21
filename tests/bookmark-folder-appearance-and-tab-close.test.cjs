@@ -93,4 +93,7 @@ test('tab X is positioned and clipped inside compact regular tab border',()=>{
   assert.match(close,/width:12px!important;/);
   assert.match(close,/overflow:hidden;/);
   assert.match(css,/\.tabs \.tab\.pinned-tab \.tab-choose/);
+  assert.match(css,/\/\* Preserve tab audio mute access/);
+  assert.match(css,/\.tab-close-near\):not\(:focus-within\) \.tab-close\{/);
+  assert.match(css,/\.tab-close-near\):not\(:focus-within\) \.tab-audio\{/);
 });
