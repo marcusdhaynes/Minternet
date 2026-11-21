@@ -5,6 +5,7 @@
 (() => {
   const sections=new Set(['identities','logins','payments']);
   const active=new Map();
+  const listeners=new Set();
   const MAX=999999,MAX_TIMEOUT=2147483647;
   const units={seconds:1000,minutes:60000,hours:3600000,days:86400000};
   const validUnit=unit=>unit==='never'||Object.hasOwn(units,unit);
@@ -12,6 +13,18 @@
     amount:Math.max(0,Math.min(MAX,Math.trunc(Number(value)||0))),
     unit:validUnit(unit)?unit:'seconds'
   });
+  const defaultDelay={amount:5,unit:'minutes'};
+  const changed=(section,enabled)=>{
+    for(const listener of listeners){
+      try{listener(section,enabled);}catch{/* A Settings listener cannot block locking. */}
+    }
+  };
+  const validSection=section=>sections.has(section);
+  function onChange(listener){
+    if(typeof listener!=='function')throw Error('Expected auto-lock listener');
+    listeners.add(listener);
+    return ()=>listeners.delete(listener);
+  }
   function forSection(section){
     if(!sections.has(section))throw Error('Unknown encrypted vault section');
     if(active.has(section))return active.get(section);
@@ -21,12 +34,49 @@
     // password required after launch, a manual Lock, or OS session shutdown.
     let preference=section==='logins'
       ?{amount:0,unit:'never'}:{amount:0,unit:'seconds'};
+    let lastFinite={...defaultDelay};
     try{
       const saved=JSON.parse(localStorage.getItem(key)||'null');
-      if(saved&&typeof saved==='object')
+      if(saved&&typeof saved==='object'&&!Array.isArray(saved)){
         preference=normalize(saved.amount,saved.unit);
-    }catch{/* A corrupted preference uses the secure zero-second default. */}
+        if(validUnit(saved.lastUnit)&&saved.lastUnit!=='never'){
+          lastFinite=normalize(saved.lastAmount,saved.lastUnit);
+        }else if(preference.unit!=='never'){
+          lastFinite={...preference};
+        }
+      }
+    }catch{/* Corrupted preference uses the original per-section default. */}
     let opened=false,unlocked=false,timer=null,deadline=0,locking=null;
+    const controls=new Set();
+    const syncControls=()=>{
+      for(const {amount,unit} of controls){
+        amount.value=String(preference.amount);
+        unit.value=preference.unit;
+        amount.disabled=preference.unit==='never';
+      }
+    };
+    const persist=()=>{
+      try{
+        localStorage.setItem(key,JSON.stringify({...preference,
+          lastAmount:lastFinite.amount,lastUnit:lastFinite.unit}));
+      }catch{/* Never save vault passwords, only this local UI preference. */}
+      syncControls();
+      changed(section,preference.unit!=='never');
+      if(!opened&&unlocked)schedule();
+      else if(preference.unit==='never')stop();
+    };
+    function setEnabled(enabled){
+      const wantEnabled=Boolean(enabled);
+      if((preference.unit!=='never')===wantEnabled)return wantEnabled;
+      if(wantEnabled){
+        preference={...lastFinite};
+      }else{
+        if(preference.unit!=='never')lastFinite={...preference};
+        preference={...preference,unit:'never'};
+      }
+      persist();
+      return wantEnabled;
+    }
     const stop=()=>{clearTimeout(timer);timer=null;deadline=0;};
     async function lock(){
       if(locking)return locking;
@@ -87,27 +137,23 @@
       unit.value=preference.unit;
       amount.disabled=unit.value==='never';
       const save=()=>{
-        // Avoid a surprise instant lock when changing Never -> finite,
-        // because its unused amount was zero. Explicitly typing zero still
-        // requests immediate lock.
+        // Switching Never → a timed mode restores a sensible non-zero delay
+        // unless the user explicitly chose zero after enabling the timer.
         if(preference.unit==='never'&&unit.value!=='never'&&Number(amount.value)===0)
-          amount.value='1';
+          amount.value=String(lastFinite.amount||5);
         preference=normalize(amount.value,unit.value);
-        amount.value=String(preference.amount);unit.value=preference.unit;
-        amount.disabled=preference.unit==='never';
-        try{localStorage.setItem(key,JSON.stringify(preference));}catch{}
-        // A selection made after the panel closed takes effect immediately.
-        // Never cancels any scheduled auto-lock; all others recalculate it.
-        if(!opened&&unlocked)schedule();
+        if(preference.unit!=='never')lastFinite={...preference};
+        persist();
       };
       amount.addEventListener('change',save);
       unit.addEventListener('change',save);
+      controls.add({amount,unit});
       label.append(caption,amount,unit);
       header.append(label);
       return label;
     }
     const controller={
-      mount,
+      mount,setEnabled,isEnabled:()=>preference.unit!=='never',
       async openManager(){
         opened=true;
         stop();
@@ -127,5 +173,16 @@
     active.set(section,controller);
     return controller;
   }
-  window.minternetVaultAutoLock={forSection};
+  window.minternetVaultAutoLock={
+    forSection,
+    getEnabled(section){
+      if(!validSection(section))throw Error('Unknown encrypted vault section');
+      return forSection(section).isEnabled();
+    },
+    setEnabled(section,enabled){
+      if(!validSection(section))throw Error('Unknown encrypted vault section');
+      return forSection(section).setEnabled(enabled);
+    },
+    onChange
+  };
 })();
