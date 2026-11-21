@@ -255,6 +255,24 @@
     const slot=document.createElement('span');
     slot.className='bookmark-emoji';
     const value=model.icon(item?.icon);
+    if(isFolder && (!value || value==='📁')){
+      // Preserve the original plain emoji unless the user opts into a styled
+      // Bookmark Bar folder. The vector is CSS-only and never changes stored
+      // bookmark icons or imagery in folder managers and menus.
+      slot.classList.add('bookmark-folder-default');
+      const original=document.createElement('span');
+      original.className='bookmark-folder-native';
+      original.textContent='📁';
+      const vector=document.createElement('span');
+      vector.className='bookmark-folder-vector';
+      vector.setAttribute('aria-hidden','true');
+      const sheen=document.createElement('span');
+      sheen.className='bookmark-folder-sheen';
+      vector.append(sheen);
+      slot.append(original,vector);
+      return slot;
+    }
+    if(isFolder)slot.classList.add('bookmark-folder-custom');
     if(/^data:image\/(?:png|jpeg|webp);base64,/i.test(value)){
       const img=document.createElement('img');
       img.src=value;img.alt='';
