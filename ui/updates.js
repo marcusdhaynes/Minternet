@@ -9,10 +9,27 @@
   const RELEASES='https://github.com/'+REPO+'/releases';
   const CACHE_KEY='minternet.updates.last-verified.v2';
   const REQUEST_TIMEOUT=12000;
-  const LIVE_REFRESH_MS=120000; // GitHub API: near-live, rate-limit conscious.
+  // The five-second background poll hits a tiny GitHub Pages JSON feed, NOT
+  // the authenticated/rate-limited GitHub REST API. Manual checks continue to
+  // verify Releases against GitHub and the native installer verifies SHA-256.
+  const FEED='https://marcusdhaynes.github.io/Minternet/update-feed.json';
+  const POLL_KEY='minternet.updates.interval-seconds.v1';
+  const DEFAULT_POLL_SECONDS=5;
+  const MIN_POLL_SECONDS=5,MAX_POLL_SECONDS=3600;
   const WINDOWS_RUNS='/actions/workflows/native-windows.yml/runs?branch=main&per_page=5';
   let pipeline={kind:'unknown',title:'Checking Build Status',detail:'Waiting for GitHub Actions…'};
   let pipelineCheck=null,readyFromPipeline=null,displayedRelease=null,pollingStarted=false;
+  let pollTimer=null,pollInFlight=null,lastFeedSignature='',lastFeedPollAt=0;
+  function normalizePollSeconds(input){
+    const seconds=Number(input);
+    return Number.isSafeInteger(seconds) &&
+      seconds>=MIN_POLL_SECONDS && seconds<=MAX_POLL_SECONDS?seconds:DEFAULT_POLL_SECONDS;
+  }
+  function storedPollSeconds(){
+    try{return normalizePollSeconds(localStorage.getItem(POLL_KEY)||DEFAULT_POLL_SECONDS);}
+    catch{return DEFAULT_POLL_SECONDS;}
+  }
+  let pollSeconds=storedPollSeconds();
   let installed='0.1.0'; // Only the web/demo fallback; native version comes from Rust.
   let lastStatus=null;
   let checking=null;
@@ -241,7 +258,8 @@
       footer.append(anchor);
     }
     const interval=document.createElement('div');interval.className='updates-live-refresh';
-    interval.textContent='Auto-refreshes every 2 minutes while open';
+    interval.textContent='Checks for new updates every '+pollSeconds+
+      (pollSeconds===1?' second':' seconds')+' · verified release feed';
     panel.append(header,stages,note,footer,interval);el.append(panel);
   }
   async function checkForUpdate(){
@@ -325,6 +343,30 @@
       versions.append(versionRow('Latest Source (Pending Release)',lastStatus.sourceSha.slice(0,8)));
     el.append(versions);
     renderPipeline(el);
+    // Control lives in Updates (not a separate global Settings menu). A
+    // change immediately reschedules the singleton background poll.
+    const pollRow=document.createElement('label');
+    pollRow.className='updates-poll-setting';
+    pollRow.setAttribute('for','updatesPollSeconds');
+    const pollLabel=document.createElement('span');
+    pollLabel.textContent='Check Every';
+    const pollInput=document.createElement('input');
+    pollInput.id='updatesPollSeconds';
+    pollInput.type='number';
+    pollInput.min=String(MIN_POLL_SECONDS);
+    pollInput.max=String(MAX_POLL_SECONDS);
+    pollInput.step='1';
+    pollInput.value=String(pollSeconds);
+    pollInput.setAttribute('inputmode','numeric');
+    pollInput.setAttribute('aria-label','Automatic update check interval in seconds');
+    pollInput.addEventListener('change',()=>{
+      const value=normalizePollSeconds(pollInput.value);
+      setPollSeconds(value);
+      pollInput.value=String(pollSeconds);
+    });
+    const unit=document.createElement('span');unit.textContent='seconds';
+    pollRow.append(pollLabel,pollInput,unit);
+    el.append(pollRow);
     const message=document.createElement('div');message.className='updates-current-status';
     message.setAttribute('role','status');message.setAttribute('aria-live','polite');
     message.textContent=status||'';
