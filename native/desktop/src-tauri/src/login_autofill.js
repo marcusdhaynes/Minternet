@@ -148,8 +148,8 @@
           const name=hint(box)+' '+(
             box.parentElement?.textContent||'')+' '+
             (box.closest('label')?.textContent||'');
-          if(!/(?:remember(?:\\s+(?:me|my|this|username|login|sign.?in|device|account))?|keep\\s+me\\s+signed\\s+in|stay\\s+signed\\s+in|trust\\s+this\\s+device)/i.test(name)||
-             /(?:do\\s+not|don.t|never|forgot|terms|agree|consent|unsubscribe)/i.test(name))
+          if(!/(?:remember(?:\s+(?:me|my|this|username|login|sign.?in|device|account))?|keep\s+me\s+signed\s+in|stay\s+signed\s+in|trust\s+this\s+device)/i.test(name)||
+             /(?:do\s+not|don.t|never|forgot|terms|agree|consent|unsubscribe)/i.test(name))
             continue;
           if(box.checked)continue;
           // A direct checked setter plus synthetic input/change is recognized
