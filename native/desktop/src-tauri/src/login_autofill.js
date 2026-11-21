@@ -246,7 +246,7 @@
           'button,input[type="submit"],input[type="button"]')||[]];
         const next=buttons.find(button=>{
           const label=(button.tagName==='INPUT'?button.value:button.textContent)||'';
-          return !button.disabled&&/^(next|continue|sign\\s*on)$/i.test(label.trim());
+          return !button.disabled&&/^(next|continue|sign\s*on)$/i.test(label.trim());
         });
         if(!next)return;
         let previous;
