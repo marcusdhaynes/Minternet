@@ -2650,3 +2650,19 @@ html.minternet-startup-armed .startup-curtain{
 .tabs .tab:not(.pinned-tab):not(.split-supertab):hover:not(.tab-close-near):not(:focus-within) .tab-audio{
   opacity:1!important;pointer-events:auto!important;
 }
+
+/* Compact Updates polling interval control. */
+.bookmark-settings .updates-poll-setting{
+  display:flex;align-items:center;justify-content:flex-start;gap:7px;
+  min-height:24px;padding:2px 0;margin:5px 0;
+  font-size:10px;color:#d8d0ed;
+}
+.bookmark-settings .updates-poll-setting input{
+  flex:0 0 54px;width:54px;max-width:54px;height:23px;
+  padding:2px 5px;border:1px solid #686080;
+  border-radius:5px;background:#202639;color:#f0edff;
+  font-size:11px;text-align:center;font-variant-numeric:tabular-nums;
+}
+.bookmark-settings .updates-poll-setting input:focus-visible{
+  outline:1px solid #b49bf3;outline-offset:1px;
+}
