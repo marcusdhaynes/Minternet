@@ -415,3 +415,8 @@ jobs:
             }
           done
           echo "Published verified in-app Windows update: https://github.com/$GITHUB_REPOSITORY/releases/tag/$tag" >> "$GITHUB_STEP_SUMMARY"
+          # Publishing through GITHUB_TOKEN does not emit another release
+          # workflow event. Dispatch Pages explicitly so the small public
+          # update feed reflects the newly verified EXE promptly.
+          gh workflow run pages.yml --ref main --repo "$GITHUB_REPOSITORY" ||
+            echo "Pages refresh can be retried; the verified release remains published."
