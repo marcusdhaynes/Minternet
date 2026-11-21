@@ -59,6 +59,41 @@
   move(userData,'passwordManagerOpen');
   move(userData,'paymentManagerOpen');
   move(userData,'bookmarkSettingsManage');
+  // The auto-lock timer is separate from the native master-password prompt:
+  // turning it off permanently disables timeout-based revocation until the
+  // user turns it back on. Each encrypted section is independent.
+  const autoLockSection=section('Auto-Lock',userData);
+  autoLockSection.id='vaultAutoLockPreferences';
+  const autoLockIntro=document.createElement('p');
+  autoLockIntro.className='lock-preference-explainer';
+  autoLockIntro.textContent='Turn off automatic locking separately for each vault. Your choice is saved across restarts. Manual Lock and the master password still work.';
+  autoLockSection.append(autoLockIntro);
+  const autoLock=window.minternetVaultAutoLock;
+  const autoLockToggles=new Map();
+  for(const [key,title] of [
+    ['identities','Identities'],['logins','Logins'],['payments','Payments']
+  ]){
+    const row=document.createElement('label');
+    row.className='auto-lock-preference-row';
+    const caption=document.createElement('span');
+    caption.textContent=title+' — Auto-Lock';
+    const toggle=document.createElement('input');
+    toggle.type='checkbox';
+    toggle.id='autoLockEnabled-'+key;
+    toggle.checked=autoLock?.getEnabled(key)??true;
+    toggle.setAttribute('aria-label','Enable automatic locking for '+title);
+    toggle.addEventListener('change',()=>{
+      const enabled=autoLock?.setEnabled(key,toggle.checked);
+      toggle.checked=enabled===true;
+    });
+    row.append(caption,toggle);
+    autoLockSection.append(row);
+    autoLockToggles.set(key,toggle);
+  }
+  autoLock?.onChange((key,enabled)=>{
+    const input=autoLockToggles.get(key);
+    if(input)input.checked=enabled;
+  });
   // Every section has an independently configurable prompt. Disabled prompts
   // use Windows Credential Manager (bound to the signed-in OS user) rather
   // than plaintext profile settings. Encrypted vault data stays encrypted.
