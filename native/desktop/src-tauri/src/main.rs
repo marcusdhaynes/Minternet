@@ -3487,7 +3487,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
                     _=>true
                 })
                 .on_new_window(|_,_|NewWindowResponse::Deny)
-                .on_page_load(|window,event|{
+                .on_page_load(move |window,event|{
                     // The real HTTPS origin, never a site-controlled HTML
                     // title, identifies the authentication window to users.
                     if event.url().scheme()=="https"{
@@ -4876,7 +4876,7 @@ fn defer_private_first_navigation(app:&tauri::AppHandle,id:u32,
             };
             let current_generation={
                 let state=handle.state::<PrivateLoginCopyState>();
-                if let Ok(mut saved)=state.0.lock(){
+                let is_current=if let Ok(mut saved)=state.0.lock(){
                     if saved.pending.get(&id).copied()!=Some(generation){
                         false
                     }else{
@@ -4884,7 +4884,8 @@ fn defer_private_first_navigation(app:&tauri::AppHandle,id:u32,
                         if destination.is_some(){saved.seeded.insert(id);}
                         true
                     }
-                }else{false}
+                }else{false};
+                is_current
             };
             if !current_generation{return;}
             if let Some(address)=destination{
