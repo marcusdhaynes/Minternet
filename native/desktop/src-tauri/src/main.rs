@@ -19,6 +19,7 @@ mod render_visual;
 #[cfg(windows)]
 mod render_compat;
 mod extensions;
+mod extension_archive;
 mod portable_updater;
 mod session_lifecycle;
 mod auth_popup;
@@ -6809,9 +6810,9 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 let Some(path)=picked else{return Ok(json!({"cancelled":true}));};
                 let handle=app.clone();
                 let result=tauri::async_runtime::spawn_blocking(move||
-                    extensions::import(&handle,&source_for_picker,&path))
+                    extension_archive::import(&handle,&source_for_picker,&path))
                     .await.map_err(|e|format!("Extension import task failed: {e}"))??;
-                return Ok(json!({"ok":true,"extension":result,"restartRequired":true}));
+                return Ok(json!({"ok":true,"details":result,"restartRequired":true}));
             }
         }
         "extensions-toggle" => {
