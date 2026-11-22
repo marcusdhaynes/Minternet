@@ -42,6 +42,9 @@ fn safe_relative(path:&str)->Result<(),String>{
        path.contains('\\')||path.starts_with('/')||path.contains('\0') {
         return Err("Archive contains an unsafe path".into());
     }
+    if path.split('/').any(|part|part.is_empty()||part=="."||part==".."){
+        return Err("Archive contains an ambiguous or traversal path".into());
+    }
     let p=Path::new(path);
     let mut count=0usize;
     for part in p.components(){
@@ -301,6 +304,51 @@ mod tests{
         assert!(safe_relative("C:/evil.js").is_err());
         assert!(safe_relative("x\\evil.js").is_err());
         assert!(safe_relative("/etc/passwd").is_err());
+    }
+    fn make_zip(entries:Vec<(&str,Vec<u8>)>)->Vec<u8>{
+        use std::io::Write;
+        let mut zip=zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for (name,contents) in entries{
+            zip.start_file(name,zip::write::SimpleFileOptions::default()).unwrap();
+            zip.write_all(&contents).unwrap();
+        }
+        zip.finish().unwrap().into_inner()
+    }
+    #[test]
+    fn recursively_finds_best_variant_and_other_extensions(){
+        let first=br#"{"name":"Marmalade Library","version":"0.3","manifest_version":3}"#.to_vec();
+        let second=br#"{"name":"Other Tool","version":"1","manifest_version":3}"#.to_vec();
+        let inner_minternet=make_zip(vec![
+            ("nested/source/manifest.json",first.clone()),
+            ("nested/source/content.js",b"self.ready=true;".to_vec())
+        ]);
+        let inner_chrome=make_zip(vec![("manifest.json",first.clone())]);
+        let inner_firefox=make_zip(vec![("manifest.json",first)]);
+        let extra=make_zip(vec![("manifest.json",second)]);
+        let middle=make_zip(vec![
+            ("archives/marmalade-library-minternet.zip",inner_minternet),
+            ("archives/marmalade-library-chrome.zip",inner_chrome),
+            ("archives/marmalade-library-firefox.zip",inner_firefox),
+            ("archives/second-extension.zip",extra)
+        ]);
+        let outer=make_zip(vec![("deeply/bundled.zip",middle)]);
+        let mut scan=Scan::default();
+        discover(&outer,"universal.zip",0,"minternet",&mut scan).unwrap();
+        assert_eq!(scan.candidates.len(),2);
+        let chosen=scan.candidates.iter()
+            .find(|candidate|candidate.name=="Marmalade Library").unwrap();
+        assert!(chosen.path.contains("minternet.zip"));
+        assert!(chosen.files.contains_key("content.js"));
+        assert!(chosen.files.contains_key("manifest.json"));
+        assert!(!chosen.files.contains_key("nested/source/manifest.json"));
+        assert!(scan.found>=4);
+    }
+    #[test]
+    fn detects_unsafe_nested_archives_before_installing(){
+        let inner=make_zip(vec![("../unsafe/manifest.json",b"{}".to_vec())]);
+        let outer=make_zip(vec![("child.zip",inner)]);
+        let mut scan=Scan::default();
+        assert!(discover(&outer,"bundle.zip",0,"minternet",&mut scan).is_err());
     }
     #[test]
     fn prefers_minternet_over_other_browser_variants(){
