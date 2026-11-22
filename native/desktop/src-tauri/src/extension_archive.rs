@@ -78,13 +78,19 @@ fn token_path(name:&str,part:&str)->bool{
         .any(|piece|piece==part)
 }
 fn rank(source:&str,where_found:&str,manifest:&Value)->Option<u8>{
-    let text=where_found.to_ascii_lowercase();
-    let firefox=token_path(&text,"firefox");
-    let safari=token_path(&text,"safari");
-    let minternet=token_path(&text,"minternet");
-    let chrome=token_path(&text,"chrome")||token_path(&text,"chromium");
-    let other_chromium=["brave","edge","opera","vivaldi"].iter()
-        .any(|name|token_path(&text,name));
+    // The closest labelled folder/inner archive wins. An OUTER ZIP called
+    // "Minternet-bundle.zip" must not cause its Firefox child to be treated
+    // as a Minternet extension.
+    let lower=where_found.to_ascii_lowercase();
+    let variant=lower.split(|c:char|c=='/'||c=='!').rev().find_map(|part|{
+        if token_path(part,"firefox"){Some("firefox")}
+        else if token_path(part,"safari"){Some("safari")}
+        else if token_path(part,"minternet"){Some("minternet")}
+        else if token_path(part,"chrome")||token_path(part,"chromium"){Some("chrome")}
+        else if ["brave","edge","opera","vivaldi"].iter()
+            .any(|name|token_path(part,name)){Some("chromium")}
+        else{None}
+    }).unwrap_or("generic");
     let mv=manifest.get("manifest_version").and_then(Value::as_u64)?;
     if !matches!(mv,2|3){return None;}
     let background=manifest.get("background");
@@ -95,15 +101,13 @@ fn rank(source:&str,where_found:&str,manifest:&Value)->Option<u8>{
         background.and_then(|b|b.get("service_worker")).is_none();
     match source {
         "minternet"|"chrome" => {
-            if firefox||safari||gecko_only||firefox_background{return None;}
+            if matches!(variant,"firefox"|"safari")||gecko_only||firefox_background{return None;}
             // Minternet currently loads through Windows WebView2 (Chromium).
-            // Prefer an explicit Minternet package over Chrome-family builds.
-            Some(if minternet {100} else if chrome {90}
-                else if other_chromium {80} else {65})
+            Some(match variant {"minternet"=>100,"chrome"=>90,"chromium"=>80,_=>65})
         }
         "firefox" => {
-            if safari||minternet||chrome||other_chromium{return None;}
-            Some(if firefox {100} else {65})
+            if matches!(variant,"safari"|"minternet"|"chrome"|"chromium"){return None;}
+            Some(if variant=="firefox" {100} else {65})
         }
         _ => None,
     }
@@ -357,5 +361,8 @@ mod tests{
         assert!(rank("minternet","bundle/safari/example.zip",&manifest).is_none());
         assert!(rank("minternet","bundle/minternet/example.zip",&manifest)>
                 rank("minternet","bundle/chrome/example.zip",&manifest));
+        assert!(rank("minternet","Minternet-bundle.zip/chrome/example.zip",&manifest)<
+                rank("minternet","Minternet-bundle.zip/minternet/example.zip",&manifest));
+        assert!(rank("minternet","Minternet-bundle.zip/firefox/example.zip",&manifest).is_none());
     }
 }
