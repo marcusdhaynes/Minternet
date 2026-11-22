@@ -66,31 +66,27 @@ credentials inaccessible. Passwords should not be entrusted to this preview
 as their only copy. Remote web pages receive no Tauri capabilities, and
 credentials are never written to browser chrome localStorage.
 
-## Marmaladeum Media Server — importable Minternet extension
+## Import a universal WebExtension ZIP in Minternet (Windows)
 
-Install **Marmaladeum-Media-Server-v1.1.0.mext** using
-**Extensions → Minternet → Import**, then restart a compatible Windows
-Minternet EXE. The installed extension activates Minternet's native local
-media-server host; an .mext alone cannot supply missing native code to an old
-browser version.
+Open **Extensions → Minternet → Import** and select the **outer ZIP** directly,
+including the universal Marmalade Library package. You do not need to unzip
+anything. The importer searches inside subfolders and ZIPs nested up to eight
+levels, checks manifests, and installs the highest-priority compatible
+Minternet/Chromium variant of each distinct extension. Firefox/Safari-only
+variants are skipped. Several different extensions may be installed from one
+bundle, and existing installed copies are preserved rather than overwritten.
 
-**All library changes take place in Marmaladeum**, not browser Settings:
-open Marmaladeum inside Minternet, enable its Media Library, create and name
-a Movies/TV/Other library, then select **Add Folder** in Marmaladeum. The
-Minternet-native folder picker scans the selected folder and its descendants;
-saved folder paths and library metadata remain on this device across restarts.
+Archive safety limits apply: 64 MB selected archive, 32 MB per entry, 160 MB
+total uncompressed content across recursion, 6,000 entries and 128 nested
+archives. The importer rejects traversal paths, symlinks and duplicate paths,
+and stages files outside the browser's live extension directory. Restart
+Minternet after a successful install to activate the newly imported extensions.
 
-Settings displays **Extensions → Marmaladeum → Media Library**, with read-only
-connection/catalog summaries and **Open Marmaladeum**. Every installed extension
-gets its own nested settings accordion using the same generic structure.
-All videos remain local; the native host serves registered media over
-token-protected loopback HTTP Range requests.
+Marmaladeum's media library backup is now the responsibility of the **standalone
+Marmalade Library browser extension**. It does not require a Minternet-native
+media server. Saved catalog metadata and browser file permissions are different:
+no extension can guarantee that Windows or the browser will retain local-folder
+access after permissions are revoked. Re-authorization may be necessary.
 
-Supported installer today: **Windows native WebView2**. Chrome/Firefox files
-are not a substitute for Minternet's native folder access. Unsupported codecs
-still require decoding or transcoding not provided by this extension.
-Actual successful EXE installation and real video playback still require
-end-to-end verification.
-
-See [Marmaladeum Media Server details](docs/MARMALADEUM-MEDIA-SERVER.md)
-for setup, security and remaining limitations.
+Source: [recursive importer](native/desktop/src-tauri/src/extension_archive.rs)
+and [Marmalade Library releases](https://github.com/marcusdhaynes/MarmaladePlayer/releases).
