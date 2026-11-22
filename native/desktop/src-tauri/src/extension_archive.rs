@@ -82,7 +82,7 @@ fn rank(source:&str,where_found:&str,manifest:&Value)->Option<u8>{
     // "Minternet-bundle.zip" must not cause its Firefox child to be treated
     // as a Minternet extension.
     let lower=where_found.to_ascii_lowercase();
-    let variant=lower.split(|c:char|c=='/'||c=='!').rev().find_map(|part|{
+    let variant=lower.split(|c:char|c=='/'||c=='!').collect::<Vec<_>>().into_iter().rev().find_map(|part|{
         if token_path(part,"firefox"){Some("firefox")}
         else if token_path(part,"safari"){Some("safari")}
         else if token_path(part,"minternet"){Some("minternet")}
