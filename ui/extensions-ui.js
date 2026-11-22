@@ -118,13 +118,29 @@
   async function importExtension(source,button){
     if(loading)return;
     loading=true;button.disabled=true;
-    say('Choose a '+source+' extension package…');
+    say('Choose an extension ZIP or bundle (nested folders and ZIPs supported)…');
     try{
       const result=await api.command('extensions-import',source);
       if(result?.message)throw Error(result.message);
       if(result?.cancelled){say('Import cancelled.');return;}
-      if(!result?.ok)throw Error('No extension was imported');
-      say((result.extension?.name||'Extension')+' imported. Restart Minternet to activate it.');
+      if(!result?.ok)throw Error('Import did not complete');
+      const details=result.details||{};
+      const installed=Array.isArray(details.extensions)?details.extensions:
+        result.extension?[result.extension]:[];
+      const skipped=Array.isArray(details.skipped)?details.skipped:[];
+      const duplicates=skipped.filter(msg=>msg.includes('already installed')).length;
+      const errors=skipped.filter(msg=>!msg.includes('incompatible browser variant')&&
+        !msg.includes('already installed')).length;
+      if(!installed.length){
+        say(duplicates?'Extension already installed. Existing copy was preserved.':
+          'No compatible extension was installed.'+(errors?' '+skipped.filter(
+            msg=>!msg.includes('incompatible browser variant')).slice(0,2).join('; '):''));
+      }else{
+        const names=installed.map(item=>item.name||'Extension').join(', ');
+        say(installed.length+' extension'+(installed.length===1?'':'s')+' imported: '+names+
+          '. Restart Minternet to activate.'+
+          (errors?' '+errors+' package(s) could not be installed.':''));
+      }
       await refresh();
     }catch(error){say('Import failed: '+String(error?.message||error));}
     finally{loading=false;button.disabled=false;}
