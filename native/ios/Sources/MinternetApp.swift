@@ -370,73 +370,104 @@ struct ContentView: View {
     @FocusState private var focused: Bool
     @State private var showTabLimitEditor = false
     @State private var tabLimitDraft = "0"
+    @State private var dashboardOpen = false
+    private let chromeForeground = Color(red: 174/255, green: 186/255, blue: 212/255)
+    private let addressFill = Color(red: 12/255, green: 20/255, blue: 35/255)
+
+    private func chromeIcon(_ systemName: String, width: CGFloat = 23) -> some View {
+        Image(systemName: systemName).font(.system(size: 14))
+            .frame(width: width, height: 23).contentShape(Rectangle())
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 3) {
-                    Image("Brand")
-                        .resizable().scaledToFit().frame(width: 24, height: 24)
-                        .accessibilityLabel("Minternet")
-                    ForEach(state.tabs) { tab in
-                        HStack(spacing: 2) {
-                            Button(action: { state.select(tab.id) }) {
-                                ZStack(alignment: .bottomTrailing) {
-                                    SiteFavicon(url: tab.url)
-                                    if tab.isPrivate {
-                                        Image(systemName: "eye.slash.fill")
-                                            .font(.system(size: 7)).foregroundStyle(.purple)
+            HStack(spacing: 3) {
+                Image("Brand")
+                    .resizable().scaledToFit().frame(width: 18, height: 18)
+                    .accessibilityLabel("Minternet")
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 2) {
+                        ForEach(state.tabs) { tab in
+                            HStack(spacing: 2) {
+                                Button(action: { dashboardOpen = false; state.select(tab.id) }) {
+                                    HStack(spacing: 3) {
+                                        if tab.url == nil {
+                                            Image("Brand").resizable().scaledToFit()
+                                                .frame(width: 12, height: 12)
+                                        } else {
+                                            SiteFavicon(url: tab.url)
+                                                .scaleEffect(0.75).frame(width: 12, height: 12)
+                                        }
+                                        Text(tab.title).font(.system(size: 10))
+                                            .lineLimit(1).truncationMode(.tail)
                                     }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .contentShape(Rectangle())
                                 }
+                                .accessibilityIdentifier("tab-\(tab.id)")
+                                .accessibilityLabel(tab.title)
+                                .help(tab.suspended ? "Unloaded · "+tab.title : tab.title)
+                                Button("×") { state.close(tab.id) }
+                                    .accessibilityLabel("Close \(tab.title)")
+                                    .font(.system(size: 14))
+                                    .frame(width: 16, height: 16)
                             }
-                            .accessibilityIdentifier("tab-\(tab.id)")
-                            .accessibilityLabel(tab.title)
-                            .help(tab.suspended ? "Unloaded · "+tab.title : tab.title)
-                            Button("×") { state.close(tab.id) }
-                                .accessibilityLabel("Close \(tab.title)")
-                                .font(.system(size: 13))
-                        }
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 4)
-                        .frame(height: 25)
-                        .background(tab.suspended ? Color.gray.opacity(0.28) : tab.id == state.selectedId ? Color.indigo.opacity(0.55) : Color.white.opacity(0.10))
-                        .saturation(tab.suspended ? 0.15 : 1)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                        .contextMenu {
-                            Button("Unload Tab") { state.manuallyUnload(tab.id) }
-                            Button("Close Tab", role: .destructive) { state.close(tab.id) }
+                            .padding(.leading, 5)
+                            .frame(width: 71, height: 20)
+                            .foregroundStyle(tab.id == state.selectedId ? Color.white : chromeForeground)
+                            .background(tab.suspended ? Color.gray.opacity(0.28) :
+                                tab.id == state.selectedId ? Color(red: 49/255, green: 58/255, blue: 81/255) : Color.white.opacity(0.035))
+                            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(
+                                tab.id == state.selectedId ? Color(red: 80/255, green: 90/255, blue: 118/255) : .clear, lineWidth: 1))
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .contextMenu {
+                                Button("Unload Tab") { state.manuallyUnload(tab.id) }
+                                Button("Close Tab", role: .destructive) { state.close(tab.id) }
+                            }
                         }
                     }
-                    Button(action: { state.newTab() }) {
-                        Image(systemName: "plus").font(.system(size: 13, weight: .bold))
-                    }.accessibilityIdentifier("new-tab")
+                    .frame(height: 22, alignment: .bottom)
                 }
-                .padding(.horizontal, 5)
+                Button(action: { dashboardOpen = false; state.newTab() }) {
+                    chromeIcon("plus", width: 20)
+                }.accessibilityIdentifier("new-tab")
+                Button(action: { dashboardOpen = false; state.switchPrivacy() }) {
+                    chromeIcon(state.active?.isPrivate == true ? "eye.slash.fill" : "eye", width: 21)
+                        .foregroundStyle(.purple)
+                }
+                .accessibilityLabel("Switch current tab private or normal")
+                .accessibilityIdentifier("privacy")
+                Button(action: { dashboardOpen = true }) {
+                    chromeIcon("circle.grid.3x3.fill", width: 21)
+                }.accessibilityLabel("Open Dashboard")
             }
-            .frame(height: 30)
-            HStack(spacing: 7) {
-                Button(action: { state.active?.webView?.goBack() }) { Image(systemName: "chevron.left") }
+            .buttonStyle(.plain)
+            .foregroundStyle(chromeForeground)
+            .padding(.horizontal, 4)
+            .frame(height: 22)
+            HStack(spacing: 2) {
+                Button(action: { dashboardOpen = false; state.active?.webView?.goBack() }) { chromeIcon("arrow.left") }
                     .accessibilityIdentifier("back")
-                Button(action: { state.active?.webView?.goForward() }) { Image(systemName: "chevron.right") }
+                Button(action: { dashboardOpen = false; state.active?.webView?.goForward() }) { chromeIcon("arrow.right") }
                     .accessibilityIdentifier("forward")
-                Button(action: { state.reloadActive() }) { Image(systemName: "arrow.clockwise") }
+                Button(action: { dashboardOpen = false; state.reloadActive() }) { chromeIcon("arrow.clockwise") }
                     .accessibilityIdentifier("reload")
-                TextField("", text: $state.address, prompt: Text("Search or HTTPS address").foregroundColor(Color(white: 0.70)))
+                TextField("", text: $state.address, prompt: Text("Search or enter address").foregroundColor(Color(red: 130/255, green: 143/255, blue: 169/255)))
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
-                    .font(.system(size: 12))
+                    .font(.system(size: 11))
                     .foregroundStyle(.white)
-                    .padding(.vertical, 5)
-                    .padding(.horizontal, 8)
-                    .background(Color.black.opacity(0.30))
+                    .padding(.horizontal, 7)
+                    .frame(height: 24)
+                    .background(addressFill)
+                    .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color(red: 59/255, green: 67/255, blue: 90/255), lineWidth: 1))
                     .clipShape(RoundedRectangle(cornerRadius: 7))
                     .focused($focused)
                     .submitLabel(.go)
-                    .onSubmit { state.navigate(state.address); focused = false }
+                    .onSubmit { dashboardOpen = false; state.navigate(state.address); focused = false }
                     .accessibilityIdentifier("address")
-                Button(action: { state.navigate(state.address); focused = false }) { Image(systemName: "arrow.right") }
+                Button(action: { dashboardOpen = false; state.navigate(state.address); focused = false }) { chromeIcon("arrow.right") }
                     .accessibilityIdentifier("go")
                 Menu {
                     Button("Tab Limit (0 = Unlimited)") {
@@ -455,7 +486,7 @@ struct ContentView: View {
                         Text("1 hour").tag(60)
                         Text("2 hours").tag(120)
                     }
-                } label: { Image(systemName: "gearshape") }
+                } label: { chromeIcon("gearshape", width: 22) }
                 .accessibilityLabel("Browser Settings")
                 .alert("Tab Limit", isPresented: $showTabLimitEditor) {
                     TextField("0 = Unlimited", text: $tabLimitDraft)
@@ -471,27 +502,33 @@ struct ContentView: View {
                 } message: {
                     Text("0 = Unlimited. Reducing the limit will not close existing tabs.")
                 }
-                Button(action: { state.switchPrivacy() }) {
-                    Image(systemName: state.active?.isPrivate == true ? "eye.slash.fill" : "eye")
-                }
-                .accessibilityLabel("Switch current tab private or normal")
-                .accessibilityIdentifier("privacy")
             }
-            .font(.system(size: 14))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 8)
-            .frame(height: 38)
-            Group {
+            .buttonStyle(.plain)
+            .foregroundStyle(chromeForeground)
+            .padding(.horizontal, 3)
+            .frame(height: 30)
+            ZStack {
                 if let tab = state.active {
                     SecureWebView(state: state, tab: tab)
                         .id(tab.id)
-                } else {
-                    Color.black
+                }
+                if dashboardOpen || state.active?.url == nil {
+                    Canvas { context, size in
+                        let color = Color(red: 128/255, green: 145/255, blue: 191/255).opacity(0.4)
+                        for x in stride(from: CGFloat.zero, to: size.width, by: 24) {
+                            for y in stride(from: CGFloat.zero, to: size.height, by: 24) {
+                                context.fill(Path(ellipseIn: CGRect(x: x-1, y: y-1, width: 2, height: 2)), with: .color(color))
+                            }
+                        }
+                    }
+                    .background(Color(red: 11/255, green: 17/255, blue: 32/255))
+                    .accessibilityLabel("Dashboard")
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(Color(red: 0.07, green: 0.10, blue: 0.17))
+        .background(LinearGradient(colors: [Color(red: 29/255, green: 35/255, blue: 51/255), Color(red: 17/255, green: 23/255, blue: 40/255)], startPoint: .topLeading, endPoint: .bottomTrailing))
+        .onChange(of: state.selectedId) { _ in dashboardOpen = false }
         .onReceive(Timer.publish(every: 10, on: .main, in: .common).autoconnect()) { _ in
             state.checkIdleTabs()
         }
