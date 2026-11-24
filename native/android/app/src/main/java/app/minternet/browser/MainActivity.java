@@ -48,15 +48,17 @@ import java.util.UUID;
 
 public class MainActivity extends Activity {
     private boolean isolatedPrivate=false;
-    private static final int BG=0xff111827;
-    private static final int SURFACE=0xff1e293b;
-    private static final int ACCENT=0xffb9b7ff;
+    private static final int BG=0xff111728;
+    private static final int SURFACE=0xff313a51;
+    private static final int ACCENT=0xffb3b2ff;
     private final List<BrowserTab> tabs=new ArrayList<>();
     private final Map<String,Bitmap> fallbackTabIcons=new HashMap<>();
     private int currentIndex=-1;
     private LinearLayout tabRow;
     private EditText address;
     private FrameLayout content;
+    private View dashboard;
+    private boolean dashboardOpen=false;
     private Button back,forward,reload;
     private boolean updatingAddress=false;
     private MinternetSync sync;
@@ -81,20 +83,49 @@ public class MainActivity extends Activity {
 
     private int dp(int n) { return (int)(getResources().getDisplayMetrics().density*n+0.5f); }
 
+    // Native equivalent of desktop ui/styles.css chrome tokens.
+    private android.graphics.drawable.GradientDrawable shape(int color,int border,int radius) {
+        android.graphics.drawable.GradientDrawable d=new android.graphics.drawable.GradientDrawable();
+        d.setColor(color); d.setCornerRadius(dp(radius));
+        if(border!=0)d.setStroke(dp(1),border);
+        return d;
+    }
     private Button button(String text, String description) {
         Button b=new Button(this);
-        b.setText(text);
-        b.setContentDescription(description);
-        b.setTextColor(0xfff3f4ff);
-        b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(SURFACE));
-        b.setAllCaps(false);
+        b.setText(text); b.setContentDescription(description);
+        b.setTextColor(0xffaebad4); b.setAllCaps(false);
+        b.setTypeface(Typeface.DEFAULT); b.setIncludeFontPadding(false);
+        b.setBackground(new android.graphics.drawable.RippleDrawable(
+            android.content.res.ColorStateList.valueOf(0x30ffffff),
+            shape(Color.TRANSPARENT,0,5),shape(Color.WHITE,0,5)));
+        b.setStateListAnimator(null);
         b.setPadding(0,0,0,0);
-        b.setMinWidth(dp(38));
-        b.setMinimumWidth(dp(38));
-        b.setMinHeight(dp(38));
-        b.setMinimumHeight(dp(38));
-        b.setTextSize(14);
+        b.setMinWidth(0); b.setMinimumWidth(0);
+        b.setMinHeight(0); b.setMinimumHeight(0);
+        b.setTextSize(16); b.setGravity(android.view.Gravity.CENTER);
         return b;
+    }
+    private void chromeButton(LinearLayout row,Button b,int width,int height) {
+        row.addView(b,new LinearLayout.LayoutParams(dp(width),dp(height)));
+    }
+    private void updateDashboard() {
+        BrowserTab tab=current();
+        if(dashboard==null||tab==null)return;
+        boolean visible=dashboardOpen||"about:blank".equals(tab.url);
+        dashboard.setVisibility(visible?View.VISIBLE:View.GONE);
+        if(visible)dashboard.bringToFront();
+    }
+    private final class DashboardView extends View {
+        private final Paint dots=new Paint(Paint.ANTI_ALIAS_FLAG);
+        DashboardView(){super(MainActivity.this);setBackgroundColor(0xff0b1120);
+            dots.setColor(0x668091bf);setContentDescription("Dashboard");setClickable(true);}
+        @Override protected void onDraw(Canvas canvas){
+            super.onDraw(canvas);
+            int step=dp(24);
+            for(int y=0;y<getHeight();y+=step)
+                for(int x=0;x<getWidth();x+=step)
+                    canvas.drawCircle(x,y,Math.max(1f,dp(1)),dots);
+        }
     }
 
     @Override public void onCreate(Bundle savedInstanceState) {
@@ -134,53 +165,77 @@ public class MainActivity extends Activity {
             });
             root.requestApplyInsets();
         }
-        HorizontalScrollView strip=new HorizontalScrollView(this);
-        strip.setHorizontalScrollBarEnabled(false);
-        strip.setFillViewport(true);
-        tabRow=new LinearLayout(this);
-        tabRow.setOrientation(LinearLayout.HORIZONTAL);
-        tabRow.setPadding(dp(3),dp(2),dp(3),dp(2));
-        strip.addView(tabRow,new HorizontalScrollView.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,dp(36)));
-        root.addView(strip,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(37)));
-
-        LinearLayout controls=new LinearLayout(this);
-        controls.setOrientation(LinearLayout.HORIZONTAL);
-        controls.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        controls.setPadding(dp(3),0,dp(3),dp(3));
+        LinearLayout chrome=new LinearLayout(this);
+        chrome.setOrientation(LinearLayout.VERTICAL);
+        chrome.setBackground(new android.graphics.drawable.GradientDrawable(
+            android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+            new int[]{0xff1d2333,BG}));
+        root.addView(chrome,new LinearLayout.LayoutParams(-1,dp(52)));
+        LinearLayout top=new LinearLayout(this);
+        top.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        top.setPadding(dp(5),0,dp(4),0);
+        chrome.addView(top,new LinearLayout.LayoutParams(-1,dp(22)));
         android.widget.ImageView brand=new android.widget.ImageView(this);
         brand.setImageResource(R.mipmap.ic_launcher);
         brand.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
         brand.setContentDescription("Minternet");
-        brand.setPadding(dp(2),dp(2),dp(2),dp(2));
-        controls.addView(brand,new LinearLayout.LayoutParams(dp(29),dp(29)));
-        back=button("‹","Back");
-        forward=button("›","Forward");
+        top.addView(brand,new LinearLayout.LayoutParams(dp(18),dp(18)));
+        HorizontalScrollView strip=new HorizontalScrollView(this);
+        strip.setHorizontalScrollBarEnabled(false);
+        tabRow=new LinearLayout(this);
+        tabRow.setGravity(android.view.Gravity.BOTTOM);
+        tabRow.setOrientation(LinearLayout.HORIZONTAL);
+        tabRow.setPadding(dp(3),0,dp(2),0);
+        strip.addView(tabRow,new HorizontalScrollView.LayoutParams(-2,-1));
+        top.addView(strip,new LinearLayout.LayoutParams(0,-1,1));
+        Button add=button("+","New tab");
+        Button privateButton=button("◉",isolatedPrivate?"Return to normal browser":"Open isolated private window");
+        privateButton.setTextColor(0xffb3a0e8);
+        Button home=button("⠿","Open Dashboard");
+        chromeButton(top,add,20,20);
+        chromeButton(top,privateButton,21,20);
+        chromeButton(top,home,21,20);
+        home.setOnClickListener(v->{dashboardOpen=true;updateDashboard();});
+
+        LinearLayout controls=new LinearLayout(this);
+        controls.setOrientation(LinearLayout.HORIZONTAL);
+        controls.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        controls.setPadding(dp(3),0,dp(3),0);
+        back=button("←","Back");
+        forward=button("→","Forward");
         reload=button("↻","Reload");
-        controls.addView(back);controls.addView(forward);controls.addView(reload);
+        chromeButton(controls,back,23,23);
+        chromeButton(controls,forward,23,23);
+        chromeButton(controls,reload,23,23);
         address=new EditText(this);
         address.setSingleLine(true);
-        address.setTextColor(Color.WHITE);
-        address.setHintTextColor(0xff9ca3af);
-        address.setHint("Search or enter HTTPS address");
-        address.setTextSize(12);
+        address.setTextColor(0xfff1f3ff);
+        address.setHintTextColor(0xff828fa9);
+        address.setHint("Search or enter address");
+        address.setTextSize(11);
+        address.setIncludeFontPadding(false);
         address.setSelectAllOnFocus(true);
         address.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_URI);
-        address.setBackgroundTintList(android.content.res.ColorStateList.valueOf(ACCENT));
-        controls.addView(address,new LinearLayout.LayoutParams(0,dp(38),1));
+        address.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_GO);
+        address.setPadding(dp(7),0,dp(7),0);
+        address.setBackground(shape(0xff0c1423,0xff3b435a,7));
+        LinearLayout.LayoutParams addressSize=new LinearLayout.LayoutParams(0,dp(24),1);
+        addressSize.setMargins(dp(4),0,dp(2),0);
+        controls.addView(address,addressSize);
         Button go=button("→","Go");
-        Button add=button("+","New tab");
-        Button privateButton=button("◈",isolatedPrivate?"Return to normal browser":"Open isolated private window");
-        controls.addView(go);controls.addView(add);controls.addView(privateButton);
         Button settings=button("⚙","Settings and Google Sync");
-        controls.addView(settings,new LinearLayout.LayoutParams(dp(34),dp(38)));
+        chromeButton(controls,go,23,23);
+        chromeButton(controls,settings,22,23);
         settings.setOnClickListener(v->openSettings());
-        root.addView(controls,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(42)));
+        chrome.addView(controls,new LinearLayout.LayoutParams(-1,dp(30)));
         content=new FrameLayout(this);
-        content.setBackgroundColor(Color.WHITE);
-        root.addView(content,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,0,1));
+        content.setBackgroundColor(0xff0b1120);
+        root.addView(content,new LinearLayout.LayoutParams(-1,0,1));
+        dashboard=new DashboardView();
+        content.addView(dashboard,new FrameLayout.LayoutParams(-1,-1));
 
-        back.setOnClickListener(v->{BrowserTab t=current();if(t!=null&&t.web.canGoBack())t.web.goBack();});
-        forward.setOnClickListener(v->{BrowserTab t=current();if(t!=null&&t.web.canGoForward())t.web.goForward();});
+        back.setOnClickListener(v->{BrowserTab t=current();if(t!=null&&t.web.canGoBack()){dashboardOpen=false;t.web.goBack();}});
+        forward.setOnClickListener(v->{BrowserTab t=current();if(t!=null&&t.web.canGoForward()){dashboardOpen=false;t.web.goForward();}});
         reload.setOnClickListener(v->{
             BrowserTab t=current();
             if(t==null)return;
@@ -216,7 +271,7 @@ public class MainActivity extends Activity {
             startActivity(intent);
         });
         if(isolatedPrivate) {
-            privateButton.setText("◈");
+            privateButton.setText("◉");
             privateButton.setContentDescription("Close isolated private window");
             address.setHint("ISOLATED PRIVATE • HTTPS search or address");
         }
@@ -510,7 +565,7 @@ public class MainActivity extends Activity {
             return;
         }
         BrowserTab tab=current();
-        if(tab!=null)tab.web.loadUrl(url);
+        if(tab!=null){dashboardOpen=false;tab.web.loadUrl(url);if(!"about:blank".equals(url))dashboard.setVisibility(View.GONE);}
         InputMethodManager imm=(InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);
         if(imm!=null)imm.hideSoftInputFromWindow(address.getWindowToken(),0);
         address.clearFocus();
@@ -552,7 +607,7 @@ public class MainActivity extends Activity {
                 }catch(Exception ignored){tab.icon=null;}
                 if(icon!=null)tab.icon=icon;
                 tab.url=url;tab.loading=true;
-                if(current()==tab)updateUI();
+                if(current()==tab){dashboardOpen=false;updateUI();}
             }
             @Override public void onPageFinished(WebView v,String url) {
                 if(tab.web!=v)return;
@@ -605,17 +660,23 @@ public class MainActivity extends Activity {
         prepareWebView(tab);
         tab.url=url;
         tab.inactiveSince=SystemClock.elapsedRealtime();
-        tab.button=button("◆","Select tab");
-        tab.button.setMinWidth(0);tab.button.setMinimumWidth(0);
-        tab.button.setTextSize(13);
+        tab.button=button("New Tab","Select tab");
+        tab.button.setTextSize(10);
+        tab.button.setSingleLine(true);
+        tab.button.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        tab.button.setGravity(android.view.Gravity.CENTER_VERTICAL|android.view.Gravity.START);
+        tab.button.setPadding(dp(5),0,0,0);
+        tab.button.setCompoundDrawablePadding(dp(3));
         tab.closeButton=button("×","Close tab");
-        tab.closeButton.setMinWidth(0);tab.closeButton.setMinimumWidth(0);
-        tab.closeButton.setTextSize(15);
+        tab.closeButton.setTextSize(14);
         tab.slot=new LinearLayout(this);
-        tab.slot.addView(tab.button,new LinearLayout.LayoutParams(dp(29),dp(32)));
-        tab.slot.addView(tab.closeButton,new LinearLayout.LayoutParams(dp(22),dp(32)));
+        tab.slot.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        tab.slot.addView(tab.button,new LinearLayout.LayoutParams(0,dp(20),1));
+        tab.slot.addView(tab.closeButton,new LinearLayout.LayoutParams(dp(16),dp(16)));
         tabs.add(tab);
-        tabRow.addView(tab.slot,new LinearLayout.LayoutParams(dp(53),dp(32)));
+        LinearLayout.LayoutParams slotSize=new LinearLayout.LayoutParams(dp(71),dp(20));
+        slotSize.setMargins(0,0,dp(2),0);
+        tabRow.addView(tab.slot,slotSize);
         tab.button.setOnClickListener(v->switchTab(tabs.indexOf(tab)));
         tab.button.setOnLongClickListener(v->{new AlertDialog.Builder(this)
             .setTitle(tab.title).setItems(new String[]{"Unload Tab","Close Tab"},(d,which)->{
@@ -636,6 +697,7 @@ public class MainActivity extends Activity {
             prev.inactiveSince=SystemClock.elapsedRealtime();
         }
         currentIndex=index;
+        dashboardOpen=false;
         BrowserTab tab=current();
         tab.inactiveSince=0;
         if(tab.suspended||tab.web==null){
@@ -679,11 +741,15 @@ public class MainActivity extends Activity {
             Bitmap image=tab.icon!=null?tab.icon:fallbackTabIcon(tab.url);
             Bitmap scaled=image.getWidth()==dp(16)&&image.getHeight()==dp(16)?image:
                 Bitmap.createScaledBitmap(image,dp(16),dp(16),true);
-            tab.button.setCompoundDrawablesWithIntrinsicBounds(new BitmapDrawable(getResources(),scaled),null,null,null);
-            tab.button.setText("");
+            android.graphics.drawable.Drawable favicon="about:blank".equals(tab.url)
+                ?getDrawable(R.mipmap.ic_launcher):new BitmapDrawable(getResources(),scaled);
+            if(favicon!=null)favicon.setBounds(0,0,dp(12),dp(12));
+            tab.button.setCompoundDrawables(favicon,null,null,null);
+            tab.button.setText("about:blank".equals(tab.url)?"New Tab":tab.title);
             tab.button.setContentDescription((tab.suspended?"Unloaded · ":"")+tab.title);
-            tab.button.setBackgroundTintList(android.content.res.ColorStateList.valueOf(
-                tab.suspended?0xff41434b:tab==current()?0xff474570:SURFACE));
+            boolean selected=tab==current();
+            tab.slot.setBackground(shape(tab.suspended?0xff41434b:selected?SURFACE:0x09ffffff,
+                selected?0xff505a76:0,6));
             tab.button.setTextColor(tab.suspended?0xff8a8c96:tab==current()?Color.WHITE:0xffc5cde6);
         }
     }
@@ -694,6 +760,7 @@ public class MainActivity extends Activity {
         back.setEnabled(tab.web.canGoBack());
         forward.setEnabled(tab.web.canGoForward());
         updateTabLabels();
+        updateDashboard();
     }
 
     private void closeTab(BrowserTab tab) {
