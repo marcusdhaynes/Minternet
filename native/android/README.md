@@ -31,4 +31,7 @@ Keep an offline encrypted backup of the keystore. Do not rotate the pinned certi
 
 Run Native Minternet Android APK (< 50 MB) from Actions after configuration. The workflow signs the release APK, checks its certificate against the pinned fingerprint, checks its package and versionCode, and archives it. Distribution versionCode is 100000000 + the workflow run number; the application ID remains app.minternet.browser. Re-running the same workflow run keeps its versionCode; a new run increments it. Never distribute emulator or local debug APKs as updates.
 
-The workflow does not automatically recover a lost signing key, migrate browser data, or prove an in-place update on a specific device.
+The verified APK is also published to the permanent **android-latest** release, which only ever moves forward to a higher versionCode:
+https://github.com/marcusdhaynes/Minternet/releases/download/android-latest/Minternet-Android.apk
+
+**Existing installs from the old debug builds:** the ephemeral debug keys are unrecoverable, so a one-time migration is required — see [MIGRATION.md](MIGRATION.md) for the verified root cause and the step-by-step procedure. After that single migration, all updates install in place with data preserved.
