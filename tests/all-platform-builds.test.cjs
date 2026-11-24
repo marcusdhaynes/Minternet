@@ -81,3 +81,22 @@ test('Android distribution fails closed on missing signing identity and verifies
   assert.match(gradle,/applicationId 'app\.minternet\.browser'/);
   assert.match(read('.github/workflows/android-emulator.yml'),/:app:assembleDebug/);
 });
+
+test('Android publishes only to its own permanent latest release and cannot be superseded by an older build',()=>{
+  const workflow=read('.github/workflows/native-android.yml');
+  assert.match(workflow,/concurrency:[\s\S]*group: native-android-/);
+  assert.match(workflow,/cancel-in-progress: true/);
+  assert.match(workflow,/Publish verified APK to permanent android-latest release/);
+  assert.match(workflow,/gh release download android-latest/);
+  assert.match(workflow,/prev_code[\s\S]*new_code/);
+  assert.match(workflow,/releases\/download\/android-latest\/Minternet-Android\.apk/);
+  assert.match(workflow,/sha256sum Minternet-Android\.apk/);
+  // The permanent-release publish step lives only in the Android workflow.
+  for(const other of ['native-windows.yml','native-unix.yml','native-ios.yml','desktop-build.yml','pages.yml']){
+    assert.doesNotMatch(read('.github/workflows/'+other),/android-latest/);
+  }
+  const migration=read('native/android/MIGRATION.md');
+  assert.match(migration,/unrecoverable/i);
+  assert.match(migration,/one-time migration/i);
+  assert.match(migration,/app\.minternet\.browser/);
+});
