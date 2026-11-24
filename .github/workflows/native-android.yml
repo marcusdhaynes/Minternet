@@ -31,24 +31,69 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
-      - name: Build native Android app (no bundled Chromium)
+      - name: Require persistent distribution signing identity
+        env:
+          MINTERNET_ANDROID_KEYSTORE_B64: ${{ secrets.MINTERNET_ANDROID_KEYSTORE_B64 }}
+          MINTERNET_ANDROID_STORE_PASSWORD: ${{ secrets.MINTERNET_ANDROID_STORE_PASSWORD }}
+          MINTERNET_ANDROID_KEY_PASSWORD: ${{ secrets.MINTERNET_ANDROID_KEY_PASSWORD }}
+          MINTERNET_ANDROID_KEY_ALIAS: ${{ vars.MINTERNET_ANDROID_KEY_ALIAS }}
+          MINTERNET_ANDROID_CERT_SHA256: ${{ vars.MINTERNET_ANDROID_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          for name in MINTERNET_ANDROID_KEYSTORE_B64 MINTERNET_ANDROID_STORE_PASSWORD MINTERNET_ANDROID_KEY_PASSWORD MINTERNET_ANDROID_KEY_ALIAS MINTERNET_ANDROID_CERT_SHA256; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing $name. Configure persistent Android signing; refusing to publish a differently signed APK."
+              exit 1
+            fi
+          done
+          expected=$(printf '%s' "$MINTERNET_ANDROID_CERT_SHA256" | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')
+          [[ "$expected" =~ ^[a-f0-9]{64}$ ]] || { echo "::error::Invalid pinned SHA-256 certificate fingerprint"; exit 1; }
+      - name: Set monotonic distribution version code
+        run: |
+          set -euo pipefail
+          code=$((100000000 + GITHUB_RUN_NUMBER))
+          test "$code" -le 2100000000
+          echo "MINTERNET_ANDROID_VERSION_CODE=$code" >> "$GITHUB_ENV"
+      - name: Build unsigned native release APK
         working-directory: native/android
-        run: gradle :app:assembleDebug --no-daemon --stacktrace
-      - name: Enforce 50 MiB APK maximum
+        run: gradle :app:assembleRelease --no-daemon --stacktrace
+      - name: Sign and verify with persistent Android key
+        env:
+          MINTERNET_ANDROID_KEYSTORE_B64: ${{ secrets.MINTERNET_ANDROID_KEYSTORE_B64 }}
+          MINTERNET_ANDROID_STORE_PASSWORD: ${{ secrets.MINTERNET_ANDROID_STORE_PASSWORD }}
+          MINTERNET_ANDROID_KEY_PASSWORD: ${{ secrets.MINTERNET_ANDROID_KEY_PASSWORD }}
+          MINTERNET_ANDROID_KEY_ALIAS: ${{ vars.MINTERNET_ANDROID_KEY_ALIAS }}
+          MINTERNET_ANDROID_CERT_SHA256: ${{ vars.MINTERNET_ANDROID_CERT_SHA256 }}
         run: |
-          set -e
-          APK=native/android/app/build/outputs/apk/debug/app-debug.apk
-          test -f "$APK"
-          BYTES=$(stat -c%s "$APK")
-          echo "Android APK: $BYTES bytes" >> "$GITHUB_STEP_SUMMARY"
-          test "$BYTES" -lt 52428800
-      - name: Record exact Android source revision
-        run: |
-          echo "Android debug APK built from commit $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
-          echo "Debug signing is for testing and may not support in-place upgrades across CI runners." >> "$GITHUB_STEP_SUMMARY"
+          set -euo pipefail
+          umask 077
+          signing_dir=$(mktemp -d "$RUNNER_TEMP/minternet-signing.XXXXXX")
+          trap 'rm -rf "$signing_dir"' EXIT
+          printf '%s' "$MINTERNET_ANDROID_KEYSTORE_B64" | base64 --decode > "$signing_dir/key.jks"
+          tools="$ANDROID_HOME/build-tools/35.0.0"
+          unsigned=native/android/app/build/outputs/apk/release/app-release-unsigned.apk
+          test -s "$unsigned"
+          "$tools/zipalign" -f -p 4 "$unsigned" "$signing_dir/aligned.apk"
+          mkdir -p release/android
+          apk=release/android/Minternet-Android.apk
+          "$tools/apksigner" sign --ks "$signing_dir/key.jks" \
+            --ks-key-alias "$MINTERNET_ANDROID_KEY_ALIAS" \
+            --ks-pass env:MINTERNET_ANDROID_STORE_PASSWORD \
+            --key-pass env:MINTERNET_ANDROID_KEY_PASSWORD \
+            --out "$apk" "$signing_dir/aligned.apk"
+          report=$("$tools/apksigner" verify --verbose --print-certs "$apk")
+          actual=$(printf '%s\n' "$report" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')
+          expected=$(printf '%s' "$MINTERNET_ANDROID_CERT_SHA256" | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')
+          test "$actual" = "$expected" || { echo "::error::Android signer mismatch. No APK will be published."; exit 1; }
+          badging=$("$tools/aapt" dump badging "$apk")
+          printf '%s\n' "$badging" | grep -F "package: name='app.minternet.browser' versionCode='$MINTERNET_ANDROID_VERSION_CODE'"
+          "$tools/zipalign" -c -p 4 "$apk"
+          test "$(stat -c%s "$apk")" -lt 52428800
+          echo "Verified Android signing certificate: $actual" >> "$GITHUB_STEP_SUMMARY"
+          echo "Android versionCode: $MINTERNET_ANDROID_VERSION_CODE; source: $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
-          name: minternet-android-debug-apk-${{ github.sha }}
-          path: native/android/app/build/outputs/apk/debug/app-debug.apk
+          name: minternet-android-signed-apk-${{ github.sha }}
+          path: release/android/Minternet-Android.apk
           if-no-files-found: error
           retention-days: 90

@@ -179,7 +179,7 @@ jobs:
           count=0
           for artifact in "${ARTIFACTS[@]}"; do
             case "$PLATFORM:$artifact" in
-              Windows:Minternet-Portable-Windows-x64|Windows:Minternet-Windows-Portable-v*|Unix:minternet-native-*|Android:minternet-android-debug-apk|Android:minternet-android-debug-apk-*|iOS-Simulator:minternet-ios-simulator|iOS-Simulator:minternet-ios-simulator-*|iOS-Simulator:minternet-ios-device-unsigned-*|Web-Preview:minternet-web-preview-*) ;;
+              Windows:Minternet-Portable-Windows-x64|Windows:Minternet-Windows-Portable-v*|Unix:minternet-native-*|Android:minternet-android-debug-apk|Android:minternet-android-debug-apk-*|Android:minternet-android-signed-apk-*|iOS-Simulator:minternet-ios-simulator|iOS-Simulator:minternet-ios-simulator-*|iOS-Simulator:minternet-ios-device-unsigned-*|Web-Preview:minternet-web-preview-*) ;;
               *) continue ;;
             esac
             echo "Retrieving: $artifact"
@@ -228,7 +228,7 @@ jobs:
           - Workflow: \`$NAME\`
           - Successful run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$RUN_ID
           - Files: $count
-          - Status: unsigned development preview, not independently security audited
+          - Status: build archive; Android signed APK artifacts have passed the distribution signer check. Historical debug APKs and unsigned platform packages are development previews. Not independently security audited.
 
           Every successful build is archived under its own immutable-by-policy tag.
           This workflow never clobbers or overwrites an earlier EXE, APK, DMG,

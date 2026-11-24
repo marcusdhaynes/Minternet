@@ -6,8 +6,29 @@ Features: compact tab strip, address/search, back/forward/reload, multiple web t
 
 **Isolated private window (Android 9+):** The ◈ control launches a dedicated Android process with a separate WebView data directory, then returns to normal browsing when closed. Private cookies and site storage receive best-effort cleanup. This is NOT a guarantee of zero disk traces, forensic erasure, crash cleanup, or network anonymity. It opens a separate window rather than converting the original WebView in place; normal-session data is not retroactively deleted.
 
-**Known limitations:** No Tor, extensions, downloads, file uploads, DRM guarantees, or cross-platform security audit. Long-press a tab to close it. The debug APK is development-signed and not a production release.
+**Known limitations:** No Tor, extensions, downloads, file uploads, DRM guarantees, or cross-platform security audit. Long-press a tab to close it. Debug APKs are emulator-only; distribution APKs require the persistent signing configuration below.
 
 GitHub Actions builds the APK and checks its **actual file size** is below 50 MiB. The Android WebView engine itself is already installed as part of the OS and is not counted as Minternet's APK size.
 
 This native Android implementation is deliberately separate from the Tauri multi-webview desktop app because Tauri child webviews are desktop-only.
+
+## Android update signing (distribution)
+
+The public APK workflow now fails closed without an owner-controlled persistent key. Emulator tests continue to use disposable debug signing, which must never be distributed as an update.
+
+To preserve an existing installation, recover the **original private signing key** used for that installation, and compare its SHA-256 certificate fingerprint against `apksigner verify --print-certs original.apk`. An APK contains the public certificate, not the private signing key. A new key cannot sign an in-place update to an APK signed by an unrelated key. If the old ephemeral debug key cannot be recovered, back up the old profile before migrating once to a new signing identity.
+
+Configure repository Actions secrets (never commit the keystore or passwords):
+- `MINTERNET_ANDROID_KEYSTORE_B64`: base64 of the original persistent keystore.
+- `MINTERNET_ANDROID_STORE_PASSWORD`: keystore password.
+- `MINTERNET_ANDROID_KEY_PASSWORD`: key password (same as store password if applicable).
+
+Configure repository Actions variables:
+- `MINTERNET_ANDROID_KEY_ALIAS`: signing alias.
+- `MINTERNET_ANDROID_CERT_SHA256`: independently recorded SHA-256 certificate fingerprint (hex, colons allowed).
+
+Keep an offline encrypted backup of the keystore. Do not rotate the pinned certificate to bypass an update failure. For a fresh signing identity only after migration is accepted, use Android Studio's Generate Signed Bundle/APK or `keytool -genkeypair -keystore minternet-release.jks -alias minternet -keyalg RSA -keysize 3072 -validity 10000`.
+
+Run Native Minternet Android APK (< 50 MB) from Actions after configuration. The workflow signs the release APK, checks its certificate against the pinned fingerprint, checks its package and versionCode, and archives it. Distribution versionCode is 100000000 + the workflow run number; the application ID remains app.minternet.browser. Re-running the same workflow run keeps its versionCode; a new run increments it. Never distribute emulator or local debug APKs as updates.
+
+The workflow does not automatically recover a lost signing key, migrate browser data, or prove an in-place update on a specific device.

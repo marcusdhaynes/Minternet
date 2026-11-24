@@ -9,7 +9,13 @@ def sharedVersion = new groovy.json.JsonSlurper()
     .parse(file('../../desktop/src-tauri/tauri.conf.json')).version.toString()
 def ciNumber = System.getenv('GITHUB_RUN_NUMBER')
 def ciSha = System.getenv('GITHUB_SHA')
-def buildNumber = ciNumber?.isInteger() ? ciNumber.toInteger() : 1
+def distributionCode = System.getenv('MINTERNET_ANDROID_VERSION_CODE')
+if (distributionCode != null && (!distributionCode.isInteger() ||
+        distributionCode.toLong() < 1 || distributionCode.toLong() > 2100000000L)) {
+    throw new GradleException('Invalid Android distribution versionCode')
+}
+def buildNumber = distributionCode != null ? distributionCode.toInteger() :
+    (ciNumber?.isInteger() ? ciNumber.toInteger() : 1)
 def buildSuffix = ciSha?.length() >= 8 ? "-g" + ciSha.substring(0, 8) : "-local"
 android {
     namespace 'app.minternet.browser'

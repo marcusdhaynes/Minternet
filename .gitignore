@@ -5,3 +5,9 @@ dist/
 !.env.example
 .DS_Store
 *.log
+
+# Android signing material (never commit)
+*.jks
+*.keystore
+*.p12
+*.pfx

@@ -38,7 +38,7 @@ test('every platform has a commit-addressable artifact or deployment',()=>{
   const unix=read('.github/workflows/native-unix.yml');
   assert.match(unix,/minternet-native-\$\{\{ matrix\.label \}\}-\$\{\{ github\.sha \}\}/);
   const android=read('.github/workflows/native-android.yml');
-  assert.match(android,/minternet-android-debug-apk-\$\{\{ github\.sha \}\}/);
+  assert.match(android,/minternet-android-signed-apk-\$\{\{ github\.sha \}\}/);
   const ios=read('.github/workflows/native-ios.yml');
   assert.match(ios,/minternet-ios-simulator-\$\{\{ github\.sha \}\}/);
   assert.match(ios,/minternet-ios-device-unsigned-\$\{\{ github\.sha \}\}/);
@@ -57,8 +57,27 @@ test('GitHub Releases archives include all platform artifacts without impersonat
   const archive=read('.github/workflows/publish-current-portable.yml');
   assert.match(archive,/Publish Minternet UI preview/);
   assert.match(archive,/Web-Preview:minternet-web-preview-\*/);
-  assert.match(archive,/Android:minternet-android-debug-apk-\*/);
+  assert.match(archive,/Android:minternet-android-debug-apk-\*/); // historical archives
+  assert.match(archive,/Android:minternet-android-signed-apk-\*/);
   assert.match(archive,/iOS-Simulator:minternet-ios-device-unsigned-\*/);
   const ios=read('.github/workflows/native-ios.yml');
   assert.match(ios,/not directly installable/);
+});
+
+test('Android distribution fails closed on missing signing identity and verifies package, signer and version',()=>{
+  const workflow=read('.github/workflows/native-android.yml');
+  const gradle=read('native/android/app/build.gradle');
+  assert.match(workflow,/Require persistent distribution signing identity/);
+  assert.match(workflow,/refusing to publish a differently signed APK/);
+  assert.match(workflow,/secrets\.MINTERNET_ANDROID_KEYSTORE_B64/);
+  assert.match(workflow,/vars\.MINTERNET_ANDROID_CERT_SHA256/);
+  assert.match(workflow,/:app:assembleRelease/);
+  assert.doesNotMatch(workflow,/:app:assembleDebug/);
+  assert.match(workflow,/apksigner" verify --verbose --print-certs/);
+  assert.match(workflow,/test "\$actual" = "\$expected"/);
+  assert.match(workflow,/100000000 \+ GITHUB_RUN_NUMBER/);
+  assert.match(workflow,/package: name='app\.minternet\.browser' versionCode='/);
+  assert.match(gradle,/MINTERNET_ANDROID_VERSION_CODE/);
+  assert.match(gradle,/applicationId 'app\.minternet\.browser'/);
+  assert.match(read('.github/workflows/android-emulator.yml'),/:app:assembleDebug/);
 });
