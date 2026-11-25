@@ -1,0 +1,39 @@
+'use strict';
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const path=require('node:path');
+const read=p=>fs.readFileSync(path.join(__dirname,'..',p),'utf8');
+const java=read('native/android/app/src/main/java/app/minternet/browser/MainActivity.java');
+const bridge=read('native/android/app/src/main/chrome/android-bridge.js');
+const gradle=read('native/android/app/build.gradle');
+const smoke=read('native/android/scripts/smoke.sh');
+test('Android packages the canonical desktop frontend without a mobile UI fork',()=>{
+  assert.match(gradle,/from\(rootProject\.file\('\.\.\/\.\.\/ui'\)\)/);
+  assert.match(gradle,/bundleSharedChrome/);
+  assert.match(gradle,/android-bridge\.js/);
+  assert.match(java,/CHROME_URL=CHROME_ORIGIN\+"\/assets\/chrome\/index\.html"/);
+  assert.match(smoke,/grep -qi "Tab Groups"/);
+  assert.match(smoke,/grep -qi "Close Settings"/);
+});
+test('privileged chrome bridge is origin and main-frame restricted, never attached to website views',()=>{
+  assert.match(java,/addWebMessageListener\(sharedChrome,"MinternetAndroid"/);
+  assert.match(java,/!isMainFrame\|\|!CHROME_ORIGIN\.equals/);
+  assert.match(java,/setAllowFileAccess\(false\)/);
+  assert.doesNotMatch(java,/addJavascriptInterface/);
+  assert.match(java,/private void prepareWebView\(BrowserTab tab\)/);
+  assert.match(java,/handler\.cancel\(\)/);
+  assert.match(java,/This desktop action is not implemented on Android/);
+});
+test('real Android state, settings, search providers, and shared context menus are bridged',()=>{
+  assert.match(java,/case "browser-preferences"/);
+  assert.match(java,/case "tab-limit-set"/);
+  assert.match(java,/case "mobile-auto-unload-set"/);
+  assert.match(java,/chatgpt\.com\/\?temporary-chat=true&q=/);
+  assert.match(java,/window\.minternetMenus\?\.site/);
+  assert.match(java,/payload\.put\("linkUrl",extra\)/);
+  assert.match(bridge,/new MouseEvent\('contextmenu'/);
+  assert.match(bridge,/window\.minternet=\{/);
+  assert.match(bridge,/mobile-layout/);
+  assert.match(java,/restoreLegacyChrome/);
+});

@@ -10,3 +10,7 @@ html.android-shared-chrome .minternet-volume { flex:0 1 auto; min-width:0; }
 html.android-shared-chrome .volume-slider-wrap { width:clamp(20px,12vw,120px);min-width:0; }
 html.android-shared-chrome .address-wrap { min-width:40px; }
 html.android-shared-chrome .bookmark-panel,html.android-shared-chrome .system-popup-root { max-width:calc(100vw - 8px); }
+
+/* Keep the desktop toolbar inside the available host viewport. */
+html.android-shared-chrome .toolbar .address-wrap { min-width: 46px !important; }
+html.android-shared-chrome .toolbar .minternet-volume { max-width: 25vw; }

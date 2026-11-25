@@ -19,7 +19,7 @@ import sys,xml.etree.ElementTree as ET,re
 root=ET.parse('/tmp/minternet-window.xml').getroot()
 wanted=sys.argv[1]
 for node in root.iter('node'):
-    if node.get('content-desc')==wanted:
+    if wanted.casefold() in [(node.get('content-desc') or '').casefold(), (node.get('text') or '').casefold()]:
         nums=list(map(int,re.findall(r'\d+',node.attrib['bounds'])))
         print((nums[0]+nums[2])//2, (nums[1]+nums[3])//2)
         break
@@ -51,6 +51,17 @@ tap_by_description "Close isolated private window"
 sleep 3
 dump
 grep -q "Open isolated private window" /tmp/minternet-window.xml
+
+# A native fallback must never masquerade as desktop UI parity.
+grep -qi "Tab Groups" /tmp/minternet-window.xml
+tap_by_description "Settings"
+sleep 1
+dump
+grep -qi "Close Settings" /tmp/minternet-window.xml
+grep -qi "Bookmark Bar" /tmp/minternet-window.xml
+adb shell screencap -p /sdcard/minternet-desktop-settings.png
+adb pull /sdcard/minternet-desktop-settings.png /tmp/minternet-desktop-settings.png >/dev/null
+tap_by_description "Close Settings"
 
 # Verify HTTPS navigation updates the in-app address bar and DOES NOT launch Chrome.
 tap_by_description "New tab"

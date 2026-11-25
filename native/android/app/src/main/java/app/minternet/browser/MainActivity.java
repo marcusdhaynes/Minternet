@@ -360,6 +360,11 @@ public class MainActivity extends Activity {
                 @Override public void onReceivedError(WebView v,WebResourceRequest request,android.webkit.WebResourceError error){
                     if(request.isForMainFrame())restoreLegacyChrome();
                 }
+                @Override public boolean onRenderProcessGone(WebView v,android.webkit.RenderProcessGoneDetail detail){
+                    restoreLegacyChrome();
+                    if(v.getParent() instanceof ViewGroup)((ViewGroup)v.getParent()).removeView(v);
+                    v.destroy();sharedChrome=null;return true;
+                }
             });
             androidx.webkit.WebViewCompat.addWebMessageListener(sharedChrome,"MinternetAndroid",
                 java.util.Collections.singleton(CHROME_ORIGIN),(view,message,origin,isMainFrame,reply)->{
@@ -377,6 +382,7 @@ public class MainActivity extends Activity {
                 });
             chromeLayer.addView(sharedChrome,new FrameLayout.LayoutParams(-1,-1));
             sharedChrome.loadUrl(CHROME_URL);
+            idleHandler.postDelayed(()->{if(!sharedReady&&sharedChrome!=null)restoreLegacyChrome();},15000);
         }catch(Exception error){restoreLegacyChrome();}
     }
     private void restoreLegacyChrome(){
@@ -437,8 +443,8 @@ public class MainActivity extends Activity {
                 .put("pageUrl",tab.url);
             String extra=hit.getExtra();
             if(extra!=null&&validHttps(extra)){
-                if(kind==WebView.HitTestResult.IMAGE_TYPE)payload.put("mediaUrl",extra).put("kind","image");
-                else payload.put("href",extra).put("kind","link");
+                if(kind==WebView.HitTestResult.IMAGE_TYPE)payload.put("sourceUrl",extra).put("kind","image");
+                else payload.put("linkUrl",extra).put("kind","link");
             }else return false;
             sharedOverlay=true;
             sharedChrome.evaluateJavascript("window.minternetMenus?.site("+payload.toString()+")",null);
@@ -488,7 +494,8 @@ public class MainActivity extends Activity {
                 if(dashboardOpen&&active!=null&&!"about:blank".equals(active.url)){
                     if(newTab("about:blank",true)==null)return new JSONObject().put("message","Tab limit reached.");
                 }
-                navigate(input);break;}
+                String engine=value instanceof JSONObject?((JSONObject)value).optString("searchEngine","google"):"google";
+                navigate(input,engine);break;}
             case "home":dashboardOpen=true;updateDashboard();break;
             case "back":if(active!=null&&active.web!=null&&active.web.canGoBack()){dashboardOpen=false;active.web.goBack();}break;
             case "forward":if(active!=null&&active.web!=null&&active.web.canGoForward()){dashboardOpen=false;active.web.goForward();}break;
@@ -776,7 +783,8 @@ public class MainActivity extends Activity {
         return currentIndex>=0&&currentIndex<tabs.size()?tabs.get(currentIndex):null;
     }
 
-    private String normalized(String input) {
+    private String normalized(String input) {return normalized(input,"google");}
+    private String normalized(String input,String engine) {
         String s=input.trim();
         if(s.isEmpty())return "about:blank";
         if(s.equals("about:blank"))return s;
@@ -789,11 +797,19 @@ public class MainActivity extends Activity {
         }
         if(s.matches("(?i)^(?:[a-z0-9-]+\\.)+[a-z]{2,}(?::[0-9]+)?(?:[/?:#].*)?$"))
             return "https://"+s;
-        return "https://duckduckgo.com/?q="+Uri.encode(s);
+        String prefix;
+        switch(engine){
+            case "chatgpt":prefix="https://chatgpt.com/?q=";break;
+            case "chatgpt-private":prefix="https://chatgpt.com/?temporary-chat=true&q=";break;
+            case "duckduckgo":prefix="https://duckduckgo.com/?q=";break;
+            default:prefix="https://www.google.com/search?q=";
+        }
+        return prefix+Uri.encode(s);
     }
 
-    private void navigate(String input) {
-        String url=normalized(input);
+    private void navigate(String input){navigate(input,"google");}
+    private void navigate(String input,String engine) {
+        String url=normalized(input,engine);
         if(url==null){
             new AlertDialog.Builder(this).setMessage("Only HTTPS addresses and searches are allowed. Insecure or local schemes are blocked.").setPositiveButton("OK",null).show();
             return;

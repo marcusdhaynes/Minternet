@@ -35,3 +35,10 @@ The verified APK is also published to the permanent **android-latest** release, 
 https://github.com/marcusdhaynes/Minternet/releases/download/android-latest/Minternet-Android.apk
 
 **Existing installs from the old debug builds:** the ephemeral debug keys are unrecoverable, so a one-time migration is required — see [MIGRATION.md](MIGRATION.md) for the verified root cause and the step-by-step procedure. After that single migration, all updates install in place with data preserved.
+
+
+## Shared desktop interface on Android
+
+Android bundles the canonical `ui/index.html`, CSS and JavaScript at build time. It no longer needs a separate recreation of desktop tabs, settings, bookmark folders, tab groups, dropdowns or browser-owned chrome context menus. A separate transparent trusted WebView hosts the desktop chrome above the existing native website WebViews. Its message bridge is limited to the bundled HTTPS asset origin and the main frame; websites are not granted the bridge. Android system bars and window controls are host-specific. The legacy native controls remain an emergency fallback if the system WebView does not support the bridge or its renderer fails.
+
+The shared interface does not itself implement every desktop engine capability. Android has native handlers for navigation, tab lifecycle, dashboard, pinning, homepage and tab limit, search engine URL routing, inactive-tab settings and existing Google account setup. The existing desktop frontend supplies local bookmark and group presentation/storage. Desktop-only encrypted vault, extension, Tor, downloads, split-view, amplified audio, secret bookmark and other native commands still require Android implementations. Unsupported commands return explicit errors instead of simulated success; existing Android private-process isolation and signing are unchanged. Link/image context menus use Android hit-test information and the desktop renderer; native editable text selection still uses the Android engine. Full feature parity and Android/iOS visual parity require additional validation and work.

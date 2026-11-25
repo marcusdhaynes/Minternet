@@ -18,7 +18,10 @@
       const id=++serial;
       const timer=setTimeout(()=>{pending.delete(id);resolve({message:'Android command timed out: '+name});},6000);
       pending.set(id,result=>{clearTimeout(timer);resolve(result);});
-      try{native.postMessage(JSON.stringify({id,name,value:value??null}));}
+      try{
+        const payload=name==='navigate'&&typeof value==='string'?{address:value,searchEngine:window.minternetSearch?.getEngine?.()||'google'}:value??null;
+        native.postMessage(JSON.stringify({id,name,value:payload}));
+      }
       catch{clearTimeout(timer);pending.delete(id);resolve({message:'Android bridge unavailable'});}
     });
   }
@@ -36,7 +39,7 @@
     scheduleLayout();
   };
   const visible=el=>!el.hidden&&el.getClientRects().length>0&&getComputedStyle(el).visibility!=='hidden'&&getComputedStyle(el).display!=='none';
-  const overlaySelector='.system-popup-root,.bookmark-overlay,.vault-screen,.secret-screen,.secret-pending-screen,.group-editor-screen,.tor-action-menu,[role="dialog"],.search-provider-menu,.media-devices-popup,.downloads-popup,.address-suggestions,.payment-popup';
+  const overlaySelector='.system-popup-root,.bookmark-overlay,.vault-screen,.secret-screen,.secret-pending-screen,.group-editor-screen,.tor-action-menu,[role="dialog"],.search-provider-menu,.media-devices-popup,.downloads-popup,.address-suggestions,#addressSuggestions,.payment-popup,[role="menu"],[role="listbox"]';
   function scheduleLayout(){
     if(frame)return;
     frame=requestAnimationFrame(()=>{
@@ -73,19 +76,20 @@
     document.addEventListener('pointerup',scheduleLayout,true);
     window.addEventListener('resize',scheduleLayout);
     // Mobile touch-and-hold invokes the same browser-owned menu as right-click.
-    let hold=0,initial=null;
+    let hold=0,initial=null,blockClickUntil=0;
     const cancel=()=>{clearTimeout(hold);hold=0;initial=null;};
     document.addEventListener('pointerdown',event=>{
       cancel();
-      if(event.pointerType!=='touch'||event.target.closest('input,textarea,select,[contenteditable]'))return;
+      if(event.pointerType!=='touch'||event.target.closest('input,textarea,select,[contenteditable],#connectionIcon,#volumeButton'))return;
       const target=event.target;initial={x:event.clientX,y:event.clientY};
       hold=setTimeout(()=>{
         const e=new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:initial.x,clientY:initial.y,button:2});
-        target.dispatchEvent(e);scheduleLayout();hold=0;initial=null;
+        target.dispatchEvent(e);blockClickUntil=Date.now()+900;scheduleLayout();hold=0;initial=null;
       },550);
     },true);
     document.addEventListener('pointermove',event=>{if(initial&&Math.hypot(event.clientX-initial.x,event.clientY-initial.y)>8)cancel();},true);
     for(const type of ['pointerup','pointercancel'])document.addEventListener(type,cancel,true);
+    document.addEventListener('click',event=>{if(Date.now()<blockClickUntil){blockClickUntil=0;event.preventDefault();event.stopImmediatePropagation();}},true);
     const ready=await command('mobile-ready');
     if(Array.isArray(ready.tabs)){
       window.__minternetMobileState(ready);
