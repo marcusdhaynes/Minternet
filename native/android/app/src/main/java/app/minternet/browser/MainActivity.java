@@ -79,6 +79,7 @@ public class MainActivity extends Activity {
         WebView web;
         int localId;
         String title="New Tab";
+        String findQuery="";
         String url="about:blank";
         Button button;
         Button closeButton;
@@ -156,7 +157,10 @@ public class MainActivity extends Activity {
         }
         getWindow().setStatusBarColor(isolatedPrivate?0xff27203e:BG);
         getWindow().setNavigationBarColor(BG);
-        WebView.setWebContentsDebuggingEnabled(false);
+        // Only emulator/debug APKs expose DevTools; distributed APKs never do.
+        if((getApplicationInfo().flags&android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE)!=0)
+            WebView.setWebContentsDebuggingEnabled(true);
+        else WebView.setWebContentsDebuggingEnabled(false);
         LinearLayout root=new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BG);
@@ -376,7 +380,7 @@ public class MainActivity extends Activity {
                         long id=req.optLong("id",-1);
                         String name=req.optString("name");
                         Object value=req.opt("value");
-                        JSONObject result=sharedCommand(name,value);
+                        Object result=sharedCommand(name,value);
                         reply.postMessage(new JSONObject().put("id",id).put("result",result).toString());
                     }catch(Exception ignored){}
                 });
@@ -451,7 +455,7 @@ public class MainActivity extends Activity {
             return true;
         }catch(Exception error){return false;}
     }
-    private JSONObject sharedCommand(String name,Object value) throws Exception{
+    private Object sharedCommand(String name,Object value) throws Exception{
         JSONObject ok=new JSONObject().put("ok",true);
         android.content.SharedPreferences prefs=getSharedPreferences("minternet.settings",MODE_PRIVATE);
         BrowserTab active=current(),target=sharedTab(value);
@@ -504,6 +508,43 @@ public class MainActivity extends Activity {
                 if(target!=null){if(target.web!=null)target.web.reload();else{switchTab(tabs.indexOf(target));}}break;
             case "unload-tab":if(target!=null)unloadTab(target,true);break;
             case "unload-others":for(BrowserTab t:new ArrayList<>(tabs))if(t!=active&&t!=target)unloadTab(t,true);break;
+            case "history-search":return historyResults(string,0,12);
+            case "history-list":{
+                JSONObject filter=value instanceof JSONObject?(JSONObject)value:new JSONObject();
+                return historyResults(filter.optString("query"),Math.max(0,filter.optInt("offset",0)),Math.max(1,Math.min(100,filter.optInt("limit",75))));}
+            case "history-remove":if(!isolatedPrivate)removeHistory(string);return ok;
+            case "history-clear":if(!isolatedPrivate)getSharedPreferences("minternet.history",MODE_PRIVATE).edit().remove("visits").apply();return ok;
+            case "navigation-history-list":{
+                org.json.JSONArray list=new org.json.JSONArray();
+                if(active==null||active.web==null)return list;
+                android.webkit.WebBackForwardList history=active.web.copyBackForwardList();
+                int direction="back".equals(string)?-1:1;
+                for(int i=history.getCurrentIndex()+direction;i>=0&&i<history.getSize()&&list.length()<50;i+=direction){
+                    android.webkit.WebHistoryItem item=history.getItemAtIndex(i);
+                    list.put(new JSONObject().put("index",i).put("url",item.getUrl()).put("title",item.getTitle()));
+                }return list;}
+            case "navigation-history-jump":
+                if(active!=null&&active.web!=null&&value instanceof Number){
+                    android.webkit.WebBackForwardList h=active.web.copyBackForwardList();
+                    int i=((Number)value).intValue();
+                    if(i>=0&&i<h.getSize()){dashboardOpen=false;active.web.goBackOrForward(i-h.getCurrentIndex());}
+                }break;
+            case "find-bar-set":
+                if(!Boolean.TRUE.equals(value)&&active!=null&&active.web!=null){active.web.clearMatches();active.findQuery="";}return ok;
+            case "find-page":{
+                if(active==null||active.web==null||!(value instanceof JSONObject))return new JSONObject().put("message","No active page");
+                JSONObject query=(JSONObject)value;
+                String needle=query.optString("query");
+                WebView site=active.web;
+                if(needle.isEmpty()){site.clearMatches();return ok;}
+                site.setFindListener((ordinal,count,done)->{
+                    if(!done||sharedChrome==null||current()==null||current().web!=site)return;
+                    String label=count==0?"No matches":(ordinal+1)+"/"+count;
+                    sharedChrome.evaluateJavascript("window.__minternetMobileFind?.("+JSONObject.quote(needle)+","+JSONObject.quote(label)+")",null);
+                });
+                if(needle.equals(active.findQuery))site.findNext(!query.optBoolean("backward",false));
+                else{active.findQuery=needle;site.findAllAsync(needle);}
+                return ok;}
             case "tab-limit-get":return ok.put("tabLimit",configuredTabLimit());
             case "tab-limit-set":{
                 if(!(value instanceof Number))return new JSONObject().put("message","Invalid Tab Limit.");
@@ -536,6 +577,48 @@ public class MainActivity extends Activity {
             default:return new JSONObject().put("message","This desktop action is not implemented on Android: "+name);
         }
         publishSharedState();return ok;
+    }
+
+    private org.json.JSONArray storedHistory(){
+        if(isolatedPrivate)return new org.json.JSONArray();
+        try{return new org.json.JSONArray(getSharedPreferences("minternet.history",MODE_PRIVATE).getString("visits","[]"));}
+        catch(Exception ignored){return new org.json.JSONArray();}
+    }
+    private void saveHistory(org.json.JSONArray entries){
+        if(!isolatedPrivate)getSharedPreferences("minternet.history",MODE_PRIVATE).edit().putString("visits",entries.toString()).apply();
+    }
+    private void recordHistory(BrowserTab tab){
+        if(isolatedPrivate||!validHttps(tab.url))return;
+        try{
+            org.json.JSONArray previous=storedHistory(),next=new org.json.JSONArray();
+            next.put(new JSONObject().put("url",tab.url).put("title",tab.title));
+            for(int i=0;i<previous.length()&&next.length()<1000;i++){
+                JSONObject entry=previous.optJSONObject(i);
+                if(entry!=null&&!tab.url.equals(entry.optString("url")))next.put(entry);
+            }
+            saveHistory(next);
+        }catch(Exception ignored){}
+    }
+    private void removeHistory(String url){
+        org.json.JSONArray previous=storedHistory(),next=new org.json.JSONArray();
+        for(int i=0;i<previous.length();i++){
+            JSONObject entry=previous.optJSONObject(i);
+            if(entry!=null&&!url.equals(entry.optString("url")))next.put(entry);
+        }
+        saveHistory(next);
+    }
+    private org.json.JSONArray historyResults(String query,int offset,int limit){
+        org.json.JSONArray previous=storedHistory(),results=new org.json.JSONArray();
+        String q=query.toLowerCase(java.util.Locale.ROOT);int skipped=0;
+        for(int i=0;i<previous.length()&&results.length()<limit;i++){
+            JSONObject entry=previous.optJSONObject(i);
+            if(entry==null)continue;
+            String text=(entry.optString("url")+" "+entry.optString("title")).toLowerCase(java.util.Locale.ROOT);
+            if(!text.contains(q))continue;
+            if(skipped++<offset)continue;
+            results.put(entry);
+        }
+        return results;
     }
 
     private static final String SAFE_TO_UNLOAD="(()=>{try{\n if(document.readyState!=='complete'||document.hasFocus()||window.onbeforeunload!==null)return false;\n if(document.querySelector('iframe,canvas,[aria-busy=\"true\"],[role=\"progressbar\"],progress,.loading,.spinner'))return false;\n if([...document.querySelectorAll('audio,video')].some(m=>!m.paused||m.seeking||m.networkState===m.NETWORK_LOADING))return false;\n if([...document.querySelectorAll('input,textarea,select')].some(e=>{\n  if(['hidden','submit','button','reset'].includes(e.type))return false;\n  if(e.type==='checkbox'||e.type==='radio')return e.checked!==e.defaultChecked;\n  if(e.type==='file')return e.files?.length>0;\n  if(e.tagName==='SELECT')return [...e.options].some(o=>o.selected!==o.defaultSelected);\n  return !!e.value;\n }))return false;\n if([...document.querySelectorAll('[contenteditable=\"true\"],[role=\"textbox\"]')].some(e=>e.textContent?.trim()))return false;\n const r=performance.getEntriesByType('resource');if(r.length&&performance.now()-(r[r.length-1].responseEnd||r[r.length-1].startTime)<15000)return false;\n return true;\n }catch(e){return false}})()";
@@ -863,6 +946,8 @@ public class MainActivity extends Activity {
             @Override public void onPageFinished(WebView v,String url) {
                 if(tab.web!=v)return;
                 tab.url=url;tab.loading=false;
+                if(v.getTitle()!=null&&!v.getTitle().isEmpty())tab.title=v.getTitle();
+                recordHistory(tab);
                 Bitmap favicon=v.getFavicon();
                 if(favicon!=null)tab.icon=favicon;
                 updateTabLabels();

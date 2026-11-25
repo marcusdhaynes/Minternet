@@ -23,6 +23,8 @@ jobs:
           echo "y" | sdkmanager --licenses >/dev/null || true
           cd native/android
           gradle :app:assembleDebug --no-daemon
+      - name: Install debug-only desktop UI test client
+        run: python3 -m pip install --quiet websocket-client
       - name: Allow KVM for Android emulator
         run: |
           if test -e /dev/kvm; then sudo chmod 666 /dev/kvm; fi

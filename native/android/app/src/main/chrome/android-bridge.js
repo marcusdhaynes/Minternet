@@ -52,6 +52,10 @@
       if(key!==layoutKey){layoutKey=key;void command('mobile-layout',{header:height,overlay});}
     });
   }
+  window.__minternetMobileFind=(query,label)=>{
+    const input=document.getElementById('findQuery'),output=document.getElementById('findResult');
+    if(input?.value.trim()===query&&output)output.textContent=label;
+  };
   window.__minternetMobileCloseMenu=()=>{
     document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
     const close=document.querySelector('#bookmarkOverlay:not([hidden]) .bookmark-panel:not([hidden]) .bookmark-close');
@@ -80,7 +84,7 @@
     const cancel=()=>{clearTimeout(hold);hold=0;initial=null;};
     document.addEventListener('pointerdown',event=>{
       cancel();
-      if(event.pointerType!=='touch'||event.target.closest('input,textarea,select,[contenteditable],#connectionIcon,#volumeButton'))return;
+      if(event.pointerType!=='touch'||event.target.closest('input,textarea,select,[contenteditable],#connectionIcon,#volumeButton,#back,#forward'))return;
       const target=event.target;initial={x:event.clientX,y:event.clientY};
       hold=setTimeout(()=>{
         const e=new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:initial.x,clientY:initial.y,button:2});

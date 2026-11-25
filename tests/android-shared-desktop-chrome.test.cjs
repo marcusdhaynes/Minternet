@@ -7,14 +7,15 @@ const read=p=>fs.readFileSync(path.join(__dirname,'..',p),'utf8');
 const java=read('native/android/app/src/main/java/app/minternet/browser/MainActivity.java');
 const bridge=read('native/android/app/src/main/chrome/android-bridge.js');
 const gradle=read('native/android/app/build.gradle');
-const smoke=read('native/android/scripts/smoke.sh');
+const smoke=read('native/android/scripts/shared-chrome-smoke.py');
 test('Android packages the canonical desktop frontend without a mobile UI fork',()=>{
   assert.match(gradle,/from\(rootProject\.file\('\.\.\/\.\.\/ui'\)\)/);
   assert.match(gradle,/bundleSharedChrome/);
   assert.match(gradle,/android-bridge\.js/);
   assert.match(java,/CHROME_URL=CHROME_ORIGIN\+"\/assets\/chrome\/index\.html"/);
-  assert.match(smoke,/grep -qi "Tab Groups"/);
-  assert.match(smoke,/grep -qi "Close Settings"/);
+  assert.match(smoke,/page\.visible\("#tabGroups"\)/);
+  assert.match(smoke,/page\.visible\("#bookmarkSettings"\)/);
+  assert.match(smoke,/page\.visible\("\.search-provider-menu"\)/);
 });
 test('privileged chrome bridge is origin and main-frame restricted, never attached to website views',()=>{
   assert.match(java,/addWebMessageListener\(sharedChrome,"MinternetAndroid"/);
