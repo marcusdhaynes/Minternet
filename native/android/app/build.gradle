@@ -40,8 +40,26 @@ android {
 
 // Native Google account authentication and push-only Realtime WebSockets.
 dependencies {
+    implementation 'androidx.webkit:webkit:1.12.1'
     implementation 'androidx.credentials:credentials:1.6.0'
     implementation 'androidx.credentials:credentials-play-services-auth:1.6.0'
     implementation 'com.google.android.libraries.identity.googleid:googleid:1.2.1'
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 }
+
+// Bundle the same versioned desktop frontend; no mobile fork of its UI.
+def sharedChromeAssets=layout.buildDirectory.dir('generated/sharedChromeAssets')
+tasks.register('bundleSharedChrome', Sync) {
+    into sharedChromeAssets
+    from(rootProject.file('../../ui')) { into 'chrome'; exclude '**/*.b64' }
+    from(file('src/main/chrome')) { into 'chrome' }
+    doLast {
+        File index=new File(sharedChromeAssets.get().asFile,'chrome/index.html')
+        String html=index.getText('UTF-8')
+        if(!html.contains('<script src="./native-bridge.js" defer></script>'))throw new GradleException('Desktop bridge entry point missing')
+        html=html.replace('<script src="./native-bridge.js" defer></script>', '<link rel="stylesheet" href="./android-chrome.css"><script src="./android-bridge.js" defer></script><script src="./native-bridge.js" defer></script>')
+        index.setText(html,'UTF-8')
+    }
+}
+android.sourceSets.main.assets.srcDir(sharedChromeAssets)
+tasks.named('preBuild').configure { dependsOn tasks.named('bundleSharedChrome') }

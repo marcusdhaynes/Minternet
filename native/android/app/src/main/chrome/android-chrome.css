@@ -1,0 +1,12 @@
+/* Host integration only. All actual chrome, settings, menus and dashboard
+   styling is inherited from the bundled desktop styles.css. */
+html.android-shared-chrome.android-live-site,
+html.android-shared-chrome.android-live-site body { background: transparent !important; }
+html.android-shared-chrome .window-actions { display:none; }
+html.android-shared-chrome .chrome { touch-action:pan-x; }
+html.android-shared-chrome .tab-row { min-width:0; }
+html.android-shared-chrome .toolbar { min-width:0; }
+html.android-shared-chrome .minternet-volume { flex:0 1 auto; min-width:0; }
+html.android-shared-chrome .volume-slider-wrap { width:clamp(20px,12vw,120px);min-width:0; }
+html.android-shared-chrome .address-wrap { min-width:40px; }
+html.android-shared-chrome .bookmark-panel,html.android-shared-chrome .system-popup-root { max-width:calc(100vw - 8px); }

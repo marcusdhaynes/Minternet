@@ -59,6 +59,14 @@ public class MainActivity extends Activity {
     private FrameLayout content;
     private View dashboard;
     private boolean dashboardOpen=false;
+    private WebView sharedChrome;
+    private ChromeLayer chromeLayer;
+    private View legacyChrome;
+    private Button privateAction;
+    private boolean sharedReady=false,sharedOverlay=false;
+    private int sharedHeader=0,nextLocalTabId=1;
+    private float lastSiteX,lastSiteY;
+    private String lastSharedSnapshot="";
     private Button back,forward,reload;
     private boolean updatingAddress=false;
     private MinternetSync sync;
@@ -69,6 +77,7 @@ public class MainActivity extends Activity {
 
     private static final class BrowserTab {
         WebView web;
+        int localId;
         String title="New Tab";
         String url="about:blank";
         Button button;
@@ -171,6 +180,7 @@ public class MainActivity extends Activity {
             android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
             new int[]{0xff1d2333,BG}));
         root.addView(chrome,new LinearLayout.LayoutParams(-1,dp(52)));
+        legacyChrome=chrome;
         LinearLayout top=new LinearLayout(this);
         top.setGravity(android.view.Gravity.CENTER_VERTICAL);
         top.setPadding(dp(5),0,dp(4),0);
@@ -191,6 +201,7 @@ public class MainActivity extends Activity {
         Button add=button("+","New tab");
         Button privateButton=button("◉",isolatedPrivate?"Return to normal browser":"Open isolated private window");
         privateButton.setTextColor(0xffb3a0e8);
+        privateAction=privateButton;
         Button home=button("⠿","Open Dashboard");
         chromeButton(top,add,20,20);
         chromeButton(top,privateButton,21,20);
@@ -230,7 +241,9 @@ public class MainActivity extends Activity {
         chrome.addView(controls,new LinearLayout.LayoutParams(-1,dp(30)));
         content=new FrameLayout(this);
         content.setBackgroundColor(0xff0b1120);
-        root.addView(content,new LinearLayout.LayoutParams(-1,0,1));
+        chromeLayer=new ChromeLayer();
+        root.addView(chromeLayer,new LinearLayout.LayoutParams(-1,0,1));
+        chromeLayer.addView(content,new FrameLayout.LayoutParams(-1,-1));
         dashboard=new DashboardView();
         content.addView(dashboard,new FrameLayout.LayoutParams(-1,-1));
 
@@ -295,6 +308,227 @@ public class MainActivity extends Activity {
             });
         }
         idleHandler.postDelayed(idleSweep,10000);
+        installSharedChrome();
+    }
+
+    // Desktop chrome is a separate, trusted asset-only WebView. Remote site
+    // WebViews never receive the privileged bridge or access to chrome storage.
+    private static final String CHROME_ORIGIN="https://appassets.androidplatform.net";
+    private static final String CHROME_URL=CHROME_ORIGIN+"/assets/chrome/index.html";
+    private final class ChromeLayer extends FrameLayout {
+        private boolean routeSite=false;
+        ChromeLayer(){super(MainActivity.this);}
+        @Override public boolean dispatchTouchEvent(android.view.MotionEvent event){
+            if(event.getActionMasked()==android.view.MotionEvent.ACTION_DOWN){
+                lastSiteX=event.getX()/getResources().getDisplayMetrics().density;
+                lastSiteY=event.getY()/getResources().getDisplayMetrics().density;
+                routeSite=sharedReady&&!sharedOverlay&&!dashboardOpen&&current()!=null
+                    &&!"about:blank".equals(current().url)&&event.getY()>=sharedHeader;
+            }
+            if(!routeSite)return super.dispatchTouchEvent(event);
+            android.view.MotionEvent translated=android.view.MotionEvent.obtain(event);
+            translated.offsetLocation(-content.getLeft(),-content.getTop());
+            boolean handled=content.dispatchTouchEvent(translated);
+            translated.recycle();
+            return handled;
+        }
+    }
+    private void installSharedChrome(){
+        if(!androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.WEB_MESSAGE_LISTENER))return;
+        try{
+            sharedChrome=new WebView(this);
+            sharedChrome.setBackgroundColor(Color.TRANSPARENT);
+            sharedChrome.setVisibility(View.INVISIBLE);
+            WebSettings settings=sharedChrome.getSettings();
+            settings.setJavaScriptEnabled(true);
+            settings.setDomStorageEnabled(true);
+            settings.setAllowFileAccess(false);
+            settings.setAllowContentAccess(false);
+            settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+            settings.setSupportMultipleWindows(false);
+            settings.setJavaScriptCanOpenWindowsAutomatically(false);
+            final androidx.webkit.WebViewAssetLoader assets=new androidx.webkit.WebViewAssetLoader.Builder()
+                .addPathHandler("/assets/",new androidx.webkit.WebViewAssetLoader.AssetsPathHandler(this)).build();
+            sharedChrome.setWebViewClient(new WebViewClient(){
+                @Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest request){
+                    return assets.shouldInterceptRequest(request.getUrl());
+                }
+                @Override public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest request){
+                    return !request.isForMainFrame()||!CHROME_URL.equals(request.getUrl().toString());
+                }
+                @Override public void onReceivedSslError(WebView v,SslErrorHandler handler,SslError error){handler.cancel();}
+                @Override public void onReceivedError(WebView v,WebResourceRequest request,android.webkit.WebResourceError error){
+                    if(request.isForMainFrame())restoreLegacyChrome();
+                }
+            });
+            androidx.webkit.WebViewCompat.addWebMessageListener(sharedChrome,"MinternetAndroid",
+                java.util.Collections.singleton(CHROME_ORIGIN),(view,message,origin,isMainFrame,reply)->{
+                    if(view!=sharedChrome||!isMainFrame||!CHROME_ORIGIN.equals(origin.toString()))return;
+                    String raw=message.getData();
+                    if(raw==null||raw.length()>262144)return;
+                    try{
+                        JSONObject req=new JSONObject(raw);
+                        long id=req.optLong("id",-1);
+                        String name=req.optString("name");
+                        Object value=req.opt("value");
+                        JSONObject result=sharedCommand(name,value);
+                        reply.postMessage(new JSONObject().put("id",id).put("result",result).toString());
+                    }catch(Exception ignored){}
+                });
+            chromeLayer.addView(sharedChrome,new FrameLayout.LayoutParams(-1,-1));
+            sharedChrome.loadUrl(CHROME_URL);
+        }catch(Exception error){restoreLegacyChrome();}
+    }
+    private void restoreLegacyChrome(){
+        sharedReady=false;sharedOverlay=false;sharedHeader=0;
+        if(sharedChrome!=null)sharedChrome.setVisibility(View.GONE);
+        legacyChrome.setVisibility(View.VISIBLE);
+        FrameLayout.LayoutParams size=(FrameLayout.LayoutParams)content.getLayoutParams();
+        size.topMargin=0;content.setLayoutParams(size);
+    }
+    private JSONObject sharedSnapshot() throws Exception{
+        org.json.JSONArray items=new org.json.JSONArray();
+        for(BrowserTab t:tabs){
+            items.put(new JSONObject().put("id",t.localId).put("url",t.url)
+                .put("title",t.title).put("private",isolatedPrivate).put("pinned",t.pinned)
+                .put("loading",t.loading).put("suspended",t.suspended)
+                .put("canBack",t.web!=null&&t.web.canGoBack())
+                .put("canForward",t.web!=null&&t.web.canGoForward()).put("error",""));
+        }
+        return new JSONObject().put("tabs",items).put("activeId",
+            dashboardOpen||current()==null?JSONObject.NULL:current().localId)
+            .put("extensionsCount",0);
+    }
+    private void publishSharedState(){
+        if(!sharedReady||sharedChrome==null)return;
+        try{
+            String json=sharedSnapshot().toString();
+            if(json.equals(lastSharedSnapshot))return;
+            lastSharedSnapshot=json;
+            sharedChrome.evaluateJavascript("window.__minternetMobileState?.("+json+")",null);
+        }catch(Exception ignored){}
+    }
+    private BrowserTab sharedTab(Object value){
+        if(!(value instanceof Number))return null;
+        int id=((Number)value).intValue();
+        for(BrowserTab t:tabs)if(t.localId==id)return t;
+        return null;
+    }
+    private boolean validHttps(String input){
+        try{Uri uri=Uri.parse(input);return "https".equalsIgnoreCase(uri.getScheme())&&uri.getHost()!=null&&uri.getUserInfo()==null;}
+        catch(Exception ignored){return false;}
+    }
+    private String sharedNewUrl(){
+        android.content.SharedPreferences prefs=getSharedPreferences("minternet.settings",MODE_PRIVATE);
+        return "website".equals(prefs.getString("newTabMode","dashboard"))?
+            prefs.getString("homepage","https://www.google.com/"):"about:blank";
+    }
+    private boolean showSharedSiteMenu(BrowserTab tab,WebView web){
+        if(!sharedReady||tab!=current())return false;
+        WebView.HitTestResult hit=web.getHitTestResult();
+        if(hit!=null&&hit.getType()==WebView.HitTestResult.EDIT_TEXT_TYPE)return false;
+        int kind=hit==null?0:hit.getType();
+        // Keep platform text selection usable; link/image/page context uses
+        // the exact desktop menu renderer and validated native hit-test data.
+        if(kind==WebView.HitTestResult.UNKNOWN_TYPE)return false;
+        try{
+            JSONObject payload=new JSONObject().put("tabId",tab.localId)
+                .put("x",lastSiteX).put("y",lastSiteY).put("url",tab.url)
+                .put("pageUrl",tab.url);
+            String extra=hit.getExtra();
+            if(extra!=null&&validHttps(extra)){
+                if(kind==WebView.HitTestResult.IMAGE_TYPE)payload.put("mediaUrl",extra).put("kind","image");
+                else payload.put("href",extra).put("kind","link");
+            }else return false;
+            sharedOverlay=true;
+            sharedChrome.evaluateJavascript("window.minternetMenus?.site("+payload.toString()+")",null);
+            return true;
+        }catch(Exception error){return false;}
+    }
+    private JSONObject sharedCommand(String name,Object value) throws Exception{
+        JSONObject ok=new JSONObject().put("ok",true);
+        android.content.SharedPreferences prefs=getSharedPreferences("minternet.settings",MODE_PRIVATE);
+        BrowserTab active=current(),target=sharedTab(value);
+        String string=value instanceof String?(String)value:"";
+        switch(name){
+            case "mobile-ready":
+                sharedReady=true;legacyChrome.setVisibility(View.GONE);sharedChrome.setVisibility(View.VISIBLE);
+                lastSharedSnapshot="";publishSharedState();return sharedSnapshot();
+            case "mobile-layout":{
+                if(!(value instanceof JSONObject))return ok;
+                JSONObject layout=(JSONObject)value;
+                int height=Math.max(dp(22),Math.min(dp(160),dp(layout.optInt("header",52))));
+                sharedOverlay=layout.optBoolean("overlay",false);
+                if(height!=sharedHeader){
+                    sharedHeader=height;
+                    FrameLayout.LayoutParams size=(FrameLayout.LayoutParams)content.getLayoutParams();
+                    size.topMargin=height;content.setLayoutParams(size);
+                }
+                return ok;}
+            case "snapshot":return sharedSnapshot();
+            case "chrome-overlay":sharedOverlay=Boolean.TRUE.equals(value);return ok;
+            case "new":newTab(sharedNewUrl(),true);break;
+            case "new-url":case "new-background-url":case "site-link-new-tab":case "open-new-browser-window":{
+                String url=value instanceof JSONObject?((JSONObject)value).optString("url"):string;
+                if(!validHttps(url))return new JSONObject().put("message","Only HTTPS addresses are allowed.");
+                newTab(url,!"new-background-url".equals(name));break;}
+            case "new-private":case "privacy":privateAction.performClick();return ok;
+            case "activate":if(target!=null)switchTab(tabs.indexOf(target));break;
+            case "deselect":dashboardOpen=true;updateDashboard();break;
+            case "close":
+                if(target!=null){boolean wasActive=target==active;closeTab(target);if(wasActive){dashboardOpen=true;updateDashboard();}}break;
+            case "close-many":
+                if(value instanceof org.json.JSONArray){org.json.JSONArray ids=(org.json.JSONArray)value;for(int i=0;i<ids.length();i++){BrowserTab t=sharedTab(ids.opt(i));if(t!=null)closeTab(t);}}break;
+            case "duplicate":if(target!=null)newTab(target.url,true);break;
+            case "pin":case "unpin":case "toggle-pin":
+                if(target!=null){target.pinned="pin".equals(name)||("toggle-pin".equals(name)&&!target.pinned);broadcastTabs();}break;
+            case "navigate":{
+                String input=value instanceof JSONObject?((JSONObject)value).optString("address"):string;
+                if(input.trim().isEmpty())return ok;
+                if(dashboardOpen&&active!=null&&!"about:blank".equals(active.url)){
+                    if(newTab("about:blank",true)==null)return new JSONObject().put("message","Tab limit reached.");
+                }
+                navigate(input);break;}
+            case "home":dashboardOpen=true;updateDashboard();break;
+            case "back":if(active!=null&&active.web!=null&&active.web.canGoBack()){dashboardOpen=false;active.web.goBack();}break;
+            case "forward":if(active!=null&&active.web!=null&&active.web.canGoForward()){dashboardOpen=false;active.web.goForward();}break;
+            case "reload":if(active!=null)reload.performClick();break;
+            case "reload-tab":
+                if(target!=null){if(target.web!=null)target.web.reload();else{switchTab(tabs.indexOf(target));}}break;
+            case "unload-tab":if(target!=null)unloadTab(target,true);break;
+            case "unload-others":for(BrowserTab t:new ArrayList<>(tabs))if(t!=active&&t!=target)unloadTab(t,true);break;
+            case "tab-limit-get":return ok.put("tabLimit",configuredTabLimit());
+            case "tab-limit-set":{
+                if(!(value instanceof Number))return new JSONObject().put("message","Invalid Tab Limit.");
+                int n=((Number)value).intValue();
+                if(n<0||n>1000000)return new JSONObject().put("message","Invalid Tab Limit.");
+                prefs.edit().putInt("tabLimit",n).apply();return ok.put("tabLimit",n);}
+            case "browser-preferences":return ok.put("homepage",prefs.getString("homepage","https://www.google.com/"))
+                .put("newTabMode",prefs.getString("newTabMode","dashboard")).put("tabLimit",configuredTabLimit())
+                .put("privateLoginSharing",false).put("autoUnloadMinutes",autoUnloadMinutes()).put("usingSystemDownloads",true);
+            case "browser-homepage-set":
+                if(!validHttps(string))return new JSONObject().put("message","Only HTTPS homepages are allowed.");
+                prefs.edit().putString("homepage",string).apply();return ok.put("homepage",string);
+            case "browser-new-tab-mode-set":
+                if(!"website".equals(string)&&!"dashboard".equals(string))return new JSONObject().put("message","Invalid New Tab mode.");
+                prefs.edit().putString("newTabMode",string).apply();return ok.put("newTabMode",string);
+            case "mobile-auto-unload-set":
+                if(value instanceof Number){int n=((Number)value).intValue();if(n>=0&&n<=120)prefs.edit().putInt("autoUnloadMinutes",n).apply();}return ok;
+            case "auto-unload-check":checkIdleTabs();return ok;
+            case "site-context-copy":
+                ((android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(android.content.ClipData.newPlainText("Minternet",string));return ok;
+            case "mobile-google":if(!isolatedPrivate)configureGoogle();return ok;
+            case "mobile-sync-stop":if(sync!=null)sync.stop();return ok;
+            case "undo":if(sync!=null&&sync.isActive()){sync.undo();return ok;}return new JSONObject().put("undone",false);
+            case "focus-address":sharedChrome.requestFocus();return ok;
+            case "quit":finish();return ok;
+            case "prepare-tab":case "session-refresh-urls":case "bookmark-bar-visibility":return ok;
+            case "extensions-list":return new JSONObject().put("extensions",new org.json.JSONArray());
+            case "split-status":return new JSONObject().put("active",false);
+            case "startup-status":return new JSONObject().put("armed",false);
+            default:return new JSONObject().put("message","This desktop action is not implemented on Android: "+name);
+        }
+        publishSharedState();return ok;
     }
 
     private static final String SAFE_TO_UNLOAD="(()=>{try{\n if(document.readyState!=='complete'||document.hasFocus()||window.onbeforeunload!==null)return false;\n if(document.querySelector('iframe,canvas,[aria-busy=\"true\"],[role=\"progressbar\"],progress,.loading,.spinner'))return false;\n if([...document.querySelectorAll('audio,video')].some(m=>!m.paused||m.seeking||m.networkState===m.NETWORK_LOADING))return false;\n if([...document.querySelectorAll('input,textarea,select')].some(e=>{\n  if(['hidden','submit','button','reset'].includes(e.type))return false;\n  if(e.type==='checkbox'||e.type==='radio')return e.checked!==e.defaultChecked;\n  if(e.type==='file')return e.files?.length>0;\n  if(e.tagName==='SELECT')return [...e.options].some(o=>o.selected!==o.defaultSelected);\n  return !!e.value;\n }))return false;\n if([...document.querySelectorAll('[contenteditable=\"true\"],[role=\"textbox\"]')].some(e=>e.textContent?.trim()))return false;\n const r=performance.getEntriesByType('resource');if(r.length&&performance.now()-(r[r.length-1].responseEnd||r[r.length-1].startTime)<15000)return false;\n return true;\n }catch(e){return false}})()";
@@ -574,6 +808,7 @@ public class MainActivity extends Activity {
     private void prepareWebView(BrowserTab tab) {
         WebView web=new WebView(this);
         tab.web=web;
+        web.setOnLongClickListener(v->showSharedSiteMenu(tab,web));
         web.setBackgroundColor(Color.WHITE);
         WebSettings s=web.getSettings();
         s.setJavaScriptEnabled(true);
@@ -657,6 +892,7 @@ public class MainActivity extends Activity {
             return null;
         }
         BrowserTab tab=new BrowserTab();
+        tab.localId=nextLocalTabId++;
         prepareWebView(tab);
         tab.url=url;
         tab.inactiveSince=SystemClock.elapsedRealtime();
@@ -752,6 +988,7 @@ public class MainActivity extends Activity {
                 selected?0xff505a76:0,6));
             tab.button.setTextColor(tab.suspended?0xff8a8c96:tab==current()?Color.WHITE:0xffc5cde6);
         }
+        publishSharedState();
     }
     private void updateUI() {
         BrowserTab tab=current();
@@ -783,6 +1020,7 @@ public class MainActivity extends Activity {
     }
 
     @Override public void onBackPressed() {
+        if(sharedReady&&sharedOverlay){sharedChrome.evaluateJavascript("window.__minternetMobileCloseMenu?.()",null);return;}
         BrowserTab tab=current();
         if(tab!=null&&tab.web.canGoBack())tab.web.goBack();
         else if(tabs.size()>1)closeTab(tab);
@@ -795,6 +1033,7 @@ public class MainActivity extends Activity {
     }
     @Override protected void onDestroy() {
         if(sync!=null)sync.stop();
+        if(sharedChrome!=null){if(sharedChrome.getParent() instanceof ViewGroup)((ViewGroup)sharedChrome.getParent()).removeView(sharedChrome);sharedChrome.destroy();sharedChrome=null;sharedReady=false;}
         idleHandler.removeCallbacks(idleSweep);
         for(BrowserTab tab:new ArrayList<>(tabs)){
             if(tab.web==null)continue;
