@@ -14,6 +14,7 @@
   const reusedChips=new Map(),reusedEndCaps=new Map();
   let draggingTabId=null;
   let gesture=null, ghost=null, splitPreview=null, dragOverlay=false, suppressedClick=null;
+  let insertionMarker=null;
   // The chrome WebView is only toolbar-height until a native tab drag expands
   // its overlay. During that async transition innerHeight is not the parent
   // browser height; use the logical client bounds returned by native code.
@@ -176,6 +177,8 @@
   }
   function clearDropState(){
     draggingTabId=null;
+    insertionMarker?.remove();
+    insertionMarker=null;
     splitPaneIds=[];
     ghost?.remove();
     ghost=null;
@@ -204,15 +207,13 @@
     clearDropState();
     return assign(id,gid);
   }
-  function dropNextTo(event,targetId,element) {
+  function dropNextTo(event,targetId,after) {
     const id=currentDraggedTab();
     if(id===null||id===targetId)return false;
     const target=latest.tabs.find(t=>t.id===targetId);
     if(!target)return false;
     event.preventDefault();
     event.stopPropagation();
-    const after=event.clientX>=element.getBoundingClientRect().left+
-      element.getBoundingClientRect().width/2;
     const targetGroup=model.findTab(state,targetId);
     const source=latest.tabs.find(t=>t.id===id);
     const moving=supertabMembers(id);
@@ -508,7 +509,58 @@
       '◉  '+(tab?.title||'New Tab');
     document.body.append(ghost);
   }
+  // One hit test drives both the preview and the committed insertion.
+  // The tiny gaps between consecutive tabs are real insertion targets too.
+  function insertionTarget(hit,x,y){
+    let tab=hit?.closest('.tab[data-tab-id]');
+    let after;
+    if(tab){
+      const rect=tab.getBoundingClientRect();
+      after=x>=rect.left+rect.width/2;
+    }else if(hit?.closest('#tabs')){
+      const strip=tabStrip.getBoundingClientRect();
+      if(y<strip.top||y>strip.bottom)return null;
+      const children=Array.from(tabStrip.children);
+      for(let i=1;i<children.length;i++){
+        const left=children[i-1],right=children[i];
+        if(!left.matches('.tab[data-tab-id]')||!right.matches('.tab[data-tab-id]'))continue;
+        const a=left.getBoundingClientRect(),b=right.getBoundingClientRect();
+        if(a.width>0&&b.width>0&&x>=a.right&&x<=b.left){
+          tab=x<(a.right+b.left)/2?left:right;
+          after=tab===left;
+          break;
+        }
+      }
+    }
+    if(!tab)return null;
+    return {tab,after,id:Number(tab.dataset.tabId)};
+  }
+  function showInsertionMarker(target){
+    const {tab,after,id}=target;
+    const moving=supertabMembers(draggingTabId);
+    if(moving.includes(id))return;
+    if(moving.length>1&&latest.tabs.find(t=>t.id===id)?.pinned)return;
+    const rect=tab.getBoundingClientRect(),strip=tabStrip.getBoundingClientRect();
+    const neighbor=after?tab.nextElementSibling:tab.previousElementSibling;
+    let edge=after?rect.right:rect.left;
+    if(neighbor?.matches('.tab[data-tab-id]')){
+      const adjacent=neighbor.getBoundingClientRect();
+      if(adjacent.width>0)edge=(edge+(after?adjacent.left:adjacent.right))/2;
+    }
+    if(edge<strip.left||edge>strip.right)return;
+    if(!insertionMarker){
+      insertionMarker=document.createElement('div');
+      insertionMarker.className='tab-insertion-marker';
+      insertionMarker.setAttribute('aria-hidden','true');
+      document.body.append(insertionMarker);
+    }
+    insertionMarker.style.left=Math.round(edge)+'px';
+    insertionMarker.style.top=Math.round(Math.max(rect.top,strip.top))+'px';
+    insertionMarker.style.height=Math.max(1,Math.round(Math.min(rect.bottom,strip.bottom)-Math.max(rect.top,strip.top)))+'px';
+    insertionMarker.hidden=false;
+  }
   function updateHover(x,y){
+    if(insertionMarker)insertionMarker.hidden=true;
     tabStrip.querySelectorAll('.drag-target,.group-drop-target,.drop-before,.drop-after')
       .forEach(node=>node.classList.remove('drag-target','group-drop-target','drop-before','drop-after'));
     tabStrip.classList.remove('drag-ungroup-over','drag-pin-over');
@@ -516,13 +568,9 @@
     const hit=document.elementFromPoint(x,y);
     const chip=hit?.closest('.group-chip[data-group-id]');
     if(chip){chip.classList.add('drag-target');return;}
-    const tab=hit?.closest('.tab[data-tab-id]');
-    if(tab){
-      const dest=Number(tab.dataset.tabId);
-      if(dest===draggingTabId)return;
-      tab.classList.add('group-drop-target');
-      const rect=tab.getBoundingClientRect();
-      tab.classList.add(x>=rect.left+rect.width/2?'drop-after':'drop-before');
+    const target=insertionTarget(hit,x,y);
+    if(target){
+      showInsertionMarker(target);
       return;
     }
     if(hit?.closest('#tabUngroupDrop'))ungroupTarget?.classList.add('drag-target');
@@ -651,7 +699,7 @@
     suppressedClick={id:finished.id,until:performance.now()+350};
     const hit=document.elementFromPoint(event.clientX,event.clientY);
     const chip=hit?.closest('.group-chip[data-group-id]');
-    const tab=hit?.closest('.tab[data-tab-id]');
+    const target=insertionTarget(hit,event.clientX,event.clientY);
     const groupId=chip?.dataset.groupId;
     const top=document.querySelector('.chrome').getBoundingClientRect().bottom;
     const viewport=dropViewport();
@@ -665,8 +713,10 @@
       const quadrant=draggedQuadrant(event.clientX,event.clientY,top);
       void api.command('split-add',{id:finished.id,x,y,quadrant});
     }else if(groupId)dropIntoGroup(event,groupId);
-    else if(tab&&Number(tab.dataset.tabId)!==finished.id)
-      dropNextTo(event,Number(tab.dataset.tabId),tab);
+    else if(target){
+      if(!supertabMembers(finished.id).includes(target.id))
+        dropNextTo(event,target.id,target.after);
+    }
     else if(hit?.closest('#tabs')){
       const rect=tabStrip.getBoundingClientRect();
       const source=latest.tabs.find(t=>t.id===finished.id);

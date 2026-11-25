@@ -509,9 +509,13 @@ body.tab-dragging .ungroup-drop-target{display:flex}
 .tab {position:relative;cursor:grab;}
 .tab.tab-drag-source {opacity:.43;cursor:grabbing;}
 .tab.group-drop-target {background:#626c8e33;}
-.tab.drop-before::before,.tab.drop-after::after {content:"";position:absolute;top:0;bottom:0;width:2px;border-radius:2px;background:#c0baff;box-shadow:0 0 6px #928cf4;pointer-events:none;}
-.tab.drop-before::before {left:-2px;}
-.tab.drop-after::after {right:-2px;}
+/* Fixed overlay outside the scrolling strip and clipped tab interiors.
+   A bright bar with end caps stays visible at narrow and pinned tab edges. */
+.tab-insertion-marker {position:fixed;z-index:301;pointer-events:none;width:4px;transform:translateX(-50%);border-radius:2px;background:#e4dcff;box-shadow:0 0 0 1px #49318c,0 0 6px #a18aff;}
+.tab-insertion-marker[hidden] {display:none;}
+.tab-insertion-marker::before,.tab-insertion-marker::after {content:"";position:absolute;left:50%;transform:translateX(-50%);width:10px;height:4px;border-radius:2px;background:#e4dcff;box-shadow:0 0 0 1px #49318c;}
+.tab-insertion-marker::before {top:0;}
+.tab-insertion-marker::after {bottom:0;}
 .group-chip.drag-target {outline:2px solid var(--group-accent);outline-offset:-1px;filter:brightness(1.4);}
 #tabUngroupDrop.drag-target {background:#6c70a45c;outline:1px solid #b3b2ff;}
 

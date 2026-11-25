@@ -147,3 +147,29 @@ test('invalid multi-pane assignments and reorders do not partially change state'
  assert.equal(m.moveBlockRelative(state,[1,2],2),false);
  assert.equal(JSON.stringify(state.order),before);
 });
+
+test('tab insertion uses the same before/after decision for hover and release, including gaps',()=>{
+ const fs=require('node:fs'),path=require('node:path');
+ const ui=fs.readFileSync(path.join(__dirname,'../ui/tab-group-ui.js'),'utf8');
+ const css=fs.readFileSync(path.join(__dirname,'../ui/styles.css'),'utf8');
+ const tab=(id,left,right)=>({dataset:{tabId:String(id)},matches:()=>true,
+   getBoundingClientRect:()=>({left,right,width:right-left,top:2,bottom:22})});
+ const a=tab(1,0,40),b=tab(2,42,82);
+ const strip={children:[a,b],getBoundingClientRect:()=>({top:0,bottom:22})};
+ const hit=t=>({closest:s=>s==='#tabs'?strip:t});
+ const source=ui.slice(ui.indexOf('  function insertionTarget('),ui.indexOf('  function showInsertionMarker('));
+ const resolve=new Function('tabStrip',source+'return insertionTarget;')(strip);
+ assert.deepEqual([resolve(hit(a),1,10).id,resolve(hit(a),1,10).after],[1,false]);
+ assert.equal(resolve(hit(a),20,10).after,true);
+ assert.deepEqual([resolve(hit(null),40,10).id,resolve(hit(null),40,10).after],[1,true]);
+ assert.deepEqual([resolve(hit(null),41,10).id,resolve(hit(null),41,10).after],[2,false]);
+ assert.equal(resolve(hit(null),90,10),null);
+ assert.equal(resolve(hit(null),41,30),null);
+ strip.children=[a,{matches:()=>false},b];
+ assert.equal(resolve(hit(null),41,10),null);
+ assert.match(ui,/const target=insertionTarget\(hit,x,y\)/);
+ assert.match(ui,/const target=insertionTarget\(hit,event.clientX,event.clientY\)/);
+ assert.match(ui,/dropNextTo\(event,target.id,target.after\)/);
+ assert.match(ui,/insertionMarker\?\.remove\(\)/);
+ assert.match(css,/\.tab-insertion-marker\s*\{[^}]*position:fixed;[^}]*pointer-events:none/);
+});
