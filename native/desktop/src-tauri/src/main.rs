@@ -1819,24 +1819,86 @@ mod split_layout_tests {
     }
 }
 
+// Focus is a selection change, not a navigation or a split-layout change.
+// Never select a hidden tab, a stale renderer, or a pane from another split.
+fn focus_split_pane(app:&tauri::AppHandle,id:u32){
+    let changed={
+        let state=app.state::<SplitState>();
+        let Ok(split)=state.0.try_lock() else{return};
+        let state=app.state::<Mutex<Browser>>();
+        let Ok(mut browser)=state.try_lock() else{return};
+        if split.len()<2 || !split.contains(&browser.active_id) ||
+           !split.contains(&id) || browser.active_id==id ||
+           !browser.tabs.iter().any(|tab|tab.id==id && tab.url!=HOME && tab.view.is_some()){
+            return;
+        }
+        let previous=browser.active_id;
+        browser.active_id=id;
+        for tab in &mut browser.tabs{
+            if tab.id==id{tab.inactive_since=None;}
+            else if tab.id==previous && tab.inactive_since.is_none(){
+                tab.inactive_since=Some(Instant::now());
+            }
+        }
+        true
+    };
+    // Do not focus the chrome or re-show/recreate any of the visible pages.
+    if changed{notify(app);}
+}
+#[cfg(windows)]
+fn attach_split_pane_focus(app:&tauri::AppHandle,id:u32,view:&tauri::Webview){
+    let handle=app.clone();
+    let _=view.with_webview(move |native|{
+        let controller=native.controller();
+        let handler=webview2_com::FocusChangedEventHandler::create(Box::new(move |_,_|{
+            focus_split_pane(&handle,id);
+            Ok(())
+        }));
+        let mut token=0i64;
+        let _=unsafe{controller.add_GotFocus(&handler,&mut token)};
+    });
+}
 fn return_split_pane(app:&tauri::AppHandle,id:u32){
-    let remaining={
+    // An OS release and a captured DOM release can both arrive; membership
+    // makes this operation idempotent and prevents duplicate undo entries.
+    if !app.state::<SplitState>().0.lock().map(|s|s.contains(&id)).unwrap_or(false){return;}
+    remember_undo(app,None);
+    let next={
         let state=app.state::<SplitState>();
         let Ok(mut split)=state.0.lock() else{return};
+        let next=split.iter().copied().find(|pane|*pane!=id);
         let state=app.state::<SplitThreeLeft>();
         if let Ok(mut side)=state.0.lock(){
             remove_split_pane(&mut split,id,&mut side);
         }
-        split.clone()
+        split.first().copied().or(next)
     };
-    if remaining.len()>1 {
+    if let Some(next)=next {
         let state=app.state::<Mutex<Browser>>();
         if let Ok(mut browser)=state.lock(){
-            if browser.active_id==id {browser.active_id=remaining[0];}
+            if browser.active_id==id {browser.active_id=next;}
         };
     }
     invalidate_layout(app);
     display_active(app);
+}
+fn split_badge_drop_in_strip(x:f64,y:f64,width:f64)->bool{
+    x.is_finite() && y.is_finite() && (25.0..width).contains(&x) &&
+        (0.0..=22.0).contains(&y)
+}
+// Pointer capture fallback: client coordinates are relative to the badge,
+// whose origin is exactly the pane origin. No remote page can invoke this.
+fn finish_split_badge_drop(app:&tauri::AppHandle,id:u32,x:f64,y:f64){
+    let Some(window)=app.get_window("main") else{return};
+    let Ok((width,height))=dimensions(&window) else{return};
+    let ids=visible_split(app);
+    let Some(index)=ids.iter().position(|pane|*pane==id) else{return};
+    if ids.len()<2{return;}
+    let top=chrome_top(app);
+    let ratios=app.state::<SplitRatios>().0.lock().map(|r|*r).unwrap_or((0.5,0.5));
+    let side=app.state::<SplitThreeLeft>().0.lock().map(|s|*s).unwrap_or(false);
+    let (px,py,_,_)=split_rect_on_side(index,ids.len(),width,(height-top).max(1.0),top,ratios.0,ratios.1,side);
+    if split_badge_drop_in_strip(px+x,py+y,width){return_split_pane(app,id);}
 }
 #[cfg(windows)]
 fn start_split_badge_drag(app:tauri::AppHandle,id:u32){
@@ -1854,16 +1916,16 @@ fn start_split_badge_drag(app:tauri::AppHandle,id:u32){
                 let mut end=POINT::default();
                 if unsafe{GetCursorPos(&mut end)}.is_err(){return;}
                 let Some(window)=app.get_window("main") else{return};
-                let Ok(position)=window.outer_position() else{return};
+                let Ok(position)=window.inner_position() else{return};
                 let Ok(scale)=window.scale_factor() else{return};
+                let Ok((width,_))=dimensions(&window) else{return};
                 let local_y=(end.y-position.y) as f64/scale;
                 let local_x=(end.x-position.x) as f64/scale;
-                let dx=end.x-start.x;
-                let dy=end.y-start.y;
-                // A short click is handled by the badge's Return button.
-                // Dragging up into the actual tab strip unsplits this pane.
-                if dx*dx+dy*dy>400 && (0.0..=22.0).contains(&local_y)
-                    && local_x>=47.0 {
+                let dx=(end.x-start.x) as f64/scale;
+                let dy=(end.y-start.y) as f64/scale;
+                // Client-relative, DPI-independent hit test; a short click
+                // selects the pane, while releasing in the strip detaches it.
+                if dx.hypot(dy)>=6.0 && split_badge_drop_in_strip(local_x,local_y,width) {
                     let handle=app.clone();
                     let _=app.run_on_main_thread(move||return_split_pane(&handle,id));
                 }
@@ -1951,8 +2013,8 @@ fn update_split_badges(app:&tauri::AppHandle,window:&tauri::Window,
         let (x,y,w,_)=split_rect_on_side(index,ids.len(),width,height,top,ratios.0,ratios.1,
                 app.state::<SplitThreeLeft>().0.lock().map(|s|*s).unwrap_or(false));
         let label=format!("split-badge-{id}");
-        let position=LogicalPosition::new(x+6.0,y+6.0);
-        let size=LogicalSize::new(w.min(190.0).max(40.0)-12.0,24.0);
+        let position=LogicalPosition::new(x,y);
+        let size=LogicalSize::new(w.min(104.0).max(1.0),16.0);
         if let Some(view)=app.get_webview(&label){
             let _=view.set_position(position);
             let _=view.set_size(size);
@@ -1973,6 +2035,31 @@ fn update_split_badges(app:&tauri::AppHandle,window:&tauri::Window,
                             let _=callback_app.run_on_main_thread(move||return_split_pane(&handle,badge_id));
                         },
                         "/drag"=>start_split_badge_drag(callback_app.clone(),badge_id),
+                        "/focus"=>{
+                            let handle=callback_app.clone();
+                            let _=callback_app.run_on_main_thread(move||{
+                                if visible_split(&handle).contains(&badge_id){
+                                    focus_split_pane(&handle,badge_id);
+                                    if let Some(page)=handle.get_webview(&format!("tab-{badge_id}")){
+                                        let _=page.set_focus();
+                                    }
+                                }
+                            });
+                        },
+                        "/drop"=>{
+                            let mut x=None;let mut y=None;
+                            for (key,value) in url.query_pairs(){
+                                match key.as_ref(){
+                                    "x"=>x=value.parse::<f64>().ok(),
+                                    "y"=>y=value.parse::<f64>().ok(),
+                                    _=>{}
+                                }
+                            }
+                            if let (Some(x),Some(y))=(x,y){
+                                let handle=callback_app.clone();
+                                let _=callback_app.run_on_main_thread(move||finish_split_badge_drop(&handle,badge_id,x,y));
+                            }
+                        },
                         "/resize"=>start_split_badge_resize(callback_app.clone(),badge_id),
                         _=>{}
                     }
@@ -3229,6 +3316,18 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
             .data_directory(extensions::isolated_site_dir(app)?)
             .extensions_path(extensions::active_dir(app)?)
     }else{builder};
+    #[cfg(not(windows))]
+    let builder=builder.initialization_script(r#"(()=>{
+      const nativeOpen=window.open;
+      let last=0;
+      const signal=event=>{
+        if(!event.isTrusted||!document.hasFocus()||Date.now()-last<200)return;
+        last=Date.now();
+        Reflect.apply(nativeOpen,window,['https://minternet-pane-focus.invalid/__focus','_blank']);
+      };
+      window.addEventListener('focus',signal,true);
+      window.addEventListener('pointerdown',signal,true);
+    })();"#);
     let builder = builder
         .initialization_script(include_str!("../../../../ui/site-media-bridge.js"))
         .initialization_script(include_str!("../../../../ui/site-fullscreen-bridge.js"))
@@ -3396,6 +3495,14 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
             // The retired Marmaladeum-only media-server endpoint is never
             // navigated. Local Media Player remains a separate feature.
             if url.host_str()==Some("minternet-media.invalid"){
+                return NewWindowResponse::Deny;
+            }
+            #[cfg(not(windows))]
+            if url.as_str()=="https://minternet-pane-focus.invalid/__focus" {
+                focus_split_pane(&for_popup,id);
+                return NewWindowResponse::Deny;
+            }
+            if url.host_str()==Some("minternet-pane-focus.invalid"){
                 return NewWindowResponse::Deny;
             }
             if url.as_str()=="https://minternet-find.invalid/__open" {
@@ -4099,6 +4206,8 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     // An unselected new WebView must never cover the current page, even when
     // display_active skips a no-op visibility refresh for the selected tab.
     if background {let _=created.hide();}
+    #[cfg(windows)]
+    attach_split_pane_focus(app,id,&created);
     Ok(())
 }
 

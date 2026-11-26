@@ -104,3 +104,31 @@ test('super tabs drag from the full surface and render as one item inside groups
  assert.match(group,/const visualMembers=containsSuper\?\[\.\.\.members,splitTabs\[0\]\]:members/);
  assert.match(group,/const node=takeSuper\(\)/);
 });
+
+test('split pane badge is flush, compact, and supports captured drag back to the tab strip',()=>{
+ const native=read('native/desktop/src-tauri/src/main.rs');
+ const badge=read('ui/split-badge.js'),css=read('ui/split-badge.css');
+ assert.match(native,/let position=LogicalPosition::new\(x,y\);/);
+ assert.match(native,/LogicalSize::new\(w.min\(104.0\).max\(1.0\),16.0\)/);
+ assert.match(css,/\.split-badge\{[^}]*height:16px;[^}]*opacity:\.38/);
+ assert.match(badge,/setPointerCapture\(event.pointerId\)/);
+ assert.match(badge,/send\('drop\?x='/);
+ assert.match(badge,/else send\('focus'\)/);
+ assert.match(native,/window.inner_position\(\)/);
+ assert.match(native,/split_badge_drop_in_strip\(local_x,local_y,width\)/);
+ assert.match(native,/split_badge_drop_in_strip\(px\+x,py\+y,width\)/);
+ assert.match(native,/if browser.active_id==id \{browser.active_id=next;\}/);
+});
+
+test('native pane focus changes the active tab without navigating or stealing focus from the toolbar',()=>{
+ const native=read('native/desktop/src-tauri/src/main.rs');
+ const focus=native.slice(native.indexOf('fn focus_split_pane('),native.indexOf('fn return_split_pane('));
+ assert.match(focus,/!split.contains\(&browser.active_id\)/);
+ assert.match(focus,/!split.contains\(&id\)/);
+ assert.match(focus,/browser.active_id=id/);
+ assert.match(focus,/notify\(app\)/);
+ assert.match(focus,/controller.add_GotFocus/);
+ assert.doesNotMatch(focus,/navigate_tab\(|display_active\(|set_focus\(/);
+ assert.match(native,/attach_split_pane_focus\(app,id,&created\)/);
+ assert.match(native,/"reload" => \{\s*let \(id,url,label\)=\{[\s\S]*?b.active\(\)/);
+});
