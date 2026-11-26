@@ -16,9 +16,11 @@ function harness({saved=null,respond=null}={}){
       ?{version:'0.3.0'}:{message:'unsupported'}},
     addEventListener(name,fn){events.set(name,fn);}
   };
+  const elements=new Map();
   const context={
-    window:w,document:{readyState:'loading',getElementById:()=>null,
-      addEventListener:()=>{}},
+    window:w,document:{readyState:'loading',getElementById:id=>elements.get(id)||null,
+      addEventListener:()=>{},createElement:()=>({dataset:{},style:{},setAttribute(){},addEventListener(){},append(){},remove(){elements.delete(this.id);}}),
+      body:{append(node){elements.set(node.id,node);}}},
     localStorage:{getItem:k=>storage.get(k)||null,
       setItem:(k,v)=>storage.set(k,String(v))},
     fetch:(url,options)=>{requests.push({url,options});
