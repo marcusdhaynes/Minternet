@@ -46,7 +46,7 @@ const verified={
   notes:'Verified release'
 };
 function feed(release=verified){
-  return {schema:1,sourceSha:SHA,windowsRun:{head_sha:SHA,
+  return {schema:1,generatedAt:Math.floor(Date.now()/1000),sourceSha:SHA,windowsRun:{head_sha:SHA,
     run_number:1200,status:'completed',conclusion:'success'},release};
 }
 test('update checker defaults to five seconds, with configurable saved seconds',()=>{
@@ -111,4 +111,11 @@ test('Settings owns numeric seconds control; publisher refreshes feed on release
   assert.match(pages,/SHA256SUMS\.txt/);
   assert.match(archive,/gh workflow run pages\.yml --ref main/);
   assert.match(win,/gh workflow run pages\.yml --ref main/);
+});
+
+test('publisher checks the stable latest release even when archive pages are full',()=>{
+ const pages=fs.readFileSync(path.join(root,'.github/workflows/pages.yml'),'utf8');
+ assert.match(pages,/yield \[get\('releases\/latest'\)\]/);
+ assert.match(pages,/workflow_run:\s*\n\s*workflows: \["Minternet Windows portable single EXE/);
+ assert.match(pages,/types: \[completed\]/);
 });

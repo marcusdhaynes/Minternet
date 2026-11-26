@@ -88,7 +88,7 @@ test('visual recovery diagnostics use valid parent module entrypoints',()=>{
 });
 
 test('Windows completes running compilations and retains Rust cache on late test failure',()=>{
- assert.match(win,/group: minternet-windows-\$\{\{ github\.ref \}\}/);
+ assert.match(win,/portable:\s*\n\s*needs: freshness[\s\S]*?concurrency:\s*\n\s*group: minternet-windows-portable-main-v2/);
  assert.match(win,/cancel-in-progress: false/);
  assert.match(win,/cache-on-failure: true/);
 });

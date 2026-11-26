@@ -69,6 +69,7 @@ jobs:
         run: npm install --no-fund --no-audit
       - name: Validate browser UI and bookmark model
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           node --check ../../ui/native-bridge.js
           node --check ../../ui/startup-curtain.js
           node --test ../../tests/startup-curtain.test.cjs
@@ -99,7 +100,7 @@ jobs:
           node --test ../../tests/single-branch-policy.test.cjs
           node --test ../../tests/passkeys-auth-popup.test.cjs
           node --test ../../tests/release-feature-parity.test.cjs
-          node --test ../../tests/updates-release.test.cjs
+          node --test ../../tests/updates-release.test.cjs ../../tests/update-poll-interval.test.cjs
           node --test ../../tests/context-menu-position.test.cjs
           node --test ../../tests/site-context-menu.test.cjs
           node --test ../../tests/native-startup-geometry.test.cjs

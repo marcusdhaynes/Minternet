@@ -9,6 +9,7 @@ const manager=read('ui/extensions-ui.js');
 const styles=read('ui/styles.css');
 const native=read('native/desktop/src-tauri/src/main.rs');
 const backend=read('native/desktop/src-tauri/src/extensions.rs');
+const archive=read('native/desktop/src-tauri/src/extension_archive.rs');
 
 test('Extensions has a dedicated toolbar control immediately before Downloads',()=>{
   assert.match(html,/id="extensionsButton"/);
@@ -37,7 +38,10 @@ test('Import/enable/disable/remove use trusted native commands and restart seman
   assert.match(manager,/extensions-remove/);
   assert.match(manager,/window\.addEventListener\?\.\('blur'/);
   assert.match(native,/mod extensions;/);
-  assert.match(native,/extensions::import/);
+  assert.match(native,/extension_archive::import\(/);
+  assert.match(archive,/pub fn import\(/);
+  assert.match(archive,/MAX_DEPTH/);
+  assert.match(archive,/MAX_EXPANDED/);
   assert.match(native,/extensions::set_enabled/);
   assert.match(native,/extensions::remove/);
   assert.match(native,/browser_extensions_enabled\(true\)/);

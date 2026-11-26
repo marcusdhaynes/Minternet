@@ -460,8 +460,8 @@
         const newer=release&&isNewer(release.version,installed);
         if(release){
           saveCache(release);
-          displayedRelease=preferredRelease(release);
-          if(newer)readyFromPipeline=release;
+          if(newer&&(!readyFromPipeline||isNewer(release.version,readyFromPipeline.version)))readyFromPipeline=release;
+          displayedRelease=preferredRelease(newer?release:null);
         }
         pipeline=classifyPipelineRun(latestRun,feed.sourceSha);
         if(stale&&!newer){
@@ -484,7 +484,7 @@
           lastStatus={kind:sourcePending?'pending':'verified',
             releaseVersion:release.version,sourceSha:feed.sourceSha,
             message:sourcePending
-              ?'New Minternet source is pending its verified Windows release. '+
+              ?(pipeline.kind==='failed'?'The newest Windows build failed. ':'New Minternet source is pending its verified Windows release. ')+
                 'v'+release.version+' is the newest published update.'
               :'Up to date — latest published Windows release: v'+release.version+'.'};
         }else if(!lastStatus){
@@ -498,7 +498,7 @@
         }
         if(el)renderSection(el,displayedRelease,
           lastStatus?.message||'Checking update status…');
-        if(newer&&!isDismissed(release.version))mountRibbon(release);
+        if(displayedRelease&&isNewer(displayedRelease.version,installed)&&!isDismissed(displayedRelease.version))mountRibbon(displayedRelease);
         return release;
       }catch(error){
         // A failed feed must never mean "up to date". Keep any previously
@@ -552,8 +552,11 @@
     scheduleNextPoll();
   }
   function mountRibbon(info){
-    if($('museUpdateRibbon')||!info||info.cached)return;
-    const ribbon=document.createElement('div');ribbon.id='museUpdateRibbon';
+    if(!info||info.cached||!isNewer(info.version,installed))return;
+    const existing=$('museUpdateRibbon');
+    if(existing?.dataset.version===info.version)return;
+    existing?.remove();
+    const ribbon=document.createElement('div');ribbon.id='museUpdateRibbon';ribbon.dataset.version=info.version;
     ribbon.setAttribute('role','button');
     ribbon.setAttribute('aria-label','Update available, version '+info.version);
     ribbon.style.cssText='position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:9999;display:flex;align-items:center;gap:8px;padding:3px 6px 3px 12px;border-radius:999px;font-size:12px;line-height:1.4;background:rgba(127,127,127,.16);border:1px solid rgba(127,127,127,.35);backdrop-filter:blur(6px);cursor:pointer;';
