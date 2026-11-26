@@ -165,8 +165,9 @@ fn discover(bytes:&[u8],location:&str,depth:usize,source:&str,
     let mut files=BTreeMap::<String,Vec<u8>>::new();
     for index in 0..archive.len(){
         let mut entry=archive.by_index(index).map_err(|e|e.to_string())?;
-        let raw_name=entry.name().trim_end_matches('/');
-        safe_relative(raw_name)?;
+        // ZIP 8 returns a fallible Cow; own the path before mutably reading entry.
+        let raw_name=entry.name().map_err(|e|e.to_string())?.trim_end_matches('/').to_owned();
+        safe_relative(&raw_name)?;
         if let Some(mode)=entry.unix_mode(){
             if mode&0o170000==0o120000{return Err("Archive symlinks are forbidden".into());}
         }
@@ -181,7 +182,7 @@ fn discover(bytes:&[u8],location:&str,depth:usize,source:&str,
         entry.by_ref().take(MAX_ENTRY+1).read_to_end(&mut payload)
             .map_err(|e|e.to_string())?;
         if payload.len() as u64>MAX_ENTRY{return Err("Archive file exceeds 32 MB".into());}
-        if files.insert(raw_name.to_owned(),payload).is_some(){
+        if files.insert(raw_name,payload).is_some(){
             return Err("Duplicate path within extension archive".into());
         }
     }
@@ -195,7 +196,7 @@ fn discover(bytes:&[u8],location:&str,depth:usize,source:&str,
         }
         discover(data,&format!("{location}/{name}!"),depth+1,source,scan)?;
     }
-    let manifests=files.keys().filter(|p|p=="manifest.json"||p.ends_with("/manifest.json"))
+    let manifests=files.keys().filter(|p|p.as_str()=="manifest.json"||p.ends_with("/manifest.json"))
         .cloned().collect::<Vec<_>>();
     for path in manifests{
         let Some(data)=files.get(&path) else{continue;};

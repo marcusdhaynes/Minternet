@@ -24,7 +24,8 @@ test('Windows finishes active builds, coalesces pending commits and prevents rel
   const src=read('.github/workflows/native-windows.yml');
   // A running compile must complete so rapid pushes cannot starve releases.
   // Only the most recent pending commit competes for the next build.
-  assert.match(src,/group: minternet-windows-\$\{\{ github\.ref \}\}/);
+  assert.match(src,/portable:\s*\n\s*needs: freshness[\s\S]*?concurrency:\s*\n\s*group: minternet-windows-portable-main-v2/);
+  assert.match(src,/if: needs\.freshness\.outputs\.build == 'true'/);
   assert.match(src,/cancel-in-progress: false/);
   assert.match(src,/cache-on-failure: true/);
   assert.match(src,/\$latestFlag.*'--latest=false'/);

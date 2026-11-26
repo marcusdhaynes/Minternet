@@ -97,7 +97,7 @@ jobs:
           node --check ../../ui/volume-ui.js
           node --check ../../ui/audio-gain.js
           node --check ../../ui/credential-import.js
-          node --test ../../tests/single-branch-policy.test.cjs
+          node --test ../../tests/single-branch-policy.test.cjs ../../tests/all-platform-builds.test.cjs
           node --test ../../tests/passkeys-auth-popup.test.cjs
           node --test ../../tests/release-feature-parity.test.cjs
           node --test ../../tests/updates-release.test.cjs ../../tests/update-poll-interval.test.cjs
