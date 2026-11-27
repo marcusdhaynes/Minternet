@@ -1,6 +1,5 @@
 //! Optional Windows-user-scoped unlock secrets. This never stores passwords in
-//! app JSON, localStorage, or a repository. User must explicitly opt in; the
-//! default keeps the master-password prompt. The Windows Credential Manager
+//! app JSON, localStorage, or a repository. New Windows profiles use a device-held random unlock secret by default. The Windows Credential Manager
 //! protects generic credentials with the signed-in Windows user's credentials.
 //! Anyone with full access to that Windows account can unlock these records.
 use zeroize::Zeroize;

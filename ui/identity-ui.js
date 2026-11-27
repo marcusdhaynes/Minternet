@@ -40,7 +40,7 @@
   };
   let screen=null,statusNode=null,auth=null,editor=null,list=null,master=null;
   let editingId=null,inputs=new Map(),customContainer=null;
-  let unlocked=false,exists=false;
+  let unlocked=false,exists=false,passwordRequired=true,protection=null;
   const report=message=>{if(statusNode)statusNode.textContent=String(message||'');};
   async function call(name,payload){
     try{return await command(name,payload);}
@@ -91,7 +91,7 @@
   function syncUi(){
     auth.hidden=unlocked;editor.hidden=!unlocked;
     const lock=screen.querySelector('.identity-lock');
-    lock.hidden=!unlocked;
+    lock.hidden=!unlocked||!passwordRequired;
     const button=screen.querySelector('.identity-auth-button');
     button.textContent=exists?'Unlock':'Create Encrypted Vault';
   }
@@ -99,6 +99,7 @@
     const result=await call('vault-status','identities');
     if(!result)return;
     exists=Boolean(result.exists);unlocked=Boolean(result.unlocked);
+    passwordRequired=result.passwordRequired!==false;protection?.setRequired(passwordRequired);autoLock?.setProtection(passwordRequired);
     autoLock?.setUnlocked(unlocked);
     syncUi();
     if(!unlocked)return;
@@ -230,7 +231,9 @@
     });
     editor.append(savedTitle,list,reset,form);
     statusNode=make('p','payment-status');
-    panel.append(head,info,auth,editor,statusNode);
+    panel.append(head);
+    protection=window.minternetPasswordProtection?.mount(panel,'identities',()=>reload());
+    panel.append(info,auth,editor,statusNode);
     screen.append(backdrop,panel);document.body.append(screen);
     await command('chrome-overlay',true);
     await reload();

@@ -23,7 +23,7 @@
     if(text!==undefined)el.textContent=text;return el;
   };
   let screen=null,panel=null,auth=null,form=null,list=null,status=null,master=null,locked=true,exists=false;
-  let editingId=null,editFields=null;
+  let editingId=null,editFields=null,passwordRequired=true,protection=null;
   function report(text){if(status)status.textContent=String(text||'');}
   function close(){
     if(!screen)return;
@@ -52,13 +52,14 @@
     auth.hidden=!locked;
     form.hidden=locked;
     list.hidden=locked;
-    panel.querySelector('.payment-lock').hidden=locked;
+    panel.querySelector('.payment-lock').hidden=locked||!passwordRequired;
     panel.querySelector('.payment-auth-button').textContent=exists?'Unlock':'Create Encrypted Vault';
   }
   async function refresh(){
     const data=await invoke('vault-status','payments');
     if(!data)return;
     exists=Boolean(data.exists);locked=!data.unlocked;
+    passwordRequired=data.passwordRequired!==false;protection?.setRequired(passwordRequired);autoLock?.setProtection(passwordRequired);
     autoLock?.setUnlocked(!locked);
     sync();
     if(!locked)await renderCards();
@@ -201,7 +202,9 @@
     const sub=create('strong','payment-list-heading','Saved Cards');
     list=create('div','payment-list');
     status=create('p','payment-status');
-    panel.append(header,info,auth,form,sub,list,status);
+    panel.append(header);
+    protection=window.minternetPasswordProtection?.mount(panel,'payments',()=>refresh());
+    panel.append(info,auth,form,sub,list,status);
     screen.append(backdrop,panel);document.body.append(screen);
     await invoke('chrome-overlay',true);
     await refresh();

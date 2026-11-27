@@ -4309,9 +4309,58 @@ mod wgu_login_association_tests{
 // An unlocked encryption key does not imply that every section was
 // authorized. The three data types share one encrypted file for compatibility,
 // but native commands enforce separate user-visible access permissions.
+fn lock_secret_bookmarks(app:&tauri::AppHandle)->Result<(),String>{
+        // Locking must also conceal already-open secrets, not just erase the
+        // encryption key. Keep only opaque secret IDs for a later unlock.
+        let labels={
+            let store=app.state::<Mutex<Browser>>();
+            let mut b=store.lock().map_err(|e|e.to_string())?;
+            let mut labels=Vec::new();
+            for tab in b.tabs.iter_mut().filter(|tab|tab.secret_id.is_some()){
+                if let Some(label)=tab.view.take(){labels.push(label);}
+                scrub_secret_tab(tab);
+            }
+            labels
+        };
+        for label in labels{
+            if let Some(view)=app.get_webview(&label){let _=view.close();}
+        }
+        let vault=app.state::<Mutex<secret_bookmarks::SecretVault>>();
+        vault.lock().map_err(|e|e.to_string())?.lock();
+        // Destroy all per-site decryption keys as well as the folder key.
+        app.state::<AuthorizedSecrets>().items.lock().map_err(|e|e.to_string())?.clear();
+        display_active(app);
+        notify(app);
+        Ok(())
+}
 fn vault_section_allowed(app:&tauri::AppHandle,section:&str)->bool{
     app.state::<Mutex<lock_preferences::Access>>().lock()
         .map(|access|access.granted(section)).unwrap_or(false)
+}
+#[cfg(windows)]
+fn fresh_device_password(bookmarks:bool)->String{
+    let mut bytes=[0u8;32];OsRng.fill_bytes(&mut bytes);
+    let result=if bookmarks{base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&bytes[..12])}
+        else{base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&bytes)};
+    bytes.zeroize();result
+}
+#[cfg(windows)]
+fn create_passwordless_vault_if_missing(app:&tauri::AppHandle)->Result<(),String>{
+    let policy=lock_preferences::load(app);
+    // A partially protected profile with no file needs a user-chosen master.
+    if policy.any_protected_vault(){return Ok(());}
+    let path=password_vault::file(app)?;
+    let state=app.state::<Mutex<password_vault::Vault>>();
+    let mut vault=state.lock().map_err(|e|e.to_string())?;
+    if path.exists(){return Ok(());}
+    let master=zeroize::Zeroizing::new(fresh_device_password(false));
+    device_secrets::write("vault",&master)?;
+    vault.unlock(&path,&master,true)?;
+    drop(vault);
+    let state=app.state::<Mutex<lock_preferences::Access>>();
+    let mut access=state.lock().map_err(|e|e.to_string())?;
+    *access=lock_preferences::Access::from_policy(&policy);
+    Ok(())
 }
 fn unlock_permitted_sections_from_device(app:&tauri::AppHandle){
     let policy=lock_preferences::load(app);
@@ -6115,51 +6164,92 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         {return Err("This option requires Windows Credential Manager".into());}
         #[cfg(windows)]
         {
-            let section=value.get("section").and_then(Value::as_str)
-                .ok_or("Choose a section")?;
-            let locked=value.get("locked").and_then(Value::as_bool)
-                .ok_or("Choose whether to require a password")?;
+            let section=value.get("section").and_then(Value::as_str).ok_or("Choose a section")?;
+            let locked=value.get("locked").and_then(Value::as_bool).ok_or("Choose whether to require a password")?;
             let mut policy=lock_preferences::load(&app);
-            policy.required(section)?;
-            if !locked {
-                // Opt-out must be authorized with the actual *current* master
-                // password. A different website, browser tab, or stale cache
-                // cannot turn off protection. Never store password in JSON.
-                let mut secret=value.get("password").and_then(Value::as_str)
-                    .ok_or("Enter your existing master password once to disable the prompt")?
-                    .to_owned();
-                let verified=if section=="bookmarks"{
-                    let path=secret_bookmarks::file(&app)?;
-                    let mut scratch=secret_bookmarks::SecretVault::default();
-                    scratch.open(&path,&secret,false).is_ok()
+            if policy.required(section)?==locked{return Ok(json!({"ok":true,"passwordRequired":policy}));}
+            let store=if section=="bookmarks"{"bookmarks"}else{"vault"};
+            let supplied=zeroize::Zeroizing::new(value.get("password").and_then(Value::as_str).unwrap_or("").to_owned());
+            if section=="bookmarks"{
+                let path=secret_bookmarks::file(&app)?;
+                let state=app.state::<Mutex<secret_bookmarks::SecretVault>>();
+                let mut secret=state.lock().map_err(|e|e.to_string())?;
+                let mut scratch=secret_bookmarks::SecretVault::default();
+                if locked{
+                    if !path.exists(){scratch.open(&path,&supplied,true)?;}
+                    else{
+                        let previous=zeroize::Zeroizing::new(device_secrets::read(store)?
+                            .ok_or("Unlock with your original password once before enabling protection")?);
+                        scratch.open(&path,&previous,false)?;
+                        if previous.as_str()!=supplied.as_str(){scratch.change_password(&path,&previous,&supplied)?;}
+                    }
+                }else if path.exists(){
+                    scratch.open(&path,&supplied,false)?;
+                    device_secrets::write(store,&supplied)?;
                 }else{
-                    let path=password_vault::file(&app)?;
-                    let mut scratch=password_vault::Vault::default();
-                    scratch.unlock(&path,&secret,false).is_ok()
-                };
-                if !verified{secret.zeroize();return Err("Incorrect master password".into());}
-                let store=if section=="bookmarks"{"bookmarks"}else{"vault"};
-                let saved=device_secrets::write(store,&secret);
-                secret.zeroize();
-                saved?;
+                    let generated=zeroize::Zeroizing::new(fresh_device_password(true));
+                    device_secrets::write(store,&generated)?;
+                    scratch.open(&path,&generated,true)?;
+                }
+                *secret=scratch;
+            }else{
+                let path=password_vault::file(&app)?;
+                let state=app.state::<Mutex<password_vault::Vault>>();
+                let mut vault=state.lock().map_err(|e|e.to_string())?;
+                let mut next_policy=policy;
+                next_policy.set(section,locked)?;
+                let mut scratch=password_vault::Vault::default();
+                if locked{
+                    if !path.exists(){scratch.unlock(&path,&supplied,true)?;}
+                    else if policy.any_protected_vault(){scratch.unlock(&path,&supplied,false)?;}
+                    else{
+                        let previous=zeroize::Zeroizing::new(device_secrets::read(store)?
+                            .ok_or("Unlock with your original password once before enabling protection")?);
+                        scratch.unlock(&path,&previous,false)?;
+                        if previous.as_str()!=supplied.as_str(){
+                            scratch.rotate_password(&path,&supplied)?;
+                            if let Err(error)=device_secrets::write(store,&supplied){
+                                scratch.rotate_password(&path,&previous)?;
+                                return Err(error);
+                            }
+                        }
+                    }
+                    if next_policy.any_unlocked_vault(){device_secrets::write(store,&supplied)?;}
+                }else if path.exists(){
+                    scratch.unlock(&path,&supplied,false)?;
+                    device_secrets::write(store,&supplied)?;
+                }else if next_policy.any_protected_vault(){
+                    scratch.unlock(&path,&supplied,true)?;
+                    device_secrets::write(store,&supplied)?;
+                }else{
+                    let generated=zeroize::Zeroizing::new(fresh_device_password(false));
+                    device_secrets::write(store,&generated)?;
+                    scratch.unlock(&path,&generated,true)?;
+                }
+                *vault=scratch;
             }
             policy.set(section,locked)?;
             lock_preferences::save(&app,&policy)?;
-            if section=="bookmarks" {
-                if locked{device_secrets::remove("bookmarks")?;}
+            if section=="bookmarks"{
+                if locked{
+                    lock_secret_bookmarks(&app)?;
+                    device_secrets::remove("bookmarks")?;
+                }
             }else{
                 let any_allowed={
                     let state=app.state::<Mutex<lock_preferences::Access>>();
                     let mut access=state.lock().map_err(|e|e.to_string())?;
                     if locked{access.revoke(section);}
+                    let permitted=lock_preferences::Access::from_policy(&policy);
+                    access.logins|=permitted.logins;
+                    access.identities|=permitted.identities;
+                    access.payments|=permitted.payments;
                     access.any()
                 };
-                if locked && !any_allowed{
-                    app.state::<Mutex<password_vault::Vault>>().lock()
-                        .map_err(|e|e.to_string())?.lock();
+                if !any_allowed{
+                    app.state::<Mutex<password_vault::Vault>>().lock().map_err(|e|e.to_string())?.lock();
                 }
                 if !policy.any_unlocked_vault(){device_secrets::remove("vault")?;}
-                else if !locked{unlock_permitted_sections_from_device(&app);}
             }
             return Ok(json!({"ok":true,"passwordRequired":policy}));
         }
@@ -6200,16 +6290,22 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         // is read from Windows Credential Manager, never browser storage.
         let policy=lock_preferences::load(&app);
         if !policy.bookmarks{
-            let locked=secret.status(&path).ok().and_then(|v|
-                v.get("unlocked").and_then(Value::as_bool))!=Some(true);
-            if locked {
+            #[cfg(windows)]
+            if !path.exists(){
+                let code=zeroize::Zeroizing::new(fresh_device_password(true));
+                device_secrets::write("bookmarks",&code)?;
+                secret.open(&path,&code,true)?;
+            }
+            if !secret.unlocked(){
                 if let Ok(Some(mut code))=device_secrets::read("bookmarks"){
                     let _=secret.open(&path,&code,false);
                     code.zeroize();
                 }
             }
         }
-        return secret.status(&path);
+        let mut result=secret.status(&path)?;
+        result["passwordRequired"]=json!(policy.bookmarks);
+        return Ok(result);
     }
     if name=="secret-auth"{
         let mut code=value.get("code").and_then(Value::as_str)
@@ -6219,9 +6315,13 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         return tauri::async_runtime::spawn_blocking(move || {
             let path=secret_bookmarks::file(&handle)?;
             let state=handle.state::<Mutex<secret_bookmarks::SecretVault>>();
-            let result=state.lock().map_err(|e|e.to_string())?.open(&path,&code,create);
+            let mut result=state.lock().map_err(|e|e.to_string())?.open(&path,&code,create);
+            let required=lock_preferences::load(&handle).bookmarks;
+            if result.is_ok() && !required{
+                if let Err(error)=device_secrets::write("bookmarks",&code){result=Err(error);}
+            }
             code.zeroize(); // discard raw code immediately after Argon2id
-            result
+            result.map(|mut status|{status["passwordRequired"]=json!(required);status})
         }).await.map_err(|e|e.to_string())?;
     }
     if name=="secret-change-password"{
@@ -6311,27 +6411,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         return result;
     }
     if name=="secret-lock"{
-        // Locking must also conceal already-open secrets, not just erase the
-        // encryption key. Keep only opaque secret IDs for a later unlock.
-        let labels={
-            let store=app.state::<Mutex<Browser>>();
-            let mut b=store.lock().map_err(|e|e.to_string())?;
-            let mut labels=Vec::new();
-            for tab in b.tabs.iter_mut().filter(|tab|tab.secret_id.is_some()){
-                if let Some(label)=tab.view.take(){labels.push(label);}
-                scrub_secret_tab(tab);
-            }
-            labels
-        };
-        for label in labels{
-            if let Some(view)=app.get_webview(&label){let _=view.close();}
-        }
-        let vault=app.state::<Mutex<secret_bookmarks::SecretVault>>();
-        vault.lock().map_err(|e|e.to_string())?.lock();
-        // Destroy all per-site decryption keys as well as the folder key.
-        app.state::<AuthorizedSecrets>().items.lock().map_err(|e|e.to_string())?.clear();
-        display_active(&app);
-        notify(&app);
+        if lock_preferences::load(&app).bookmarks{lock_secret_bookmarks(&app)?;}
         return Ok(json!({"ok":true}));
     }
     if matches!(name.as_str(),"secret-put"|"secret-delete"|"secret-edit"|"secret-move"){
@@ -7294,9 +7374,11 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             return Ok(json!({"ok":true,"imported":imported,"skipped":skipped}));
         }
         "vault-status" => {
-            let exists=password_vault::file(&app)?.exists();
             let section=value.as_str().unwrap_or("logins");
             let password_required=lock_preferences::load(&app).required(section)?;
+            #[cfg(windows)]
+            if !password_required{create_passwordless_vault_if_missing(&app)?;}
+            let exists=password_vault::file(&app)?.exists();
             // The optional Windows password-prompt setting remains effective
             // after an after-close timer revokes this section's access. This
             // reauthorizes only settings-approved passwordless sections, never
@@ -7314,7 +7396,7 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             let unlocked=app.state::<Mutex<password_vault::Vault>>().lock()
                 .map_err(|e|e.to_string())?.unlocked()
                 && vault_section_allowed(&app,section);
-            return Ok(json!({"exists":exists,"unlocked":unlocked}));
+            return Ok(json!({"exists":exists,"unlocked":unlocked,"passwordRequired":password_required}));
         }
         "vault-unlock" | "vault-create" => {
             let password=value.as_str()
@@ -7332,6 +7414,16 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                 let access=app.state::<Mutex<lock_preferences::Access>>();
                 access.lock().map_err(|e|e.to_string())?.permit(section);
             }
+            let policy=lock_preferences::load(&app);
+            if policy.any_unlocked_vault(){
+                device_secrets::write("vault",password)?;
+                let permitted=lock_preferences::Access::from_policy(&policy);
+                let state=app.state::<Mutex<lock_preferences::Access>>();
+                let mut access=state.lock().map_err(|e|e.to_string())?;
+                access.logins|=permitted.logins;
+                access.identities|=permitted.identities;
+                access.payments|=permitted.payments;
+            }
             let _=app.emit_to("chrome","minternet:vault-unlocked",());
             // A login page may already be open when Logins is unlocked.
             if section=="logins" {
@@ -7344,6 +7436,9 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
             let section=value.as_str().unwrap_or("all");
             if !matches!(section,"all"|"logins"|"identities"|"payments"){
                 return Err("Unknown vault section".into());
+            }
+            if section!="all" && !lock_preferences::load(&app).required(section)?{
+                return Ok(json!({"ok":true,"passwordRequired":false}));
             }
             let any_allowed={
                 let state=app.state::<Mutex<lock_preferences::Access>>();

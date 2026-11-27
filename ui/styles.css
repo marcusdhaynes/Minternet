@@ -2703,3 +2703,6 @@ html.minternet-startup-armed .startup-curtain{
   .auto-lock-preference-row input[type="checkbox"],
   .auto-lock-preference-row input[type="checkbox"]::after{transition:none;}
 }
+
+/* Independent password protection, with optional inline credential form. */
+.vault-password-toggle{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;padding:5px 8px;border-bottom:1px solid #ffffff16;font-size:11px;color:inherit}.vault-password-switch{display:inline-flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap}.vault-password-switch input{accent-color:#9878e8;margin:0}.vault-password-form{flex:1 0 100%;display:flex;flex-wrap:wrap;align-items:center;gap:5px}.vault-password-form p{flex:1 0 100%;margin:0;font-size:11px;opacity:.85}.vault-password-form input{min-width:0;flex:1 1 125px}.vault-password-toggle small{font-size:10px;opacity:.85;min-width:0}.vault-password-form[hidden],.vault-password-form input[hidden],.secret-close-lock[hidden]{display:none!important}

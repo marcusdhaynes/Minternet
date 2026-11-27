@@ -1,19 +1,18 @@
-//! Per-section master-password prompts. Defaults require a password.
+//! Per-section master-password prompts. New Windows profiles default to no prompt.
 use std::{fs,path::PathBuf};
 use serde::{Serialize,Deserialize};
 use tauri::Manager;
 #[derive(Clone,Copy,Debug,Serialize,Deserialize)]
 #[serde(rename_all="camelCase")]
 pub struct Policy{
-    #[serde(default="yes")]pub logins:bool,
-    #[serde(default="yes")]pub identities:bool,
-    #[serde(default="yes")]pub payments:bool,
+    #[serde(default)]pub logins:bool,
+    #[serde(default)]pub identities:bool,
+    #[serde(default)]pub payments:bool,
     // This controls *Secret* Bookmarks; ordinary Bookmarks are not encrypted.
-    #[serde(default="yes")]pub bookmarks:bool,
+    #[serde(default)]pub bookmarks:bool,
 }
-fn yes()->bool{true}
 impl Default for Policy{
-    fn default()->Self{Self{logins:true,identities:true,payments:true,bookmarks:true}}
+    fn default()->Self{Self{logins:false,identities:false,payments:false,bookmarks:false}}
 }
 impl Policy{
     pub fn required(&self,kind:&str)->Result<bool,String>{
@@ -33,6 +32,8 @@ impl Policy{
         }
         Ok(())
     }
+    pub fn protected()->Self{Self{logins:true,identities:true,payments:true,bookmarks:true}}
+    pub fn any_protected_vault(&self)->bool{self.logins||self.identities||self.payments}
     pub fn any_unlocked_vault(&self)->bool{
         !self.logins||!self.identities||!self.payments
     }
@@ -43,10 +44,13 @@ fn file(app:&tauri::AppHandle)->Result<PathBuf,String>{
         .map_err(|e|e.to_string())
 }
 pub fn load(app:&tauri::AppHandle)->Policy{
-    file(app).ok().and_then(|path|fs::read(path).ok())
-        .filter(|bytes|bytes.len()<2048)
-        .and_then(|bytes|serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
+    if !cfg!(windows){return Policy::protected();}
+    let Ok(path)=file(app) else{return Policy::protected()};
+    match fs::read(path){
+        Ok(bytes) if bytes.len()<2048=>serde_json::from_slice(&bytes).unwrap_or_else(|_|Policy::protected()),
+        Err(error) if error.kind()==std::io::ErrorKind::NotFound=>Policy::default(),
+        _=>Policy::protected()
+    }
 }
 pub fn save(app:&tauri::AppHandle,value:&Policy)->Result<(),String>{
     let path=file(app)?;
@@ -83,12 +87,14 @@ impl Access{
 #[cfg(test)]
 mod tests{
     use super::*;
-    #[test]fn all_locks_default_on(){
+    #[test]fn all_locks_default_off(){
         let p:Policy=serde_json::from_str("{}").unwrap();
-        assert!(p.logins&&p.identities&&p.payments&&p.bookmarks);
+        assert!(!p.logins&&!p.identities&&!p.payments&&!p.bookmarks);
+        assert!(!Policy::default().any_protected_vault());
+        assert!(Policy::protected().any_protected_vault());
     }
     #[test]fn scopes_remain_independent(){
-        let mut p=Policy::default();
+        let mut p=Policy::protected();
         p.set("logins",false).unwrap();
         assert!(p.any_unlocked_vault());
         let a=Access::from_policy(&p);

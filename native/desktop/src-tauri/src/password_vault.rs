@@ -256,6 +256,19 @@ impl Vault {
         self.entries=entries;self.cards=cards;self.identities=identities;
         Ok(())
     }
+    // Caller first authenticates the current device-held password.
+    pub fn rotate_password(&mut self,path:&PathBuf,next:&str)->Result<(),String>{
+        if !self.unlocked(){return Err("Unlock the vault first".into());}
+        let mut salt=[0u8;16];OsRng.fill_bytes(&mut salt);
+        let key=Self::key_from(next,&salt)?;
+        let mut old_key=self.key.replace(key).ok_or("Missing vault key")?;
+        let old_salt=self.salt.replace(salt);
+        if let Err(error)=self.save(path){
+            if let Some(mut failed)=self.key.replace(old_key){failed.zeroize();}
+            self.salt=old_salt;return Err(error);
+        }
+        old_key.zeroize();Ok(())
+    }
     pub fn save(&self,path:&PathBuf)->Result<(),String>{
         let key=self.key.as_ref().ok_or("Vault locked")?;
         let salt=self.salt.ok_or("Missing vault salt")?;

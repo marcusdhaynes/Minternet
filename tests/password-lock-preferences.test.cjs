@@ -4,13 +4,13 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const read=p=>fs.readFileSync(path.join(__dirname,'..',p),'utf8');
-test('four password prompts default to ON with independent explicit choices',()=>{
+test('four password prompts default to OFF with independent explicit choices',()=>{
   const prefs=read('native/desktop/src-tauri/src/lock_preferences.rs');
   for(const section of ['logins','identities','payments','bookmarks']){
     assert.match(prefs,new RegExp('pub '+section+':bool'));
     assert.match(prefs,new RegExp('"'+section+'"'));
   }
-  assert.match(prefs,/Self\{logins:true,identities:true,payments:true,bookmarks:true\}/);
+  assert.match(prefs,/Self\{logins:false,identities:false,payments:false,bookmarks:false\}/);
   assert.match(prefs,/pub fn from_policy/);
 });
 test('opt-out credentials use Windows Credential Manager, never a plaintext local profile',()=>{
@@ -20,9 +20,9 @@ test('opt-out credentials use Windows Credential Manager, never a plaintext loca
   assert.doesNotMatch(store,/fs::write|localStorage\.setItem|JSON\.stringify\(/);
   const main=read('native/desktop/src-tauri/src/main.rs');
   assert.match(main,/lock-preferences-set/);
-  assert.match(main,/scratch\.unlock\(&path,&secret,false\)/);
-  assert.match(main,/scratch\.open\(&path,&secret,false\)/);
-  assert.match(main,/device_secrets::write\(store,&secret\)/);
+  assert.match(main,/scratch\.unlock\(&path,&supplied,false\)/);
+  assert.match(main,/scratch\.open\(&path,&supplied,false\)/);
+  assert.match(main,/device_secrets::write\(store,&supplied\)/);
   assert.match(main,/device_secrets::remove\("vault"\)/);
   assert.match(main,/device_secrets::remove\("bookmarks"\)/);
   assert.match(main,/secret\.open\(&path,&code,false\)/);
@@ -46,10 +46,11 @@ test('settings show independent passwords switches and one-time authorization',(
   for(const name of ['identities','logins','payments','bookmarks']){
     assert.ok(ui.includes("'"+name+"'"));
   }
-  assert.match(ui,/lock-preferences-get/);
-  assert.match(ui,/lock-preferences-set/);
-  assert.match(ui,/master\.type='password'/);
-  assert.doesNotMatch(ui,/localStorage\.setItem/);
+  const shared=read('ui/vault-password-toggle.js');
+  assert.match(shared,/lock-preferences-get/);
+  assert.match(shared,/lock-preferences-set/);
+  assert.match(shared,/password\.type='password'/);
+  assert.doesNotMatch(shared,/localStorage\.setItem/);
   const html=read('ui/index.html');
   assert.match(html,/>▣ Payments <span>/);
   assert.match(html,/>☆ Bookmarks <span>/);
@@ -70,4 +71,19 @@ test('each manager requests its own native section access and password prompt',(
   const policy=read('native/desktop/src-tauri/src/lock_preferences.rs');
   assert.match(policy,/pub fn revoke\(&mut self,kind:&str\)/);
   assert.match(policy,/pub fn any\(&self\)->bool/);
+});
+
+test('native default passwordless setup and in-manager protection switches are wired independently',()=>{
+  const main=read('native/desktop/src-tauri/src/main.rs');
+  assert.match(main,/fresh_device_password/);
+  assert.match(main,/create_passwordless_vault_if_missing\(&app\)/);
+  assert.match(main,/scratch\.rotate_password\(&path,&supplied\)/);
+  assert.match(main,/scratch\.change_password\(&path,&previous,&supplied\)/);
+  assert.match(main,/passwordRequired.*password_required/);
+  for(const [file,section] of [['password-ui.js','logins'],['identity-ui.js','identities'],['payment-ui.js','payments'],['secret-bookmarks.js','bookmarks']]){
+    const source=read('ui/'+file);
+    assert.ok(source.includes('minternetPasswordProtection?.mount('));
+    assert.ok(source.includes("'"+section+"'"));
+    assert.ok(source.includes('protection?.setRequired('));
+  }
 });

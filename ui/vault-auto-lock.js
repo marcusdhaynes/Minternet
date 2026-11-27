@@ -46,10 +46,11 @@
         }
       }
     }catch{/* Corrupted preference uses the original per-section default. */}
-    let opened=false,unlocked=false,timer=null,deadline=0,locking=null;
+    let opened=false,unlocked=false,timer=null,deadline=0,locking=null,protectedByPassword=true;
     const controls=new Set();
     const syncControls=()=>{
-      for(const {amount,unit} of controls){
+      for(const {amount,unit,label} of controls){
+        if(label)label.hidden=!protectedByPassword;
         amount.value=String(preference.amount);
         unit.value=preference.unit;
         amount.disabled=preference.unit==='never';
@@ -83,7 +84,7 @@
       stop();
       // A timer may fire just as the user turns Auto-Lock off. Honor the
       // latest persistent preference before attempting native revocation.
-      if(opened||!unlocked||preference.unit==='never')return false;
+      if(opened||!unlocked||!protectedByPassword||preference.unit==='never')return false;
       locking=(async()=>{
         try{
           const response=await window.minternet?.command('vault-lock',section);
@@ -99,19 +100,19 @@
         locking=null;
         // If IPC was temporarily unavailable, keep the vault closed in the
         // UI and retry the native revocation instead of silently giving up.
-        if(!success&&!opened&&unlocked&&preference.unit!=='never'){
+        if(!success&&!opened&&unlocked&&protectedByPassword&&preference.unit!=='never'){
           timer=setTimeout(()=>{void lock();},2000);
         }
       }
     }
     function schedule(){
       stop();
-      if(opened||!unlocked||preference.unit==='never')return;
+      if(opened||!unlocked||!protectedByPassword||preference.unit==='never')return;
       const ms=preference.amount*units[preference.unit];
       if(ms===0){void lock();return;}
       deadline=Date.now()+ms;
       const step=()=>{
-        if(opened||!unlocked)return;
+        if(opened||!unlocked||!protectedByPassword)return;
         const remaining=deadline-Date.now();
         if(remaining<=0){void lock();return;}
         timer=setTimeout(step,Math.min(remaining,MAX_TIMEOUT));
@@ -149,13 +150,14 @@
       };
       amount.addEventListener('change',save);
       unit.addEventListener('change',save);
-      controls.add({amount,unit});
+      controls.add({amount,unit,label});label.hidden=!protectedByPassword;
       label.append(caption,amount,unit);
       header.append(label);
       return label;
     }
     const controller={
       mount,setEnabled,isEnabled:()=>preference.unit!=='never',
+      setProtection(value){protectedByPassword=Boolean(value);syncControls();if(!protectedByPassword)stop();},
       async openManager(){
         opened=true;
         stop();

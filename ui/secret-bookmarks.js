@@ -14,7 +14,8 @@
   // Public, user-chosen visible labels only; true titles and secret URLs stay native.
   const secretTabNames=new Map();
   window.minternetSecretTabNames=secretTabNames;
-  let status={exists:false,unlocked:false,items:[]};
+  let status={exists:false,unlocked:false,items:[],passwordRequired:true};
+  const protection=window.minternetPasswordProtection?.mount(screen.querySelector('.secret-panel'),'bookmarks',()=>readStatus());
   let selected=new Set(),folder=null,pendingAdd=null,pendingDrop=null,pendingReveal=null,entryTask=null;
   let editMode=null,editId=null,editorTrueTitle='',pendingNormalId=null,starMenu=null,autoLockTimer=null,suppressStarClick=false;
   let lockPromise=null,closeDeadline=0;
@@ -180,6 +181,8 @@
       if(typeof next.legacyCount!=='number')
         status.legacyCount=next.items.filter(item=>item.legacyCodeRequired).length;
     }
+    if(typeof next?.passwordRequired==='boolean')status.passwordRequired=next.passwordRequired;
+    protection?.setRequired(status.passwordRequired);
     if(typeof next?.exists==='boolean')status.exists=next.exists;
     if(typeof next?.unlocked==='boolean')status.unlocked=next.unlocked;
     if(typeof next?.legacyCount==='number')status.legacyCount=next.legacyCount;
@@ -190,9 +193,10 @@
     }
     $('secretAuthForm').hidden=status.unlocked;
     $('secretUnlocked').hidden=!status.unlocked;
-    $('secretLock').hidden=!status.unlocked;
+    $('secretLock').hidden=!status.unlocked||!status.passwordRequired;
+    $('secretAutoLockAmount').closest('label').hidden=!status.passwordRequired;
     $('secretAuthButton').textContent=status.exists?'Unlock Secret Folder':'Create Secret Folder Password';
-    $('secretChangePassword').hidden=!status.unlocked;
+    $('secretChangePassword').hidden=!status.unlocked||!status.passwordRequired;
     $('secretResetStart').hidden=!status.exists;
     $('secretMigrateLegacy').hidden=!status.unlocked||!status.legacyCount;
     if(status.unlocked){
@@ -208,6 +212,7 @@
     // Never show stale unlocked metadata while the previous close is still
     // clearing the native encryption key.
     if(lockPromise)await lockPromise;
+    await protection?.refresh();
     await readStatus();
     clearPasswordForms();
     // The secret dialog takes over the trusted chrome; leave no ordinary
@@ -255,13 +260,13 @@
   // the user is actively editing or viewing it. Zero is the secure default.
   function scheduleCloseLock(){
     clearTimeout(autoLockTimer);autoLockTimer=null;
-    if(!status.unlocked)return;
+    if(!status.unlocked||!status.passwordRequired)return;
     const ms=closeLockMillis();
     if(ms===0){void lock(true);return;}
     if(ms===Infinity)return; // Never locks only on explicit Lock or app exit.
     closeDeadline=Date.now()+ms;
     const step=()=>{
-      if(!screen.hidden||!status.unlocked)return;
+      if(!screen.hidden||!status.unlocked||!status.passwordRequired)return;
       const remaining=closeDeadline-Date.now();
       if(remaining<=0){void lock(true);return;}
       autoLockTimer=setTimeout(step,Math.min(remaining,2147483647));
@@ -273,6 +278,7 @@
     clearPasswordForms();
     eraseUnsavedSecretEditor();
     overlay(false);
+    protection?.clear();
     $('secretEditor').hidden=true;
     $('secretCode').value='';
     pendingAdd=null;pendingDrop=null;pendingNormalId=null;editorTrueTitle='';

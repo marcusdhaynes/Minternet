@@ -7,6 +7,8 @@
   if(!screen)return;
   const autoLock=window.minternetVaultAutoLock?.forSection('logins');
   autoLock?.mount(screen.querySelector('.vault-head'));
+  const protection=window.minternetPasswordProtection?.mount(screen.querySelector('.vault-panel'),'logins',()=>refresh());
+  let passwordRequired=true;
   const call=(name,value)=>window.minternet?.command(name,value);
   let existing=false,unlocked=false;
   let entries=[],editing=null;
@@ -70,13 +72,14 @@
   function sync(){
     $('vaultAuthForm').hidden=unlocked;
     $('vaultUnlocked').hidden=!unlocked;
-    $('vaultLock').hidden=!unlocked;
+    $('vaultLock').hidden=!unlocked||!passwordRequired;
     $('vaultAuthButton').textContent=existing?'Unlock':'Create Encrypted Vault';
   }
   async function refresh(){
     const status=await invoke('vault-status');
     if(!status)return;
     existing=Boolean(status.exists);unlocked=Boolean(status.unlocked);
+    passwordRequired=status.passwordRequired!==false;protection?.setRequired(passwordRequired);autoLock?.setProtection(passwordRequired);
     autoLock?.setUnlocked(unlocked);
     sync();
     if(unlocked)await list();
@@ -192,8 +195,9 @@
     await invoke('chrome-overlay',true);
     resetEditor();
     report('');
+    await protection?.refresh();
     await refresh();
-    if(!unlocked)report('Autofill paused: unlock Logins or enable automatic unlock in Settings.');
+    if(!unlocked)report('Enter your existing password to access saved data.');
     else if(isWguOrigin(activeSite())){
       const diagnostic=await invoke('vault-autofill-check');
       if(diagnostic&&!diagnostic.ready)report(diagnostic.reason);
@@ -203,6 +207,7 @@
   function close(){
     if(screen.hidden)return;
     screen.hidden=true;
+    protection?.clear();
     autoLock?.closeManager(unlocked);
     $('vaultMaster').value='';
     $('vaultPassword').value='';

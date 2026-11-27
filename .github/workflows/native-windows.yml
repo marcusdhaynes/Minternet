@@ -82,7 +82,8 @@ jobs:
           node --check ../../ui/extensions-ui.js
           node --check ../../ui/settings-sections.js
           node --check ../../ui/vault-auto-lock.js
-          node --test ../../tests/vault-auto-lock.test.cjs
+          node --test ../../tests/vault-auto-lock.test.cjs ../../tests/password-lock-preferences.test.cjs
+          node --check ../../ui/vault-password-toggle.js
           node --check ../../ui/password-ui.js
           node --check ../../ui/site-download-links.js
           node --check ../../ui/bookmark-model.js
