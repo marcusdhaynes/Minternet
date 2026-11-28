@@ -3,4 +3,4 @@
 .split-badge:hover,.split-badge:focus-within,.split-badge.dragging{opacity:1;background:#292844e8}
 button{height:14px;display:flex;align-items:center;gap:2px;padding:0 3px;border:0;background:transparent;color:#f4f2ff;text-align:left;font-size:9px;line-height:12px;cursor:grab;user-select:none;-webkit-user-select:none;touch-action:none}
 button:active{cursor:grabbing}button:focus-visible{outline:1px solid #d7c1ff;outline-offset:-1px}
-#return{min-width:0;flex:1}#title{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#release{font-size:9px;flex:none;opacity:.8}#resize{flex:0 0 14px;width:14px;padding:0;justify-content:center;border-left:1px solid #d7c1ff33;cursor:nwse-resize;font-size:10px}#resize:hover{background:#7e6dbe66}
+#return{min-width:0;flex:1}#title{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#release{font-size:9px;flex:none;opacity:.8}

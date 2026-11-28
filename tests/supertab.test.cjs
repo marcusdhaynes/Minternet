@@ -132,3 +132,28 @@ test('native pane focus changes the active tab without navigating or stealing fo
  assert.match(native,/attach_split_pane_focus\(app,id,&created\)/);
  assert.match(native,/"reload" => \{\s*let \(id,url,label\)=\{[\s\S]*?b.active\(\)/);
 });
+
+
+test('session checkpoints retain split pane membership and ratios with remapped native ids',()=>{
+ const native=read('native/desktop/src-tauri/src/main.rs');
+ assert.match(native,/session_split_layout\(&split,left,ratios,&persistent_ids\)/);
+ assert.match(native,/restored_split_layout\(&data,&restored_ids\)/);
+ assert.match(native,/if address!=HOME\{restored_ids.insert\(saved_index,id\);\}/);
+ assert.match(native,/saved_split_restores_remapped_ids_order_and_ratios/);
+ assert.match(native,/excluded_private_panes_never_enter_session/);
+});
+test('native divider controls use axis-specific grab areas, preserve focus and save on release',()=>{
+ const native=read('native/desktop/src-tauri/src/main.rs');
+ const divider=read('ui/split-divider.js');
+ const styles=read('ui/split-divider.css');
+ assert.match(native,/split_pane_at\(&ids,x,y,width/);
+ assert.match(native,/assign_split_slot\(&mut split,id,slot\)/);
+ assert.match(native,/update_split_dividers\(app,&window,split_controls,width,available,top\)/);
+ assert.match(native,/initial\.0\+dx\/width/);
+ assert.match(native,/initial\.1\+dy\/available/);
+ assert.match(native,/schedule_session_save\(&handle\)/);
+ assert.match(divider,/setPointerCapture/);
+ assert.match(styles,/cursor:col-resize/);
+ assert.match(styles,/cursor:row-resize/);
+ assert.doesNotMatch(read('ui/split-badge.html'),/id="resize"/);
+});

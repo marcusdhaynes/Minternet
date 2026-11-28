@@ -1083,6 +1083,31 @@ mod session_checkpoint_tests {
         let _=std::fs::remove_dir_all(dir);
     }
 }
+// Saved indices refer to the persistent tab records, not transient native IDs.
+fn session_split_layout(ids:&[u32],mut left:bool,ratios:(f64,f64),persistent:&[u32])->Value{
+    let mut retained=ids.to_vec();
+    for id in ids.iter().copied().filter(|id|!persistent.contains(id)){
+        remove_split_pane(&mut retained,id,&mut left);
+    }
+    let slots=retained.iter().filter_map(|id|persistent.iter().position(|p|p==id)).collect::<Vec<_>>();
+    json!({"slots":slots,"left":left,"horizontal":ratios.0,"vertical":ratios.1})
+}
+fn restored_split_layout(data:&Value,restored:&HashMap<usize,u32>)->(Vec<u32>,bool,(f64,f64)){
+    let layout=&data["split"];
+    let mut ids=Vec::new();
+    if let Some(slots)=layout.get("slots").and_then(Value::as_array){
+        for entry in slots.iter().take(4){
+            if let Some(id)=entry.as_u64().and_then(|n|usize::try_from(n).ok()).and_then(|n|restored.get(&n)){
+                if !ids.contains(id){ids.push(*id);}
+            }
+        }
+    }
+    if ids.len()<2{ids.clear();}
+    let left=ids.len()==3&&layout.get("left").and_then(Value::as_bool).unwrap_or(false);
+    let ratio=|key:&str|layout.get(key).and_then(Value::as_f64)
+        .filter(|v|v.is_finite()).unwrap_or(0.5).clamp(0.2,0.8);
+    (ids,left,(ratio("horizontal"),ratio("vertical")))
+}
 fn save_session(app: &tauri::AppHandle) -> Result<(),String> {
     // Capture live locations even for background tabs. ChatGPT and other SPAs
     // can change routes without a top-level WebView navigation callback.
@@ -1105,6 +1130,10 @@ fn save_session(app: &tauri::AppHandle) -> Result<(),String> {
         }
     }
     if std::env::args().any(|a|a.starts_with("--minternet-") && a.ends_with("smoke")) {return Ok(());}
+    // Read split state before Browser, matching the native layout lock order.
+    let split=app.state::<SplitState>().0.lock().map_err(|e|e.to_string())?.clone();
+    let left=*app.state::<SplitThreeLeft>().0.lock().map_err(|e|e.to_string())?;
+    let ratios=*app.state::<SplitRatios>().0.lock().map_err(|e|e.to_string())?;
     let data={
         let store=app.state::<Mutex<Browser>>();
         let browser=store.lock().map_err(|e|e.to_string())?;
@@ -1123,7 +1152,9 @@ fn save_session(app: &tauri::AppHandle) -> Result<(),String> {
         let active=persistent.iter().position(|tab|Some(tab.id)==selected)
             .or_else(||persistent.iter().rposition(|tab|tab.url!=HOME))
             .or_else(||persistent.len().checked_sub(1));
-        json!({"version":1,"tabs":tabs,"active":active})
+        let persistent_ids=persistent.iter().map(|tab|tab.id).collect::<Vec<_>>();
+        let layout=session_split_layout(&split,left,ratios,&persistent_ids);
+        json!({"version":1,"tabs":tabs,"active":active,"split":layout})
     };
     let file=session_file(app)?;
     let bytes=serde_json::to_vec(&data).map_err(|e|e.to_string())?;
@@ -1167,6 +1198,7 @@ fn restore_session(app: &tauri::AppHandle) {
     let saved_active=data.get("active").and_then(Value::as_u64)
         .and_then(|n|usize::try_from(n).ok());
     let mut restored_active=None;
+    let mut restored_ids=HashMap::new();
     // Limits apply to NEW tabs, not tabs that were already open before
     // the user changed the preference or updated the executable.
     // Dropping older saved tabs here can silently lose the selected one.
@@ -1182,6 +1214,7 @@ fn restore_session(app: &tauri::AppHandle) {
         }
         if let Ok(id)=browser.add(false){
             if Some(saved_index)==saved_active{restored_active=Some(id);}
+            if address!=HOME{restored_ids.insert(saved_index,id);}
             if let Some(tab)=browser.tabs.iter_mut().find(|t|t.id==id){
                 tab.url=address.to_string();
                 tab.title=title_for(address);
@@ -1202,6 +1235,11 @@ fn restore_session(app: &tauri::AppHandle) {
         .or_else(||browser.tabs.iter().rev().find(|t|t.url!=HOME).map(|t|t.id))
         .or_else(||browser.tabs.last().map(|t|t.id))
         .unwrap_or(0);
+    drop(browser);
+    let (ids,left,ratios)=restored_split_layout(&data,&restored_ids);
+    if let Ok(mut split)=app.state::<SplitState>().0.lock(){*split=ids;}
+    if let Ok(mut side)=app.state::<SplitThreeLeft>().0.lock(){*side=left;}
+    if let Ok(mut saved)=app.state::<SplitRatios>().0.lock(){*saved=ratios;}
 }
 
 fn snapshot(app: &tauri::AppHandle) -> Result<Snapshot, String> {
@@ -1792,6 +1830,33 @@ mod split_layout_tests {
         assert!(side);
     }
     #[test]
+    fn saved_split_restores_remapped_ids_order_and_ratios(){
+        let data=serde_json::json!({"split":super::session_split_layout(&[8,4,20],true,(0.63,0.38),&[4,8,20,99])});
+        let remap=std::collections::HashMap::from([(0usize,101u32),(1,102),(2,103),(3,104)]);
+        assert_eq!(super::restored_split_layout(&data,&remap),(vec![102,101,103],true,(0.63,0.38)));
+        assert_eq!(super::restored_split_layout(&serde_json::json!({}),&remap),(vec![],false,(0.5,0.5)));
+    }
+    #[test]
+    fn excluded_private_panes_never_enter_session_and_invalid_ids_are_ignored(){
+        let data=serde_json::json!({"split":super::session_split_layout(&[1,2,3,4],false,(0.5,0.5),&[1,3,4])});
+        assert_eq!(data["split"]["slots"],serde_json::json!([0,1,2]));
+        let remap=std::collections::HashMap::from([(0usize,11u32),(1,13),(2,14)]);
+        assert_eq!(super::restored_split_layout(&data,&remap).0,vec![11,13,14]);
+        let invalid=serde_json::json!({"split":{"slots":[0,0,99],"horizontal":99.0}});
+        assert_eq!(super::restored_split_layout(&invalid,&remap),(vec![],false,(0.8,0.5)));
+    }
+    #[test]
+    fn pane_hit_test_uses_real_unequal_rectangles_and_divider_axes(){
+        let ids=[1,2,3,4];
+        assert_eq!(super::split_pane_at(&ids,550.0,100.0,1000.0,800.0,52.0,(0.65,0.4),false),Some(1));
+        assert_eq!(super::split_pane_at(&ids,700.0,500.0,1000.0,800.0,52.0,(0.65,0.4),false),Some(4));
+        assert_eq!(super::split_pane_at(&ids,100.0,20.0,1000.0,800.0,52.0,(0.65,0.4),false),None);
+        let div=super::split_divider_rects(3,1000.0,800.0,52.0,(0.65,0.4),true);
+        assert_eq!(div[0],("x",646.0,52.0,8.0,800.0));
+        assert_eq!(div[1],("y",0.0,368.0,650.0,8.0));
+        assert_eq!(super::split_divider_rects(2,1000.0,800.0,52.0,(0.65,0.4),false).len(),1);
+    }
+    #[test]
     fn two_way_split_fills_entire_page() {
         assert_eq!(split_rect(0,2,1000.0,800.0,52.0,0.5,0.5),
                    (0.0,52.0,500.0,800.0));
@@ -1882,6 +1947,41 @@ fn return_split_pane(app:&tauri::AppHandle,id:u32){
     invalidate_layout(app);
     display_active(app);
 }
+// Hit-test real pane geometry (including custom ratios and asymmetric
+// three-pane layouts), rather than the center of an assumed 50/50 grid.
+fn split_pane_at(ids:&[u32],x:f64,y:f64,width:f64,height:f64,top:f64,ratios:(f64,f64),left:bool)->Option<u32>{
+    if !x.is_finite()||!y.is_finite(){return None;}
+    ids.iter().enumerate().find_map(|(i,id)|{
+        let (px,py,w,h)=split_rect_on_side(i,ids.len(),width,height,top,ratios.0,ratios.1,left);
+        if x>=px&&x<px+w&&y>=py&&y<py+h{Some(*id)}else{None}
+    })
+}
+fn split_content_top(app:&tauri::AppHandle)->f64{
+    chrome_top(app)+if find_visible(app){FIND_BAR}else{0.0}
+}
+fn drop_split_at(app:&tauri::AppHandle,id:u32,x:f64,y:f64){
+    let Some(window)=app.get_window("main") else{return};
+    let Ok((width,height))=dimensions(&window) else{return};
+    if split_badge_drop_in_strip(x,y,width){return_split_pane(app,id);return;}
+    let ids=visible_split(app);
+    if ids.len()<2||!ids.contains(&id){return;}
+    let top=split_content_top(app);
+    let ratios=app.state::<SplitRatios>().0.lock().map(|v|*v).unwrap_or((0.5,0.5));
+    let left=app.state::<SplitThreeLeft>().0.lock().map(|v|*v).unwrap_or(false);
+    let Some(target)=split_pane_at(&ids,x,y,width,(height-top).max(1.0),top,ratios,left) else{return};
+    if target==id{return;}
+    remember_undo(app,None);
+    {
+        let state=app.state::<SplitState>();
+        let Ok(mut split)=state.0.lock() else{return};
+        // Check membership again; a stale drag can never modify another group.
+        let Some(slot)=split.iter().position(|pane|*pane==target) else{return};
+        if !split.contains(&id){return;}
+        let _=assign_split_slot(&mut split,id,slot);
+    }
+    invalidate_layout(app);
+    display_active(app);
+}
 fn split_badge_drop_in_strip(x:f64,y:f64,width:f64)->bool{
     x.is_finite() && y.is_finite() && (25.0..width).contains(&x) &&
         (0.0..=22.0).contains(&y)
@@ -1894,11 +1994,15 @@ fn finish_split_badge_drop(app:&tauri::AppHandle,id:u32,x:f64,y:f64){
     let ids=visible_split(app);
     let Some(index)=ids.iter().position(|pane|*pane==id) else{return};
     if ids.len()<2{return;}
-    let top=chrome_top(app);
+    // Windows uses one authoritative global release event, preventing a
+    // captured DOM release from swapping the same two panes a second time.
+    if cfg!(windows){return;}
+    let top=split_content_top(app);
     let ratios=app.state::<SplitRatios>().0.lock().map(|r|*r).unwrap_or((0.5,0.5));
     let side=app.state::<SplitThreeLeft>().0.lock().map(|s|*s).unwrap_or(false);
     let (px,py,_,_)=split_rect_on_side(index,ids.len(),width,(height-top).max(1.0),top,ratios.0,ratios.1,side);
     if split_badge_drop_in_strip(px+x,py+y,width){return_split_pane(app,id);}
+    else{drop_split_at(app,id,px+x,py+y);}
 }
 #[cfg(windows)]
 fn start_split_badge_drag(app:tauri::AppHandle,id:u32){
@@ -1925,9 +2029,13 @@ fn start_split_badge_drag(app:tauri::AppHandle,id:u32){
                 let dy=(end.y-start.y) as f64/scale;
                 // Client-relative, DPI-independent hit test; a short click
                 // selects the pane, while releasing in the strip detaches it.
-                if dx.hypot(dy)>=6.0 && split_badge_drop_in_strip(local_x,local_y,width) {
+                if dx.hypot(dy)>=6.0 {
                     let handle=app.clone();
-                    let _=app.run_on_main_thread(move||return_split_pane(&handle,id));
+                    if split_badge_drop_in_strip(local_x,local_y,width){
+                        let _=app.run_on_main_thread(move||return_split_pane(&handle,id));
+                    }else{
+                        let _=app.run_on_main_thread(move||drop_split_at(&handle,id,local_x,local_y));
+                    }
                 }
                 return;
             }
@@ -1938,61 +2046,110 @@ fn start_split_badge_drag(app:tauri::AppHandle,id:u32){
 fn start_split_badge_drag(_app:tauri::AppHandle,_id:u32){}
 
 
+// Divider hit areas sit directly over the shared boundaries. The horizontal
+// divider exists only on the divided half of a three-pane layout.
+fn split_divider_rects(count:usize,width:f64,height:f64,top:f64,ratios:(f64,f64),left:bool)
+    ->Vec<(&'static str,f64,f64,f64,f64)>{
+    if count<2{return Vec::new();}
+    let x=(width*ratios.0.clamp(0.2,0.8)).round();
+    let y=(height*ratios.1.clamp(0.2,0.8)).round()+top;
+    let hit=8.0;
+    let mut result=vec![("x",x-hit/2.0,top,hit,height)];
+    if count>=3{
+        let (start,length)=if count==4{(0.0,width)}else if left{(0.0,x)}else{(x,width-x)};
+        result.push(("y",start,y-hit/2.0,length,hit));
+        result.push(("both",x-hit/2.0,y-hit/2.0,hit,hit));
+    }
+    result
+}
 #[cfg(windows)]
-fn start_split_badge_resize(app:tauri::AppHandle,id:u32){
+fn start_split_divider_resize(app:tauri::AppHandle,axis:&'static str){
     std::thread::spawn(move||{
         use windows::Win32::Foundation::POINT;
         use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
         use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState,VK_LBUTTON};
         let Some(window)=app.get_window("main") else{return};
-        let Ok(origin)=window.outer_position() else{return};
         let Ok(scale)=window.scale_factor() else{return};
         let Ok((width,height))=dimensions(&window) else{return};
-        let top=chrome_top(&app);
-        let available=(height-top).max(1.0);
-        let (count,index)={
-            let state=app.state::<SplitState>();
-            let Ok(split)=state.0.lock() else{return};
-            (split.len(),split.iter().position(|pane|*pane==id).unwrap_or(0))
-        };
-        if count<2{return;}
+        let available=(height-split_content_top(&app)).max(1.0);
+        let members=visible_split(&app);
+        if members.len()<2{return;}
+        let initial=app.state::<SplitRatios>().0.lock().map(|r|*r).unwrap_or((0.5,0.5));
         let mut first=POINT::default();
         if unsafe{GetCursorPos(&mut first)}.is_err(){return;}
+        let mut previous=initial;
         let mut recorded=false;
-        let mut previous=(0.0f64,0.0f64);
-        let until=Instant::now()+Duration::from_secs(15);
+        let until=Instant::now()+Duration::from_secs(30);
         loop{
-            std::thread::sleep(Duration::from_millis(34));
-            if Instant::now()>=until{return;}
-            if unsafe{GetAsyncKeyState(VK_LBUTTON.0 as i32)}>=0{return;}
+            std::thread::sleep(Duration::from_millis(16));
+            if Instant::now()>=until{break;}
             let mut pos=POINT::default();
-            if unsafe{GetCursorPos(&mut pos)}.is_err(){return;}
-            let dx=(pos.x-first.x).abs();
-            let dy=(pos.y-first.y).abs();
-            if dx+dy<5{continue;}
-            let horizontal=(((pos.x-origin.x) as f64/scale)/width).clamp(0.2,0.8);
-            let vertical=((((pos.y-origin.y) as f64/scale)-top)/available).clamp(0.2,0.8);
-            if (previous.0-horizontal).abs()<0.01 &&
-               (previous.1-vertical).abs()<0.01 {continue;}
-            previous=(horizontal,vertical);
-            let should_record=!recorded;
-            recorded=true;
+            if unsafe{GetCursorPos(&mut pos)}.is_err(){break;}
+            // Delta relative to the actual grab point prevents the divider
+            // jumping when the pointer starts at the edge of its hit area.
+            let dx=(pos.x-first.x) as f64/scale;
+            let dy=(pos.y-first.y) as f64/scale;
+            let horizontal=if axis=="x"||axis=="both"{(initial.0+dx/width).clamp(0.2,0.8)}else{initial.0};
+            let vertical=if axis=="y"||axis=="both"{(initial.1+dy/available).clamp(0.2,0.8)}else{initial.1};
+            if (previous.0-horizontal).abs()>=0.001||(previous.1-vertical).abs()>=0.001{
+                previous=(horizontal,vertical);
+                let should_record=!recorded;recorded=true;
+                let handle=app.clone();let expected=members.clone();
+                let _=app.run_on_main_thread(move||{
+                    if visible_split(&handle)!=expected{return;}
+                    if should_record{remember_undo(&handle,None);}
+                    if let Ok(mut value)=handle.state::<SplitRatios>().0.lock(){*value=(horizontal,vertical);}
+                    invalidate_layout(&handle);
+                    refresh_layout(&handle);
+                });
+            }
+            if unsafe{GetAsyncKeyState(VK_LBUTTON.0 as i32)}>=0{break;}
+        }
+        if recorded{
             let handle=app.clone();
-            let _=app.run_on_main_thread(move||{
-                if should_record{remember_undo(&handle,None);}
-                let ratios=handle.state::<SplitRatios>();
-                if let Ok(mut value)=ratios.0.lock(){
-                    value.0=horizontal;
-                    if count>3 || (count==3&&index>0){value.1=vertical;}
-                };
-                invalidate_layout(&handle);
-                refresh_layout(&handle);
-            });
+            let _=app.run_on_main_thread(move||schedule_session_save(&handle));
         }
     });
 }
 #[cfg(not(windows))]
-fn start_split_badge_resize(_app:tauri::AppHandle,_id:u32){}
+fn start_split_divider_resize(_app:tauri::AppHandle,_axis:&'static str){}
+
+fn update_split_dividers(app:&tauri::AppHandle,window:&tauri::Window,ids:&[u32],width:f64,height:f64,top:f64){
+    let ratios=app.state::<SplitRatios>().0.lock().map(|r|*r).unwrap_or((0.5,0.5));
+    let left=app.state::<SplitThreeLeft>().0.lock().map(|r|*r).unwrap_or(false);
+    let rects=if cfg!(windows){split_divider_rects(ids.len(),width,height,top,ratios,left)}else{Vec::new()};
+    for existing in window.webviews(){
+        if let Some(axis)=existing.label().strip_prefix("split-divider-"){
+            if !rects.iter().any(|r|r.0==axis){let _=existing.close();}
+        }
+    }
+    for (axis,x,y,w,h) in rects{
+        let label=format!("split-divider-{axis}");
+        let position=LogicalPosition::new(x,y);
+        let size=LogicalSize::new(w.max(1.0),h.max(1.0));
+        if let Some(view)=app.get_webview(&label){
+            let _=view.set_bounds(tauri::Rect{position:position.into(),size:size.into()});
+            let _=view.show();
+            continue;
+        }
+        let handle=app.clone();
+        let builder=WebviewBuilder::new(label,WebviewUrl::App("split-divider.html".into()))
+            .transparent(true)
+            .on_navigation(move|url|{
+                if url.host_str()==Some("minternet.invalid") {
+                    if url.path()=="/resize"{start_split_divider_resize(handle.clone(),axis);}
+                    return false;
+                }
+                url.scheme()=="tauri"||url.host_str()==Some("tauri.localhost")||url.host_str()==Some("localhost")
+            })
+            .on_page_load(move|view,event|{
+                if matches!(event.event(),PageLoadEvent::Finished){
+                    let _=view.eval(&format!("document.body.dataset.axis='{axis}';"));
+                }
+            });
+        let _=window.add_child(builder,position,size);
+    }
+}
 
 fn update_split_badges(app:&tauri::AppHandle,window:&tauri::Window,
                        ids:&[u32],width:f64,height:f64,top:f64){
@@ -2060,7 +2217,6 @@ fn update_split_badges(app:&tauri::AppHandle,window:&tauri::Window,
                                 let _=callback_app.run_on_main_thread(move||finish_split_badge_drop(&handle,badge_id,x,y));
                             }
                         },
-                        "/resize"=>start_split_badge_resize(callback_app.clone(),badge_id),
                         _=>{}
                     }
                     return false;
@@ -2170,7 +2326,11 @@ fn refresh_layout(app: &tauri::AppHandle) {
         return;
     }
     let Ok((width, height)) = dimensions(&window) else { return };
-    if site_fullscreen::apply_layout(app,width,height){return;}
+    if site_fullscreen::apply_layout(app,width,height){
+        update_split_badges(app,&window,&[],width,height,0.0);
+        update_split_dividers(app,&window,&[],width,height,0.0);
+        return;
+    }
     let (show_home, active_id, active_label) = {
         let state = app.state::<Mutex<Browser>>();
         let Ok(browser) = state.lock() else { return };
@@ -2243,9 +2403,9 @@ fn refresh_layout(app: &tauri::AppHandle) {
             applied = false;
         }
     }
-    update_split_badges(app,&window,
-        if split_count > 1 {positions.as_slice()} else {&[]},
-        width,available,top);
+    let split_controls=if split_count>1&&!overlay_open{positions.as_slice()}else{&[]};
+    update_split_badges(app,&window,split_controls,width,available,top);
+    update_split_dividers(app,&window,split_controls,width,available,top);
     if overlay_open { raise_chrome_above_site(app); }
     // Only cache successful layouts. A transient controller failure should
     // be retried on the next resize/tab switch, never permanently skipped.
@@ -5243,6 +5403,19 @@ fn activated(app: &tauri::AppHandle) -> Result<(), String> {
     if url != HOME && !view_exists {
         navigate_tab(app, id, Some(tauri::Url::parse(&url).map_err(|e| e.to_string())?), false)?;
     } else { display_active(app); }
+    // Restored split members are lazy-loaded together when their supertab is
+    // opened. Keep the selected pane active; never load unrelated background tabs.
+    let members=visible_split(app);
+    let missing={
+        let state=app.state::<Mutex<Browser>>();
+        let b=state.lock().map_err(|e|e.to_string())?;
+        b.tabs.iter().filter(|t|members.contains(&t.id)&&t.id!=id&&t.view.is_none()&&t.url!=HOME&&t.secret_id.is_none())
+            .map(|t|(t.id,t.url.clone())).collect::<Vec<_>>()
+    };
+    for (pane,address) in missing{
+        if let Ok(target)=tauri::Url::parse(&address){let _=navigate_tab(app,pane,Some(target),false);}
+    }
+    display_active(app);
     Ok(())
 }
 

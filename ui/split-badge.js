@@ -2,7 +2,6 @@
 (() => {
   const send=action=>{location.href='https://minternet.invalid/'+action;};
   const normal=document.getElementById('return');
-  const resize=document.getElementById('resize');
   const badge=document.querySelector('.split-badge');
   let gesture=null;
   const moved=event=>gesture&&Math.hypot(event.clientX-gesture.x,event.clientY-gesture.y)>=6;
@@ -31,11 +30,5 @@
   normal?.addEventListener('lostpointercapture',cancel);
   normal?.addEventListener('click',event=>{if(event.detail===0)send('focus');});
   normal?.addEventListener('dblclick',()=>send('return'));
-  resize?.addEventListener('pointerdown',event=>{
-    if(event.button!==0||event.isPrimary===false)return;
-    event.preventDefault();event.stopPropagation();
-    send('resize');
-  });
-  for(const button of [normal,resize])
-    button?.addEventListener('dragstart',event=>event.preventDefault());
+  normal?.addEventListener('dragstart',event=>event.preventDefault());
 })();
