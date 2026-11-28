@@ -36,7 +36,9 @@ test('volume is backed by website gain graph AND native WebView2 mute',()=>{
   assert.match(audio,/createGain\(\)/);
   assert.match(audio,/state\.level=n/);
   assert.match(audio,/gain\.gain\.value=state\.level/);
-  assert.match(audio,/url\.origin===location\.origin \|\| Boolean\(media\.crossOrigin\)/);
+  assert.match(audio,/url\.origin===location\.origin \|\|/);
+  assert.match(audio,/media\.crossOrigin!==null&&media\.crossOrigin!==undefined/);
+  assert.match(audio,/media\.readyState<1/);
 });
 
 function importHarness(){
