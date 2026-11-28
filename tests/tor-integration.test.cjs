@@ -42,7 +42,7 @@ test('6. Tor browsing is private and has its own WebView data directory',()=>{
  assert.match(native,/tab\.tor=true/);
  assert.match(native,/\.incognito\(private\)/);
  assert.match(transport,/tor-ephemeral-profiles/);
- assert.match(native,/if !private && !tor && extensions::any_enabled\(app\)/);
+ assert.match(native,/if !private && !tor && !secret && extensions::any_enabled\(app\)/);
 });
 test('7. New context-menu and background tabs inherit Tor instead of leaking directly',()=>{
  assert.match(native,/let tor=original\.tor/);
