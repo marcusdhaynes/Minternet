@@ -69,7 +69,7 @@
   const active=()=>current&&mediaElements[current];
   // The scoped Tauri asset protocol supplies Access-Control-Allow-Origin.
   // CORS mode is set before assigning src; the shared graph waits for metadata.
-  // Use native attenuation below unity and a true linear gain above unity.
+  // Use native attenuation below unity and peak-protected loudness gain above unity.
   function applyVolume(){
     const ratio=Math.max(0,Math.min(6,volume.level/100));
     const level=volume.muted?0:Math.min(1,ratio);

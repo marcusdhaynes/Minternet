@@ -35,7 +35,9 @@ test('volume is backed by website gain graph AND native WebView2 mute',()=>{
   assert.match(audio,/createMediaElementSource\(media\)/);
   assert.match(audio,/createGain\(\)/);
   assert.match(audio,/state\.level=n/);
-  assert.match(audio,/gain\.gain\.value=state\.level/);
+  assert.match(audio,/loudnessGain\(ratio\)/);
+  assert.match(audio,/createDynamicsCompressor\(\)/);
+  assert.match(audio,/createWaveShaper\(\)/);
   assert.match(audio,/url\.origin===location\.origin \|\|/);
   assert.match(audio,/media\.crossOrigin!==null&&media\.crossOrigin!==undefined/);
   assert.match(audio,/media\.readyState<1/);
@@ -117,38 +119,57 @@ test('source importer never scans browser profiles and uses unlocked vault',()=>
 });
 
 
-test('Web Audio gain numerically amplifies eligible media through 600%',()=>{
-  let gain=null;
-  const media={currentSrc:'https://example.com/video.mp4',src:'',srcObject:null,
-    mediaKeys:null,crossOrigin:null,paused:true};
-  const context={
-    destination:{},state:'running',
-    createMediaElementSource(node){
-      assert.equal(node,media);
-      return {connect(target){return target;}};
-    },
-    createGain(){gain={gain:{value:1},connect(){}};return gain;}
+// Minimal Web Audio graph model: captures the actual parameters and routing
+// selected by the production script, independently of OS audio hardware.
+function audioHarness(initialState='running'){
+  const nodes=[],handlers={};let connections=0;
+  const media={currentSrc:'https://example.com/video.mp4',mediaKeys:null,crossOrigin:null,readyState:1};
+  const make=(type,props={})=>{
+    const node={type,outputs:[],connect(target){this.outputs.push(target);return target;},...props};
+    nodes.push(node);return node;
   };
-  const document={
-    documentElement:{},
-    addEventListener(){},
-    querySelectorAll(){return [media];}
-  };
-  const win={AudioContext:function(){return context;}};
-  vm.runInNewContext(audio,{window:win,document,location:{href:'https://example.com/',origin:'https://example.com'},
-    MutationObserver:function(){this.observe=()=>{};},
-    requestAnimationFrame:callback=>callback(),URL,Number,Set,WeakMap});
-  assert.equal(typeof win.__minternetAudioGain?.setLevel,'function');
-  win.__minternetAudioGain.setLevel(2);
-  assert.equal(gain?.gain.value,2);
-  for(let multiplier=3;multiplier<=6;multiplier++){
-    win.__minternetAudioGain.setLevel(multiplier);
-    assert.equal(gain?.gain.value,multiplier);
+  const param=()=>({value:0});
+  const ctx={state:initialState,destination:{type:'destination'},resume(){this.state='running';return Promise.resolve();},
+    createGain(){return make('gain',{gain:param()});},
+    createDynamicsCompressor(){return make('compressor',{threshold:param(),knee:param(),ratio:param(),attack:param(),release:param()});},
+    createWaveShaper(){return make('peak');},
+    createMediaElementSource(node){assert.equal(node,media);connections++;return make('source');}};
+  const window={AudioContext:function(){return ctx;}};
+  const document={documentElement:{},addEventListener(n,fn){handlers[n]=fn;},querySelectorAll(){return [media];}};
+  vm.runInNewContext(audio,{window,document,location:{href:'https://example.com/',origin:'https://example.com'},MutationObserver:function(){this.observe=()=>{};},requestAnimationFrame:cb=>cb(),URL});
+  return {api:window.__minternetAudioGain,ctx,nodes,handlers,get connections(){return connections;}};
+}
+test('perceived loudness target rises through 600 percent, unity remains unchanged',()=>{
+  const h=audioHarness();
+  h.api.setLevel(2);
+  const [input,dry,drive,pad,wet]=h.nodes.filter(x=>x.type==='gain');
+  const comp=h.nodes.find(x=>x.type==='compressor'),peak=h.nodes.find(x=>x.type==='peak');
+  assert.equal(input.outputs[0],dry);assert.equal(input.outputs[1],drive);
+  assert.equal(drive.outputs[0],comp);assert.equal(comp.outputs[0],pad);
+  assert.equal(pad.outputs[0],peak);assert.equal(peak.outputs[0],wet);
+  for(let n=2;n<=6;n++){
+    h.api.setLevel(n);
+    assert.equal(dry.gain.value,0);assert.equal(wet.gain.value,1);
+    assert.ok(Math.abs(20*Math.log10(drive.gain.value)-10*Math.log2(n))<1e-9);
   }
-  win.__minternetAudioGain.setLevel(7);
-  assert.equal(gain?.gain.value,6);
-  win.__minternetAudioGain.setLevel(1);
-  assert.equal(gain?.gain.value,1);
+  const max=drive.gain.value;h.api.setLevel(7);assert.equal(drive.gain.value,max);
+  h.api.setLevel(1);assert.equal(dry.gain.value,1);assert.equal(wet.gain.value,0);
+  h.api.setLevel(0);assert.equal(dry.gain.value,0);assert.equal(wet.gain.value,0);
+  assert.equal(h.connections,1);
+});
+test('boost graph uses a monotonic soft peak ceiling with headroom',()=>{
+  const h=audioHarness();h.api.setLevel(6);
+  const compressor=h.nodes.find(x=>x.type==='compressor'),peak=h.nodes.find(x=>x.type==='peak');
+  assert.equal(compressor.ratio.value,20);assert.equal(compressor.attack.value,0.003);
+  assert.equal(peak.oversample,'4x');
+  const c=peak.curve,mid=(c.length-1)/2;
+  assert.equal(c[mid],0);
+  for(let i=1;i<c.length;i++){
+    assert.ok(c[i]>=c[i-1]);
+    assert.ok(Math.abs(c[i])<=Math.pow(10,-1.5/20)+1e-7);
+  }
+  assert.ok(Math.abs(c[mid+128]-0.25)<1e-6);
+  assert.ok(c[c.length-1]<1&&c[0]>-1);
 });
 
 test('volume magnet snaps prominently to 0, 100, 200, 300 with fine keyboard steps',()=>{
@@ -291,18 +312,14 @@ test('Settings submenus offer User Data in requested order',()=>{
 });
 
 test('normal playback gesture warms suspended context before toolbar amplification',async()=>{
-  const handlers={};let gain=null,connections=0;
-  const media={currentSrc:'https://example.com/sound.wav',mediaKeys:null,crossOrigin:null,readyState:1};
-  const ctx={state:'suspended',destination:{},resume(){this.state='running';return Promise.resolve();},
-    createGain(){return gain={gain:{value:1},connect(){}};},
-    createMediaElementSource(){connections++;return {connect(target){return target;}};}};
-  const win={AudioContext:function(){return ctx;}};
-  const document={documentElement:{},addEventListener(n,fn){handlers[n]=fn;},querySelectorAll(){return [media];}};
-  vm.runInNewContext(audio,{window:win,document,location:{href:'https://example.com/',origin:'https://example.com'},MutationObserver:function(){this.observe=()=>{};},requestAnimationFrame:cb=>cb(),URL});
-  handlers.pointerdown();await Promise.resolve();
-  assert.equal(connections,0);
-  for(let n=2;n<=6;n++){win.__minternetAudioGain.setLevel(n);assert.equal(gain.gain.value,n);}
-  assert.equal(connections,1);
-  win.__minternetAudioGain.setLevel(0);assert.equal(gain.gain.value,0);
-  win.__minternetAudioGain.setLevel(1);assert.equal(gain.gain.value,1);
+  const h=audioHarness('suspended');
+  h.handlers.pointerdown();await Promise.resolve();
+  assert.equal(h.connections,0);
+  h.api.setLevel(2);
+  const drive=h.nodes.filter(x=>x.type==='gain')[2];
+  for(let n=2;n<=6;n++){
+    h.api.setLevel(n);
+    assert.ok(Math.abs(20*Math.log10(drive.gain.value)-10*Math.log2(n))<1e-9);
+  }
+  assert.equal(h.connections,1);
 });
