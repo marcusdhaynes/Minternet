@@ -75,7 +75,7 @@ test('session uses validated primary, temporary and backup checkpoints after upd
 });
 test('Windows release is gated by actual native executable and Rust tests',()=>{
  assert.match(win,/npm run build/);
- assert.match(win,/cargo test --manifest-path src-tauri\/Cargo\.toml/);
+ assert.match(win,/cargo test --release --manifest-path src-tauri\/Cargo\.toml/);
  assert.match(win,/--minternet-blank-render-smoke/);
  assert.match(win,/--minternet-geometry-smoke/);
  assert.match(win,/Publish verified portable EXE as a GitHub Release/);

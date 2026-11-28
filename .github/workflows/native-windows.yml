@@ -8,10 +8,10 @@ permissions:
   contents: write
   issues: write
   actions: write
-# Let freshness checks run immediately, regardless of previous Windows builds.
-# Only the expensive portable job is serialized. New source updates replace
-# OBSOLETE pending packaging jobs, but never cancel an active compilation.
-# A distinct job concurrency group avoids inheriting the old serialized queue.
+# A newer source revision must not wait for an older revision's Windows
+# compilation or smoke suite. Coalesce duplicate builds of the SAME commit;
+# the queue recovery workflow removes superseded unstarted revisions.
+# Keep already-running builds so verified rollback packages are retained.
 jobs:
   freshness:
     if: github.ref == 'refs/heads/main'
@@ -38,7 +38,7 @@ jobs:
     needs: freshness
     if: needs.freshness.outputs.build == 'true'
     concurrency:
-      group: minternet-windows-portable-main-v2
+      group: minternet-windows-portable-${{ github.sha }}
       cancel-in-progress: false
     outputs:
       version_label: ${{ steps.package.outputs.version_label }}
