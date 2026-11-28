@@ -3410,6 +3410,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
       window.addEventListener('pointerdown',signal,true);
     })();"#);
     let builder = builder
+        .initialization_script(include_str!("../../../../ui/audio-gain.js"))
         .initialization_script(include_str!("../../../../ui/site-media-bridge.js"))
         .initialization_script(include_str!("../../../../ui/site-fullscreen-bridge.js"))
         .initialization_script(include_str!("../../../../ui/site-download-links.js"))
@@ -4320,7 +4321,7 @@ fn apply_volume_to_site(app:&tauri::AppHandle,id:u32,label:&str,initialize:bool)
         (config.level,config.muted||config.level==0||config.manually_muted.contains(&id)
             ||media_devices::speaker_disabled(app,id))
     };
-    let ratio=level as f64/100.0;
+    let ratio=if mute{0.0}else{level as f64/100.0};
     if initialize {
         let script=format!("{}\nwindow.__minternetAudioGain?.setLevel({ratio});",
             include_str!("../../../../ui/audio-gain.js"));

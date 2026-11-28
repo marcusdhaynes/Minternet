@@ -7,13 +7,14 @@
 <link rel="stylesheet" href="./media-player.css">
 <script src="./media-player-geometry.js" defer></script>
 <script src="./media-player-subtitles.js" defer></script>
+<script src="./audio-gain.js" defer></script>
 <script src="./media-player.js" defer></script></head>
 <body data-mode="chooser">
   <main class="player-root">
     <div class="drag-zone" id="dragZone" title="Drag to Move" aria-label="Drag Player"></div>
     <button class="player-close" id="playerClose" type="button" aria-label="Close Player" title="Close">×</button>
-    <video id="localVideo" playsinline preload="metadata" hidden></video>
-    <audio id="localAudio" preload="metadata" hidden></audio>
+    <video id="localVideo" crossorigin="anonymous" playsinline preload="metadata" hidden></video>
+    <audio id="localAudio" crossorigin="anonymous" preload="metadata" hidden></audio>
     <div id="mediaError" role="status" hidden></div>
     <div class="subtitle-overlay" id="subtitleOverlay" role="status" dir="auto" hidden></div>
     <div class="subtitle-popover" id="subtitlePanel" hidden>

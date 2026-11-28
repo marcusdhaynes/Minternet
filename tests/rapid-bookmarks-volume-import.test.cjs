@@ -115,7 +115,7 @@ test('source importer never scans browser profiles and uses unlocked vault',()=>
 });
 
 
-test('Web Audio gain numerically amplifies eligible local media up to 300%',()=>{
+test('Web Audio gain numerically amplifies eligible media through 600%',()=>{
   let gain=null;
   const media={currentSrc:'https://example.com/video.mp4',src:'',srcObject:null,
     mediaKeys:null,crossOrigin:null,paused:true};
@@ -139,8 +139,12 @@ test('Web Audio gain numerically amplifies eligible local media up to 300%',()=>
   assert.equal(typeof win.__minternetAudioGain?.setLevel,'function');
   win.__minternetAudioGain.setLevel(2);
   assert.equal(gain?.gain.value,2);
-  win.__minternetAudioGain.setLevel(3);
-  assert.equal(gain?.gain.value,3);
+  for(let multiplier=3;multiplier<=6;multiplier++){
+    win.__minternetAudioGain.setLevel(multiplier);
+    assert.equal(gain?.gain.value,multiplier);
+  }
+  win.__minternetAudioGain.setLevel(7);
+  assert.equal(gain?.gain.value,6);
   win.__minternetAudioGain.setLevel(1);
   assert.equal(gain?.gain.value,1);
 });
@@ -282,4 +286,21 @@ test('Settings submenus offer User Data in requested order',()=>{
   for(const key of ['identityManagerOpen','passwordManagerOpen','paymentManagerOpen',
     'bookmarkSettingsManage','settingsSecretsOpen'])assert.ok(source.includes(key));
   assert.match(source,/details/);
+});
+
+test('normal playback gesture warms suspended context before toolbar amplification',async()=>{
+  const handlers={};let gain=null,connections=0;
+  const media={currentSrc:'https://example.com/sound.wav',mediaKeys:null,crossOrigin:null,readyState:1};
+  const ctx={state:'suspended',destination:{},resume(){this.state='running';return Promise.resolve();},
+    createGain(){return gain={gain:{value:1},connect(){}};},
+    createMediaElementSource(){connections++;return {connect(target){return target;}};}};
+  const win={AudioContext:function(){return ctx;}};
+  const document={documentElement:{},addEventListener(n,fn){handlers[n]=fn;},querySelectorAll(){return [media];}};
+  vm.runInNewContext(audio,{window:win,document,location:{href:'https://example.com/',origin:'https://example.com'},MutationObserver:function(){this.observe=()=>{};},requestAnimationFrame:cb=>cb(),URL});
+  handlers.pointerdown();await Promise.resolve();
+  assert.equal(connections,0);
+  for(let n=2;n<=6;n++){win.__minternetAudioGain.setLevel(n);assert.equal(gain.gain.value,n);}
+  assert.equal(connections,1);
+  win.__minternetAudioGain.setLevel(0);assert.equal(gain.gain.value,0);
+  win.__minternetAudioGain.setLevel(1);assert.equal(gain.gain.value,1);
 });

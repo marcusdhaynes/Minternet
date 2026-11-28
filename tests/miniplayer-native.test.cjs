@@ -83,7 +83,9 @@ test('native path picker gives scoped byte-range media URL, without file copies'
   assert.match(player,/controls-idle/);
   assert.doesNotMatch(player,/startResizeDragging/);
   assert.match(player,/minternet:media-volume/);
-  assert.doesNotMatch(player,/createMediaElementSource|ensureGain|AudioContext/);
+  assert.match(player,/__minternetAudioGain\?\.setLevel\(Math\.max\(1,ratio\)\)/);
+  assert.match(html,/id="localVideo" crossorigin="anonymous"/);
+  assert.match(html,/id="localAudio" crossorigin="anonymous"/);
   assert.match(player,/media\.volume=level/);
   assert.match(player,/media-player-transcode/);
   assert.match(rust,/if name=="media-player-transcode"/);
@@ -129,10 +131,11 @@ test('mini-player gestures and controls respect the video surface',()=>{
   assert.match(native,/\.min_inner_size\(80\.0,45\.0\)/);
 });
 
-test('local audio never routes a cross-origin asset through WebAudio and falls back to FFmpeg',()=>{
+test('local audio uses CORS-authorized shared gain and retains FFmpeg codec fallback',()=>{
   const script=read('ui/media-player.js');
   const rust=read('native/desktop/src-tauri/src/main.rs');
-  assert.doesNotMatch(script,/createMediaElementSource/);
+  assert.match(script,/Math\.min\(6,volume\.level\/100\)/);
+  assert.match(script,/__minternetAudioGain\?\.setLevel\(Math\.max\(1,ratio\)\)/);
   assert.match(script,/media\.muted=volume\.muted/);
   assert.match(script,/media\.src=url;media\.load\(\)/);
   assert.match(script,/codecFallback\(sourceGeneration\)/);

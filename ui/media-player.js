@@ -67,16 +67,17 @@
     }
   }
   const active=()=>current&&mediaElements[current];
-  // The local asset protocol is not the webview page's origin. Passing it through
-  // a Web Audio media-source node can permanently silence the media element
-  // under Web Audio's cross-origin security rules, even for ordinary WAV/MP3.
-  // Use the media element's own native output path for ALL local files.
+  // The scoped Tauri asset protocol supplies Access-Control-Allow-Origin.
+  // CORS mode is set before assigning src; the shared graph waits for metadata.
+  // Use native attenuation below unity and a true linear gain above unity.
   function applyVolume(){
-    const level=volume.muted?0:Math.max(0,Math.min(1,volume.level/100));
+    const ratio=Math.max(0,Math.min(6,volume.level/100));
+    const level=volume.muted?0:Math.min(1,ratio);
     for(const media of Object.values(mediaElements)){
       media.muted=volume.muted;
       media.volume=level;
     }
+    window.__minternetAudioGain?.setLevel(Math.max(1,ratio));
   }
   async function codecFallback(generation,quiet=false){
     if(generation!==sourceGeneration||normalizing||usedCodecFallback)return false;
@@ -204,7 +205,7 @@
       },{once:true});
     }
     media.src=url;media.load();
-    // Native audio delivery avoids the Web Audio cross-origin silence bug.
+    // Native attenuation and CORS-authorized gain share a single output path.
     applyVolume();
     await resizeWindow(current);
     if(current==='video')showControls();
