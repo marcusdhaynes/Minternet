@@ -121,3 +121,26 @@ test('publisher checks the stable latest release even when archive pages are ful
  assert.match(pages,/workflow_run:\s*\n\s*workflows: \["Minternet Windows portable single EXE/);
  assert.match(pages,/types: \[completed\]/);
 });
+
+test('both effective security policies permit only the required update-feed origin',()=>{
+  for(const name of ['ui/index.html','native/desktop/src-tauri/tauri.conf.json']){
+    const raw=fs.readFileSync(path.join(root,name),'utf8');
+    assert.match(raw,/connect-src[^;]*https:\/\/marcusdhaynes\.github\.io/);
+  }
+});
+test('offline Pages falls back to verified public release and throttles repeated REST calls',async()=>{
+  const h=harness({respond:async url=>{
+    if(url.includes('github.io'))return {ok:false,status:503};
+    if(url.endsWith('/releases/latest'))return {ok:true,json:async()=>({tag_name:verified.tag,target_commitish:SHA,assets:[
+      {name:'Minternet-Windows-Portable-'+verified.tag+'.exe',size:30000000,browser_download_url:verified.downloadUrl},
+      {name:'SHA256SUMS.txt',size:126,browser_download_url:verified.checksumUrl}]})};
+    if(url.endsWith('/branches/main'))return {ok:true,json:async()=>({commit:{sha:SHA}})};
+    return {ok:true,json:async()=>({workflow_runs:[]})};
+  }});
+  await h.api.refreshLiveFeed(null);
+  assert.equal(h.api.livePipeline.kind,'ready');
+  assert.equal(h.requests.length,4);
+  await h.api.refreshLiveFeed(null);
+  assert.equal(h.requests.length,5);
+  assert.equal(h.api.livePipeline.kind,'ready');
+});

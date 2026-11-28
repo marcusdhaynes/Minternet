@@ -21,6 +21,8 @@
   let pipeline={kind:'unknown',title:'Checking Build Status',detail:'Waiting for GitHub Actions…'};
   let pipelineCheck=null,readyFromPipeline=null,displayedRelease=null,pollingStarted=false;
   let pollTimer=null,pollInFlight=null,lastFeedSignature='',lastFeedPollAt=0;
+  let lastFallbackAt=0;
+  const FALLBACK_INTERVAL=300000;
   function normalizePollSeconds(input){
     const seconds=Number(input);
     return Number.isSafeInteger(seconds) &&
@@ -426,6 +428,43 @@
       sourceSha:value.sourceSha
     };
   }
+  // Pages is an optimization, not a dependency. Direct checks remain
+  // bounded to three REST requests per five minutes during a feed outage.
+  const newerFeedRelease=release=>Boolean(release&&isNewer(release.version,installed));
+  async function fallbackLiveStatus(){
+    const now=Date.now();
+    if(lastFallbackAt&&now-lastFallbackAt<FALLBACK_INTERVAL)return;
+    lastFallbackAt=now;
+    const results=await Promise.allSettled([
+      request('/releases/latest'),request('/branches/main'),request(WINDOWS_RUNS)
+    ]);
+    const value=r=>r.status==='fulfilled'?r.value?.data:null;
+    const data=value(results[0]),head=String(value(results[1])?.commit?.sha||'');
+    const runs=value(results[2])?.workflow_runs;
+    if(Array.isArray(runs)&&runs.length){
+      pipeline=classifyPipelineRun(runs.find(r=>r.head_sha===head)||runs.find(r=>r.head_branch==='main'),head);
+    }
+    if(!data||data.draft||data.prerelease)return;
+    const tag=String(data.tag_name||''),assets=Array.isArray(data.assets)?data.assets:[];
+    const binary=assets.find(a=>a.name==='Minternet-Windows-Portable-'+tag+'.exe'&&Number(a.size)>=100000&&Number(a.size)<50000000);
+    const checksum=assets.find(a=>a.name==='SHA256SUMS.txt'&&Number(a.size)>0);
+    if(!binary||!checksum)return;
+    const release=verifiedFeedRelease({tag,version:tag.slice(1),sourceSha:data.target_commitish,
+      url:data.html_url,downloadUrl:binary.browser_download_url,checksumUrl:checksum.browser_download_url,notes:data.body});
+    if(!release)return;
+    const prior=cached();
+    if(prior&&isNewer(prior.version,release.version))return;
+    saveCache(release);
+    const newer=isNewer(release.version,installed);
+    if(newer&&(!readyFromPipeline||isNewer(release.version,readyFromPipeline.version)))readyFromPipeline=release;
+    displayedRelease=preferredRelease(newer?release:null);
+    if(newer)pipeline={...pipeline,kind:'ready',title:'Update Ready',detail:'Verified published EXE and checksum (direct GitHub check).'};
+    else if(head===release.sourceSha&&pipeline.kind==='publishing')pipeline={...pipeline,kind:'current',title:'Up To Date',detail:'The published Windows build is installed.'};
+    lastStatus={kind:newer?'verified':head&&head!==release.sourceSha?'pending':head?'verified':'verification-unknown',
+      releaseVersion:release.version,sourceSha:head||null,message:newer?'New verified update available: v'+release.version+'.':
+        head&&head!==release.sourceSha?'Newer source awaits a verified Windows release.':'Latest verified published release: v'+release.version+'.'};
+    if(displayedRelease&&!isDismissed(displayedRelease.version))mountRibbon(displayedRelease);
+  }
   // Frequent checks use a tiny static Pages feed; an installed EXE is still
   // verified against GitHub Releases and SHA256SUMS by the native updater.
   // This keeps 5s polling viable without exhausting GitHub's 60/hour API cap.
@@ -455,11 +494,15 @@
           latestRun?.head_sha,latestRun?.status,latestRun?.conclusion,
           latestRun?.run_number,release?.version]);
         lastFeedPollAt=Date.now();
-        if(signature===lastFeedSignature)return release;
+        if(signature===lastFeedSignature){
+          if(stale&&!newerFeedRelease(release)){await fallbackLiveStatus();if(el)renderSection(el,displayedRelease,lastStatus?.message||pipeline.detail);}
+          return release;
+        }
         lastFeedSignature=signature;
         const newer=release&&isNewer(release.version,installed);
         if(release){
-          saveCache(release);
+          const prior=cached();
+          if(!prior||!isNewer(prior.version,release.version))saveCache(release);
           if(newer&&(!readyFromPipeline||isNewer(release.version,readyFromPipeline.version)))readyFromPipeline=release;
           displayedRelease=preferredRelease(newer?release:null);
         }
@@ -496,6 +539,7 @@
             message:'Build status feed is outdated; the newest source/build state is unverified. '+
               'The last published verified release remains available.'};
         }
+        if(stale&&!newer)await fallbackLiveStatus();
         if(el)renderSection(el,displayedRelease,
           lastStatus?.message||'Checking update status…');
         if(displayedRelease&&isNewer(displayedRelease.version,installed)&&!isDismissed(displayedRelease.version))mountRibbon(displayedRelease);
@@ -506,10 +550,12 @@
         // Do not preserve a previously queued/initiating state indefinitely
         // when the source of live information has become unreachable.
         lastFeedSignature='';
-        pipeline={kind:'unavailable',title:'Live Status Unavailable',
-          detail:'Fast status feed unavailable. Use Check for Updates for a direct GitHub check.'};
-        if(el)renderSection(el,displayedRelease,
-          'Live build status could not be refreshed; published release data may be older.');
+        if(!lastFallbackAt||Date.now()-lastFallbackAt>=FALLBACK_INTERVAL){
+          pipeline={kind:'unavailable',title:'Live Status Unavailable',
+            detail:'Fast status feed unavailable; checking GitHub directly.'};
+          await fallbackLiveStatus();
+        }
+        if(el)renderSection(el,displayedRelease,lastStatus?.message||pipeline.detail);
         return null;
       }finally{clearTimeout(timeout);}
     })().finally(()=>{pollInFlight=null;});
