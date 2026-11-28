@@ -43,3 +43,15 @@ test('recent download and navigation enhancements survive',()=>{
  assert.match(html,/src="\.\/navigation-history-ui\.js"/);
  assert.match(native,/initialization_script\(include_str!\("\.\.\/\.\.\/\.\.\/\.\.\/ui\/site-download-links\.js"\)\)/);
 });
+
+
+test('release publication supports a repository-scoped owner-authorized credential without exposing it to build scripts',()=>{
+  const win=read('.github/workflows/native-windows.yml');
+  const archive=read('.github/workflows/publish-current-portable.yml');
+  const token=/secrets\.MINTERNET_RELEASE_TOKEN \|\| github\.token/;
+  assert.match(win,token);
+  assert.equal((archive.match(/secrets\.MINTERNET_RELEASE_TOKEN/g)||[]).length,2);
+  assert.doesNotMatch(win.slice(0,win.indexOf('      - name: Publish verified portable EXE as a GitHub Release')),token);
+  assert.match(win,/\$env:GH_TOKEN = \$env:ACTIONS_REFRESH_TOKEN/);
+  assert.match(archive,/GH_TOKEN="\$ACTIONS_REFRESH_TOKEN" gh workflow run pages\.yml/);
+});

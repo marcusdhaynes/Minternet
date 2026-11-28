@@ -243,7 +243,7 @@ jobs:
       - name: Publish new per-build release without replacing earlier builds
         if: steps.already.outputs.skip != 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.MINTERNET_RELEASE_TOKEN || github.token }}
         run: |
           set -euo pipefail
           # GitHub's release-by-tag endpoint returns 404 for unpublished
@@ -338,7 +338,8 @@ jobs:
       - name: Publish stable Windows updater release from verified archive
         if: steps.already.outputs.skip != 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.MINTERNET_RELEASE_TOKEN || github.token }}
+          ACTIONS_REFRESH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           # The build job's repository token can be denied release-write
@@ -420,5 +421,5 @@ jobs:
           # Publishing through GITHUB_TOKEN does not emit another release
           # workflow event. Dispatch Pages explicitly so the small public
           # update feed reflects the newly verified EXE promptly.
-          gh workflow run pages.yml --ref main --repo "$GITHUB_REPOSITORY" ||
+          GH_TOKEN="$ACTIONS_REFRESH_TOKEN" gh workflow run pages.yml --ref main --repo "$GITHUB_REPOSITORY" ||
             echo "Pages refresh can be retried; the verified release remains published."

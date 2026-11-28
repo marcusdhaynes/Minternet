@@ -935,7 +935,8 @@ jobs:
         continue-on-error: true
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.MINTERNET_RELEASE_TOKEN || github.token }}
+          ACTIONS_REFRESH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.package.outputs.version_label }}
           RELEASE_EXE: ${{ steps.package.outputs.exe_name }}
         run: |
@@ -1001,6 +1002,7 @@ jobs:
           "PASS: authenticated release-by-tag API confirms public release $tag, exact commit, portable EXE and SHA-256 sums." >> $env:GITHUB_STEP_SUMMARY
           # GITHUB_TOKEN release events do not trigger new workflows. Request
           # Pages to refresh the public update feed for frequent client polls.
+          $env:GH_TOKEN = $env:ACTIONS_REFRESH_TOKEN
           gh workflow run pages.yml --ref main --repo "$env:GITHUB_REPOSITORY"
           if ($LASTEXITCODE -ne 0) { Write-Host 'Live update feed will refresh on the next Pages deployment.' }
 

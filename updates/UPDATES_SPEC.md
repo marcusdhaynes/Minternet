@@ -53,3 +53,10 @@ Spec version: 1.0 · 2026-11-13 · Repo: marcusdhaynes/Minternet
 
 ## Current version
 - package.json: version 0.1.0.
+
+
+## Recovery from release API authorization failures
+
+The Windows build and archive workflows request `contents: write`. If GitHub still denies release creation (HTTP 403), an authorized repository owner can review the repository's Actions permissions and any applicable policy, and provision a fine-grained personal access token limited to this repository with Contents read/write as an Actions repository secret named `MINTERNET_RELEASE_TOKEN`, if permitted. Never commit the token or send it through chat. The optional credential is scoped to release publishing steps; builds and artifact retrieval keep using the standard workflow token. Pages refresh continues to use the standard Actions token. If authorization is denied by an intentional repository or organization policy, ask the administrator or GitHub support to resolve it rather than bypassing it.
+
+To recover an already successful Windows build, manually run `publish-current-portable.yml` with its original Windows workflow run ID. The workflow validates the source repository, main branch and successful run, retrieves the verified artifact and publishes its matching checksum and versioned release without rebuilding. Confirm the tagged release and assets are actually public; build success alone is not publication proof.
