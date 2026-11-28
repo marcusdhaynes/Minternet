@@ -31,7 +31,7 @@ test('Minternet owns one full card; Firefox and Chrome have equal split source c
     assert.match(html,new RegExp('data-extension-import="'+source+'"'));
   }
 });
-test('Import/enable/disable/remove use trusted native commands and restart semantics',()=>{
+test('Import uses trusted native commands and awaits live WebView2 activation',()=>{
   assert.match(manager,/extensions-import/);
   assert.match(manager,/extensions-list/);
   assert.match(manager,/extensions-toggle/);
@@ -58,4 +58,13 @@ test('Store actions do not misrepresent unsupported one-click installation',()=>
   assert.match(manager,/https:\/\/chromewebstore\.google\.com\//);
   assert.match(html,/not currently supported/);
   assert.match(html,/Firefox-only APIs may not work/);
+});
+
+test('live import awaits WebView2 completion and isolates private, Tor and secret tabs',()=>{
+  assert.match(native,/activate_imported_extensions\(&app,&result,first\)\.await/);
+  assert.match(native,/ProfileAddBrowserExtensionCompletedHandler::create/);
+  assert.match(native,/rx\.recv_timeout/);
+  assert.match(native,/!t\.private&&!t\.tor&&t\.secret_id\.is_none\(\)/);
+  assert.match(manager,/result\.activationError/);
+  assert.match(manager,/result\.activateOnNavigation/);
 });

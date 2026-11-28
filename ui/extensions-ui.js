@@ -118,7 +118,7 @@
   async function importExtension(source,button){
     if(loading)return;
     loading=true;button.disabled=true;
-    say('Choose an extension ZIP or bundle (nested folders and ZIPs supported)…');
+    say('Choose an extension package. First import may reload ordinary tabs into the isolated extension profile.');
     try{
       const result=await api.command('extensions-import',source);
       if(result?.message)throw Error(result.message);
@@ -138,7 +138,10 @@
       }else{
         const names=installed.map(item=>item.name||'Extension').join(', ');
         say(installed.length+' extension'+(installed.length===1?'':'s')+' imported: '+names+
-          '. Restart Minternet to activate.'+
+          (result.activationError?'. Saved, but activation failed: '+result.activationError:
+            result.restartRequired?'. Restart Minternet to activate.':
+            result.activateOnNavigation?'. Available on next website navigation.':
+            '. Activated. Reload existing pages if their content scripts need to run.')+
           (errors?' '+errors+' package(s) could not be installed.':''));
       }
       await refresh();

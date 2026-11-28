@@ -3261,6 +3261,87 @@ fn schedule_auth_popup_blank_check(
     });
 }
 
+// Import into the current isolated website profile, awaiting the actual
+// WebView2 callback instead of treating unpacking as successful activation.
+#[cfg(windows)]
+async fn activate_imported_extensions(app:&tauri::AppHandle, details:&Value, first:bool)
+    ->Result<usize,String>{
+    use windows::core::{Interface,HSTRING};
+    use webview2_com::{ProfileAddBrowserExtensionCompletedHandler,
+        Microsoft::Web::WebView2::Win32::{ICoreWebView2_13,ICoreWebView2Profile7}};
+    let Some(entries)=details.get("extensions").and_then(Value::as_array)else{return Ok(0)};
+    if entries.is_empty(){return Ok(0);}
+    let regular={
+        let state=app.state::<Mutex<Browser>>();
+        let browser=state.lock().map_err(|e|e.to_string())?;
+        browser.tabs.iter().filter(|t|!t.private&&!t.tor&&t.secret_id.is_none())
+            .filter_map(|t|t.view.clone().map(|label|(t.id,label,t.url.clone())))
+            .collect::<Vec<_>>()
+    };
+    // On the first import, the previous ordinary views belong to an
+    // extension-disabled environment. Rebuild only those ordinary views;
+    // their tab IDs, tab groups and browser-managed history remain intact.
+    if first{
+        for (id,label,url) in &regular{
+            if let Some(view)=app.get_webview(label){
+                view.close().map_err(|e|e.to_string())?;
+            }
+            {
+                let state=app.state::<Mutex<Browser>>();
+                let mut browser=state.lock().map_err(|e|e.to_string())?;
+                if let Some(tab)=browser.tabs.iter_mut().find(|t|t.id==*id){
+                    if tab.view.as_deref()==Some(label.as_str()){tab.view=None;}
+                }
+            }
+            if url!=HOME {
+                let target=tauri::Url::parse(url).map_err(|e|e.to_string())?;
+                navigate_tab(app,*id,Some(target),false)?;
+            }
+        }
+        invalidate_layout(app);
+        display_active(app);
+    }
+    // All eligible site controllers share the extension-sites data directory.
+    // With no open website, the ordinary new-tab loader will register the
+    // packages on the next navigation, without requiring a process restart.
+    let Some(view)=regular.iter().find_map(|(_,label,_)|app.get_webview(label))else{
+        return Ok(0);
+    };
+    let mut activated=0;
+    for entry in entries{
+        let source=entry.get("source").and_then(Value::as_str).ok_or("Missing extension source")?;
+        let id=entry.get("id").and_then(Value::as_str).ok_or("Missing extension ID")?;
+        if !matches!(source,"minternet"|"chrome"|"firefox")||
+            id.len()!=24||!id.bytes().all(|b|b.is_ascii_hexdigit()){
+            return Err("Invalid imported extension identity".into());
+        }
+        let path=extensions::active_dir(app)?.join(format!("{source}-{id}"));
+        let (tx,rx)=std::sync::mpsc::channel::<Result<(),String>>();
+        view.with_webview(move|native|{
+            let failure=tx.clone();
+            let started=(||->windows::core::Result<()>{
+                let profile=unsafe{native.controller().CoreWebView2()?}
+                    .cast::<ICoreWebView2_13>()?;
+                let profile=unsafe{profile.Profile()?}.cast::<ICoreWebView2Profile7>()?;
+                let handler=ProfileAddBrowserExtensionCompletedHandler::create(Box::new(move|status,extension|{
+                    let result=status.map_err(|e|e.to_string()).and_then(|_|{
+                        if extension.is_some(){Ok(())}else{Err("WebView2 returned no extension".into())}
+                    });
+                    let _=tx.send(result);
+                    Ok(())
+                }));
+                unsafe{profile.AddBrowserExtension(&HSTRING::from(path.as_path()),&handler)}
+            })();
+            if let Err(error)=started{let _=failure.send(Err(error.to_string()));}
+        }).map_err(|e|e.to_string())?;
+        tauri::async_runtime::spawn_blocking(move||
+            rx.recv_timeout(Duration::from_secs(20)).map_err(|e|format!("WebView2 activation callback: {e}"))?)
+            .await.map_err(|e|e.to_string())??;
+        activated+=1;
+    }
+    Ok(activated)
+}
+
 fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: bool) -> Result<(), String> {
     let Some(window) = app.get_window("main") else { return Err("Missing window".into()) };
     let label = format!("tab-{id}");
@@ -3276,8 +3357,8 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     // prevents File/DataTransfer drops on ChatGPT, Muse, upload targets,
     // sortable lists, editors and ordinary third-party web applications.
     // Browser tab reordering remains scoped to the trusted chrome view.
-    let tor=app.state::<Mutex<Browser>>().lock().map_err(|e|e.to_string())?
-        .tabs.iter().find(|tab|tab.id==id).is_some_and(|tab|tab.tor);
+    let (tor,secret)=app.state::<Mutex<Browser>>().lock().map_err(|e|e.to_string())?
+        .tabs.iter().find(|tab|tab.id==id).map(|tab|(tab.tor,tab.secret_id.is_some())).unwrap_or((false,false));
     #[cfg(not(any(windows,target_os="linux")))]
     if tor{return Err("Tor network integration is not supported on this platform".into());}
     let builder=WebviewBuilder::new(label.clone(),url)
@@ -3311,7 +3392,7 @@ fn create_webview(app: &tauri::AppHandle, id: u32, url: WebviewUrl, private: boo
     // its existing profile outside third-party extension scope. Without an
     // imported extension existing cookies and sessions stay untouched.
     #[cfg(windows)]
-    let builder=if !private && !tor && extensions::any_enabled(app){
+    let builder=if !private && !tor && !secret && extensions::any_enabled(app){
         builder.browser_extensions_enabled(true)
             .data_directory(extensions::isolated_site_dir(app)?)
             .extensions_path(extensions::active_dir(app)?)
@@ -6997,11 +7078,21 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
                     picked.and_then(|file|file.into_path().ok())
                 }).await.map_err(|e|format!("Extension picker failed: {e}"))?;
                 let Some(path)=picked else{return Ok(json!({"cancelled":true}));};
+                let first=!extensions::any_enabled(&app);
                 let handle=app.clone();
-                let result=tauri::async_runtime::spawn_blocking(move||
+                let mut result=tauri::async_runtime::spawn_blocking(move||
                     extension_archive::import(&handle,&source_for_picker,&path))
                     .await.map_err(|e|format!("Extension import task failed: {e}"))??;
-                return Ok(json!({"ok":true,"details":result,"restartRequired":true}));
+                let activation=activate_imported_extensions(&app,&result,first).await;
+                let imported=result.get("extensions").and_then(Value::as_array).map_or(0,Vec::len);
+                let (activated,error)=match activation{
+                    Ok(count)=>(count,None),
+                    Err(error)=>(0,Some(error)),
+                };
+                result["restartRequired"]=json!(error.is_some());
+                return Ok(json!({"ok":true,"details":result,"restartRequired":error.is_some(),
+                    "activated":activated,"activateOnNavigation":imported>0&&activated==0&&error.is_none(),
+                    "activationError":error}));
             }
         }
         "extensions-toggle" => {
