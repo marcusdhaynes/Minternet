@@ -93,6 +93,18 @@ pub fn verify(view:&tauri::Webview,parent:isize,wanted:Bounds){
     });
 }
 
+/// Raise a trusted split handle above its sibling website windows without
+/// activating it or changing the user's focused webpage.
+pub fn raise_split_control(view:&tauri::Webview){
+    use windows::Win32::UI::WindowsAndMessaging::{HWND_TOP,SWP_NOMOVE,SWP_NOSIZE};
+    let _=view.with_webview(|native|{
+        let mut hwnd=HWND::default();
+        if unsafe{native.controller().ParentWindow(&mut hwnd)}.is_ok(){
+            let _=unsafe{SetWindowPos(hwnd,Some(HWND_TOP),0,0,0,0,SWP_NOACTIVATE|SWP_NOMOVE|SWP_NOSIZE)};
+        }
+    });
+}
+
 /// A cached "shown" label does not prove its controller remains visible.
 /// WebView2 can reset IsVisible after a renderer/browser process failure or
 /// child re-parent. Repair only a false state; don't repeatedly toggle healthy

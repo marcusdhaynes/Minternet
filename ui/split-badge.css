@@ -4,3 +4,5 @@
 button{height:14px;display:flex;align-items:center;gap:2px;padding:0 3px;border:0;background:transparent;color:#f4f2ff;text-align:left;font-size:9px;line-height:12px;cursor:grab;user-select:none;-webkit-user-select:none;touch-action:none}
 button:active{cursor:grabbing}button:focus-visible{outline:1px solid #d7c1ff;outline-offset:-1px}
 #return{min-width:0;flex:1}#title{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#release{font-size:9px;flex:none;opacity:.8}
+
+.split-badge.drop-target{opacity:1;background:#7750bd;border-color:#e2c8ff;box-shadow:inset 0 0 0 1px #e2c8ff}

@@ -1239,7 +1239,7 @@ fn restore_session(app: &tauri::AppHandle) {
     let (ids,left,ratios)=restored_split_layout(&data,&restored_ids);
     if let Ok(mut split)=app.state::<SplitState>().0.lock(){*split=ids;}
     if let Ok(mut side)=app.state::<SplitThreeLeft>().0.lock(){*side=left;}
-    if let Ok(mut saved)=app.state::<SplitRatios>().0.lock(){*saved=ratios;}
+    if let Ok(mut saved)=app.state::<SplitRatios>().0.lock(){*saved=ratios;};
 }
 
 fn snapshot(app: &tauri::AppHandle) -> Result<Snapshot, String> {
@@ -2005,41 +2005,67 @@ fn finish_split_badge_drop(app:&tauri::AppHandle,id:u32,x:f64,y:f64){
     else{drop_split_at(app,id,px+x,py+y);}
 }
 #[cfg(windows)]
+fn split_drag_preview(app:&tauri::AppHandle,old:Option<u32>,new:Option<u32>){
+    let handle=app.clone();
+    let _=app.run_on_main_thread(move||{
+        if let Some(id)=old{
+            if let Some(view)=handle.get_webview(&format!("split-badge-{id}")){
+                let _=view.eval("document.querySelector('.split-badge')?.classList.remove('drop-target')");
+            }
+        }
+        if let Some(id)=new{
+            if let Some(view)=handle.get_webview(&format!("split-badge-{id}")){
+                let _=view.eval("document.querySelector('.split-badge')?.classList.add('drop-target')");
+            }
+        }
+    });
+}
+#[cfg(windows)]
 fn start_split_badge_drag(app:tauri::AppHandle,id:u32){
     std::thread::spawn(move||{
         use windows::Win32::Foundation::POINT;
         use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
-        use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState,VK_LBUTTON};
+        use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState,VK_LBUTTON,VK_ESCAPE};
+        let Some(window)=app.get_window("main") else{return};
+        let Ok(position)=window.inner_position() else{return};
+        let Ok(scale)=window.scale_factor() else{return};
+        let Ok((width,height))=dimensions(&window) else{return};
+        let top=split_content_top(&app);
+        let ratios=app.state::<SplitRatios>().0.lock().map(|r|*r).unwrap_or((0.5,0.5));
+        let left=app.state::<SplitThreeLeft>().0.lock().map(|r|*r).unwrap_or(false);
+        let members=visible_split(&app);
         let mut start=POINT::default();
         if unsafe{GetCursorPos(&mut start)}.is_err(){return;}
-        let deadline=Instant::now()+Duration::from_secs(12);
+        let deadline=Instant::now()+Duration::from_secs(30);
+        let mut preview=None;
         loop {
             std::thread::sleep(Duration::from_millis(16));
-            if Instant::now()>=deadline{return;}
-            if unsafe{GetAsyncKeyState(VK_LBUTTON.0 as i32)}>=0 {
-                let mut end=POINT::default();
-                if unsafe{GetCursorPos(&mut end)}.is_err(){return;}
-                let Some(window)=app.get_window("main") else{return};
-                let Ok(position)=window.inner_position() else{return};
-                let Ok(scale)=window.scale_factor() else{return};
-                let Ok((width,_))=dimensions(&window) else{return};
-                let local_y=(end.y-position.y) as f64/scale;
-                let local_x=(end.x-position.x) as f64/scale;
-                let dx=(end.x-start.x) as f64/scale;
-                let dy=(end.y-start.y) as f64/scale;
-                // Client-relative, DPI-independent hit test; a short click
-                // selects the pane, while releasing in the strip detaches it.
-                if dx.hypot(dy)>=6.0 {
+            if Instant::now()>=deadline||unsafe{GetAsyncKeyState(VK_ESCAPE.0 as i32)}<0{break;}
+            let mut end=POINT::default();
+            if unsafe{GetCursorPos(&mut end)}.is_err(){break;}
+            let local_y=(end.y-position.y) as f64/scale;
+            let local_x=(end.x-position.x) as f64/scale;
+            let dx=(end.x-start.x) as f64/scale;
+            let dy=(end.y-start.y) as f64/scale;
+            let dragged=dx.hypot(dy)>=6.0;
+            if unsafe{GetAsyncKeyState(VK_LBUTTON.0 as i32)}>=0{
+                if dragged{
                     let handle=app.clone();
-                    if split_badge_drop_in_strip(local_x,local_y,width){
-                        let _=app.run_on_main_thread(move||return_split_pane(&handle,id));
-                    }else{
-                        let _=app.run_on_main_thread(move||drop_split_at(&handle,id,local_x,local_y));
-                    }
+                    let detach=split_badge_drop_in_strip(local_x,local_y,width);
+                    let _=app.run_on_main_thread(move||{
+                        if visible_split(&handle)!=members{return;}
+                        if detach{return_split_pane(&handle,id);}
+                        else{drop_split_at(&handle,id,local_x,local_y);}
+                    });
                 }
-                return;
+                break;
             }
+            let target=if dragged{
+                split_pane_at(&members,local_x,local_y,width,(height-top).max(1.0),top,ratios,left).filter(|pane|*pane!=id)
+            }else{None};
+            if target!=preview{split_drag_preview(&app,preview,target);preview=target;}
         }
+        if preview.is_some(){split_drag_preview(&app,preview,None);}
     });
 }
 #[cfg(not(windows))]
@@ -2130,6 +2156,8 @@ fn update_split_dividers(app:&tauri::AppHandle,window:&tauri::Window,ids:&[u32],
         if let Some(view)=app.get_webview(&label){
             let _=view.set_bounds(tauri::Rect{position:position.into(),size:size.into()});
             let _=view.show();
+            #[cfg(windows)]
+            native_surface::raise_split_control(&view);
             continue;
         }
         let handle=app.clone();
@@ -2147,7 +2175,10 @@ fn update_split_dividers(app:&tauri::AppHandle,window:&tauri::Window,ids:&[u32],
                     let _=view.eval(&format!("document.body.dataset.axis='{axis}';"));
                 }
             });
-        let _=window.add_child(builder,position,size);
+        if let Ok(view)=window.add_child(builder,position,size){
+            #[cfg(windows)]
+            native_surface::raise_split_control(&view);
+        }
     }
 }
 
@@ -2176,6 +2207,8 @@ fn update_split_badges(app:&tauri::AppHandle,window:&tauri::Window,
             let _=view.set_position(position);
             let _=view.set_size(size);
             let _=view.show();
+            #[cfg(windows)]
+            native_surface::raise_split_control(&view);
             continue;
         }
         let title=title_map.get(id).cloned().unwrap_or_else(||"Split Tab".into());
@@ -2230,7 +2263,10 @@ fn update_split_badges(app:&tauri::AppHandle,window:&tauri::Window,
                     let _=view.eval(&format!("document.getElementById('title').textContent={safe_title};"));
                 }
             });
-        let _=window.add_child(builder,position,size);
+        if let Ok(view)=window.add_child(builder,position,size){
+            #[cfg(windows)]
+            native_surface::raise_split_control(&view);
+        }
     }
 }
 
@@ -5412,8 +5448,14 @@ fn activated(app: &tauri::AppHandle) -> Result<(), String> {
         b.tabs.iter().filter(|t|members.contains(&t.id)&&t.id!=id&&t.view.is_none()&&t.url!=HOME&&t.secret_id.is_none())
             .map(|t|(t.id,t.url.clone())).collect::<Vec<_>>()
     };
+    let restored_companions=!missing.is_empty();
     for (pane,address) in missing{
         if let Ok(target)=tauri::Url::parse(&address){let _=navigate_tab(app,pane,Some(target),false);}
+    }
+    if restored_companions{
+        if let Ok(mut browser)=app.state::<Mutex<Browser>>().lock(){
+            if browser.tabs.iter().any(|tab|tab.id==id){browser.active_id=id;}
+        }
     }
     display_active(app);
     Ok(())

@@ -157,3 +157,13 @@ test('native divider controls use axis-specific grab areas, preserve focus and s
  assert.match(styles,/cursor:row-resize/);
  assert.doesNotMatch(read('ui/split-badge.html'),/id="resize"/);
 });
+
+test('dragging highlights only the current target and keeps native split handles above webpages',()=>{
+ const native=read('native/desktop/src-tauri/src/main.rs');
+ const surface=read('native/desktop/src-tauri/src/native_surface.rs');
+ assert.match(native,/split_drag_preview\(&app,preview,target\)/);
+ assert.match(native,/if preview\.is_some\(\)\{split_drag_preview\(&app,preview,None\);\}/);
+ assert.match(native,/native_surface::raise_split_control\(&view\)/);
+ assert.match(surface,/SWP_NOACTIVATE\|SWP_NOMOVE\|SWP_NOSIZE/);
+ assert.match(read('ui/split-badge.css'),/\.split-badge\.drop-target/);
+});
