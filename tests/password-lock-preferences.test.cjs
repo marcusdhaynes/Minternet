@@ -87,3 +87,13 @@ test('native default passwordless setup and in-manager protection switches are w
     assert.ok(source.includes('protection?.setRequired('));
   }
 });
+
+test('bulk opt-out verifies existing vaults and saves both device keys before disabling prompts',()=>{
+  const main=read('native/desktop/src-tauri/src/main.rs');
+  const bulk=main.split('if name=="lock-preferences-disable-all"')[1].split('if name=="lock-preferences-set"')[0];
+  assert.match(bulk,/if vp.exists\(\)\{vault.unlock\(&vp,&master,false\)/);
+  assert.match(bulk,/if bp.exists\(\)\{secret.open\(&bp,&code,false\)/);
+  assert.ok(bulk.indexOf('device_secrets::write("bookmarks"')<bulk.indexOf('lock_preferences::save'));
+  assert.match(bulk,/Policy::default\(\)/);
+  assert.match(read('ui/settings-sections.js'),/Disable All Master Passwords/);
+});

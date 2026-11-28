@@ -6240,6 +6240,48 @@ async fn browser_action(app: tauri::AppHandle, name: String, value: Value) -> Re
         return Ok(json!({"supported":cfg!(windows),"passwordRequired":policy,
             "note":"Windows Credential Manager stores optional unlock keys under the signed-in Windows user. Other Windows programs running as you may access them. Normal Bookmarks never required a password; Bookmarks controls the separate Secret Bookmarks vault."}));
     }
+    if name=="lock-preferences-disable-all"{
+        #[cfg(not(windows))]
+        {return Err("This option requires Windows Credential Manager".into());}
+        #[cfg(windows)]
+        {
+            // Verify both existing encrypted files before persisting any
+            // policy changes. Never reset a vault or bypass its encryption.
+            let vp=password_vault::file(&app)?;
+            let bp=secret_bookmarks::file(&app)?;
+            let mut master=zeroize::Zeroizing::new(value.get("password")
+                .and_then(Value::as_str).unwrap_or("").to_owned());
+            let mut code=zeroize::Zeroizing::new(value.get("bookmarksPassword")
+                .and_then(Value::as_str).unwrap_or("").to_owned());
+            if master.is_empty(){
+                *master=if vp.exists(){device_secrets::read("vault")?
+                    .ok_or("Enter your current shared master password once")?}
+                    else{fresh_device_password(false)};
+            }
+            if code.is_empty(){
+                *code=if bp.exists(){device_secrets::read("bookmarks")?
+                    .ok_or("Enter your current Secret Bookmarks password once")?}
+                    else{fresh_device_password(true)};
+            }
+            let mut vault=password_vault::Vault::default();
+            let mut secret=secret_bookmarks::SecretVault::default();
+            if vp.exists(){vault.unlock(&vp,&master,false)?;}
+            if bp.exists(){secret.open(&bp,&code,false)?;}
+            if !vp.exists(){vault.unlock(&vp,&master,true)?;}
+            if !bp.exists(){secret.open(&bp,&code,true)?;}
+            device_secrets::write("vault",&master)?;
+            device_secrets::write("bookmarks",&code)?;
+            let policy=lock_preferences::Policy::default();
+            lock_preferences::save(&app,&policy)?;
+            *app.state::<Mutex<password_vault::Vault>>().lock()
+                .map_err(|e|e.to_string())?=vault;
+            *app.state::<Mutex<secret_bookmarks::SecretVault>>().lock()
+                .map_err(|e|e.to_string())?=secret;
+            *app.state::<Mutex<lock_preferences::Access>>().lock()
+                .map_err(|e|e.to_string())?=lock_preferences::Access::from_policy(&policy);
+            return Ok(json!({"ok":true,"passwordRequired":policy}));
+        }
+    }
     if name=="lock-preferences-set"{
         #[cfg(not(windows))]
         {return Err("This option requires Windows Credential Manager".into());}

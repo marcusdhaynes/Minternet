@@ -104,6 +104,51 @@
     window.minternetPasswordProtection?.mount(lockSection,key,undefined,label+' — Password Protection');
   }
 
+  const allOff=document.createElement('button');
+  allOff.type='button';allOff.className='bookmark-menu-action';
+  allOff.textContent='Disable All Master Passwords';
+  const allForm=document.createElement('form');
+  allForm.hidden=true;allForm.className='vault-password-form';allForm.autocomplete='off';
+  const allNote=document.createElement('p');
+  allNote.textContent='Existing protected vaults require their current passwords once. Leave a field empty if its device key is already saved or the vault is new. This allows anyone signed into your Windows account to access these sections.';
+  const allMaster=document.createElement('input');
+  allMaster.type='password';allMaster.autocomplete='off';allMaster.maxLength=1024;
+  allMaster.placeholder='Current shared master password';
+  allMaster.setAttribute('aria-label','Current shared master password');
+  const allSecret=document.createElement('input');
+  allSecret.type='password';allSecret.autocomplete='off';allSecret.maxLength=1024;
+  allSecret.placeholder='Current Secret Bookmarks password';
+  allSecret.setAttribute('aria-label','Current Secret Bookmarks password');
+  const allApply=document.createElement('button');
+  allApply.type='submit';allApply.textContent='Disable All';
+  const allCancel=document.createElement('button');
+  allCancel.type='button';allCancel.textContent='Cancel';
+  const allStatus=document.createElement('small');allStatus.setAttribute('role','status');
+  const clearAllFields=()=>{allMaster.value='';allSecret.value='';};
+  allForm.append(allNote,allMaster,allSecret,allApply,allCancel);
+  lockSection.append(allOff,allForm,allStatus);
+  allOff.addEventListener('click',async()=>{
+    try{
+      const result=await window.minternet.command('lock-preferences-get');
+      if(result?.supported!==true)throw Error(result?.message||'Device unlock requires Windows.');
+      allForm.hidden=false;allStatus.textContent='';allMaster.focus();
+    }catch(error){allStatus.textContent=String(error?.message||error);}
+  });
+  allCancel.addEventListener('click',()=>{clearAllFields();allForm.hidden=true;});
+  allForm.addEventListener('submit',async event=>{
+    event.preventDefault();if(allApply.disabled)return;
+    const payload={password:allMaster.value,bookmarksPassword:allSecret.value};
+    clearAllFields();allApply.disabled=true;allCancel.disabled=true;allOff.disabled=true;
+    try{
+      const result=await window.minternet.command('lock-preferences-disable-all',payload);
+      if(!result?.ok||Object.values(result.passwordRequired||{}).some(Boolean))
+        throw Error(result?.message||'Could not disable all passwords.');
+      window.dispatchEvent(new CustomEvent('minternet:password-policy',{detail:result.passwordRequired}));
+      allForm.hidden=true;allStatus.textContent='All four master password prompts are disabled.';
+    }catch(error){allStatus.textContent=String(error?.message||error);}
+    finally{payload.password='';payload.bookmarksPassword='';allApply.disabled=false;allCancel.disabled=false;allOff.disabled=false;}
+  });
+
   const secrets=section('Secrets',userData);
   const openSecret=document.createElement('button');
   openSecret.type='button';openSecret.id='settingsSecretsOpen';
